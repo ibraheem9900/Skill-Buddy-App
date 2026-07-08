@@ -1,0 +1,109 @@
+# SkillBuddy Mobile App — Frontend Build (Replit Prompt)
+
+Copy everything below this line into Replit AI / your dev agent. Attach your mobile app design screenshots/mockups to this same message — treat them as the definitive visual reference for every screen.
+
+---
+
+## CONTEXT
+
+SkillBuddy is a service marketplace connecting Clients with SkillBuddy Pilots (service providers) across the Baltic states. The **web app is already fully built** (React 19 + TanStack Router/Start + Tailwind v4 + shadcn/ui) with working authentication, client/provider profiles, dashboard, bookings, and services browsing, now integrated with a live FastAPI backend at `https://api.skillbuddy.zeyshan.com`.
+
+This task is to build the **mobile app frontend only** — a React Native app (using Expo) that mirrors the same product structure, connects to the exact same FastAPI backend (no separate/mock backend), and matches the attached design screenshots pixel-for-pixel in look, spacing, and feel. The backend already exists and is shared between web and mobile — do not build any backend logic, only consume the existing API.
+
+---
+
+## TASK 1 — Project Setup
+
+- Initialize a new **Expo (React Native)** project using the latest stable Expo SDK, with TypeScript enabled.
+- Set up **NativeWind** (Tailwind CSS for React Native) so styling conventions and design tokens (colors, spacing, font sizes) can closely mirror the web app's existing Tailwind v4 setup — reuse the same color palette, font choices, and spacing scale already established on the web (the SkillBuddy green primary color, the same greys/accent colors, etc.) so the app feels like the same product as the website, not a different one.
+- Set up **React Navigation** (bottom tabs for the main authenticated app + stack navigators for auth flow and nested screens).
+- Set up a global state solution (React Context or Zustand — pick whichever is simpler to keep consistent with a small app) for auth state, user profile, and app-wide data.
+- Set up an environment-based API base URL (e.g. via `app.config.ts` / `expo-constants`), reading from an env variable so it's not hardcoded:
+  ```
+  EXPO_PUBLIC_API_BASE_URL=https://api.skillbuddy.zeyshan.com
+  ```
+
+---
+
+## TASK 2 — Design Fidelity to Attached Screenshots
+
+- Treat every attached screenshot as the **exact target** for that screen's layout, spacing, typography, colors, iconography, and component styling — not a loose inspiration. Match padding/margins, corner radii, shadow/elevation, font weights, and color values as closely as React Native/NativeWind allows.
+- Use a proper **icon library** (e.g. `lucide-react-native` or `@expo/vector-icons`) for all icons — **no emojis anywhere in the UI**, consistent with the standard already set on the web app.
+- Maintain a shared design-token file (colors, spacing, typography scale, border radii) referenced across all screens, so the whole app looks cohesive rather than each screen being styled independently.
+- Support both light mode and dark mode if the attached screenshots show both (the web app has a dark mode toggle — check if the mobile designs indicate the same); if only one mode is shown in the screenshots, build that one properly first.
+
+---
+
+## TASK 3 — Smooth Animations & Micro-Interactions Throughout
+
+This app should feel premium and polished, not stiff or default. Implement:
+
+- **Screen transitions**: smooth native-feeling push/pop and tab-switch transitions (React Navigation's built-in transitions, tuned to feel snappy, not sluggish).
+- **List/content entrance animations**: when a screen loads (e.g. bookings list, services list, notifications), items should animate in with a subtle fade + slight upward slide, staggered slightly per item — not appear all at once abruptly. Use `react-native-reanimated` (already the standard for high-quality RN animations) or `Moti` (built on Reanimated, simpler API) for this.
+- **Button/tap feedback**: every tappable element (buttons, cards, list items) should have a visible, smooth press-state animation (scale-down or opacity change on press) — nothing should feel like a static, unresponsive tap target.
+- **Loading states**: use skeleton loaders (shimmer effect) for content that's fetching from the API, instead of blank screens or plain spinners, wherever the design screenshots suggest content-heavy screens (dashboard, bookings, profile).
+- **Modal/bottom-sheet animations**: any modal, action sheet, or bottom sheet (e.g. filters, confirmation dialogs) should slide/fade in smoothly with a backdrop dim, and dismiss the same way — mirror the same polish level as the web app's modal fixes.
+- **Pull-to-refresh** on list screens (bookings, jobs, notifications) with a smooth native refresh control.
+
+---
+
+## TASK 4 — Authentication Flow (Using the Existing FastAPI Backend)
+
+Reuse the exact same backend endpoints already integrated on the web app — do not build separate auth logic:
+
+- **Signup** — `POST /api/v1/users/signup` (email, personal_code, password, confirm_password, first_name, last_name). After signup, show a "check your email to verify" screen — verification is link-based (email), not OTP, so do not build an OTP input screen.
+- **Login** — `POST /api/v1/users/login` (form-urlencoded: `grant_type=password`, `username`=email, `password`). Store `access_token` and `refresh_token` securely using `expo-secure-store` (React Native's secure, encrypted storage — do not use plain `AsyncStorage` for tokens).
+- **Token refresh** — `POST /api/v1/users/refresh`, implemented as an automatic interceptor: on any 401 response, attempt a silent refresh before failing, consistent with the web app's approach.
+- **Get current user** — `GET /api/v1/users/me`, called on app launch to restore session state if a valid refresh token exists in secure storage.
+- **Update user / onboarding** — `PATCH /api/v1/users/update-user` for collecting address, phone, and role (CLIENT or PROVIDER) as part of onboarding, matching the same required-field structure as the web app.
+- **Document uploads** — `POST /api/v1/users/upload-profile-picture`, `POST /api/v1/users/upload-residence-permits` (front_file, back_file), `POST /api/v1/users/upload-face-auth-video` — all multipart/form-data. Use `expo-image-picker` for photo selection/camera capture and `expo-camera` (or equivalent) for the face-auth video capture step, matching whatever the attached onboarding screenshots show.
+- **Forgot/reset password** and **change password** — same endpoints as web (`/forgot-password`, `/reset-password`, `/update-password`), with the reset link opening the app via a deep link if that's how the attached designs indicate it should work (confirm the deep-linking scheme with the backend/web team if unclear, since email links currently point to the web flow).
+- **Logout** — `POST /api/v1/users/logout`, clearing all secure storage on both success and failure of the call.
+- Signup must NOT be treated as complete, and the user must NOT see the main authenticated app, until email verification and all mandatory onboarding steps (profile info, address, role selection, and role-specific documents for Providers) are finished — same gating logic already implemented on web.
+
+---
+
+## TASK 5 — App Structure: Client vs. Provider
+
+Mirror the same role-based structure already built on web (per the SkillBuddy module spec):
+
+**Client experience:**
+- Home / browse services
+- My Bookings (Upcoming / Ongoing / Completed tabs)
+- Saved Services
+- Notifications
+- Profile: General Info, Professional Info (jobs done, active jobs, dues), Documents (face verification, residence permit), Credit Points/Wallet, Support
+
+**Provider (SkillBuddy Pilot) experience:**
+- Home / available jobs
+- My Jobs / Bids
+- Notifications
+- Profile: General Info, Professional Info (primary/secondary skill, certifications, performance), Documents, Wallet/Earnings, Support
+
+- Route to the correct experience based on the authenticated user's `role`/`active_role` from the backend.
+- All lists and profile data must come from real API responses tied to the logged-in user — no hardcoded/sample data anywhere, consistent with the standard already enforced on web.
+
+---
+
+## TASK 6 — Navigation Structure
+
+- Bottom tab navigator for the main authenticated sections (e.g. Home, Bookings/Jobs, Notifications, Profile — match exact tab set/icons/order to the attached screenshots).
+- Stack navigators nested within each tab for detail screens (e.g. tapping a booking opens a detail screen, tapping "Edit Profile" opens the edit flow) so back-navigation works naturally within each tab.
+- A separate top-level stack for the unauthenticated flow (Login, Signup, onboarding steps, forgot/reset password) that's fully separate from the authenticated tab navigator, swapped automatically based on auth state.
+
+---
+
+## TASK 7 — Error & Empty States
+
+- Every list/data screen needs a proper empty state (illustration/icon + message) when there's no data yet (e.g. "No bookings yet") — never a blank white screen.
+- Every network/API failure needs a clear, non-technical error message with a retry option — never a raw error dump or a crash.
+- Match the tone and visual style of empty/error states to the attached screenshots if they show any; otherwise design them consistently with the rest of the app's visual language.
+
+---
+
+## SCOPE BOUNDARY
+
+- This is a **frontend-only** build — do not create any backend/API logic; every data operation must call the existing FastAPI backend at `https://api.skillbuddy.zeyshan.com`.
+- Do not attempt to build features not shown in the attached screenshots or not covered in Tasks 1–7 — if something is ambiguous or missing from the reference designs, flag it as a question rather than guessing and building extra scope.
+- Do not touch the existing web app's codebase, Vercel deployment, or configuration while working on this — this is a separate, standalone mobile project.
+- If any backend endpoint needed for a screen doesn't exist yet (e.g. Services/Jobs APIs, which the backend team confirmed are still in progress), build the screen's UI against the attached design but wire it to a clearly isolated placeholder/mock data function, so it can be swapped to the real API call later with minimal changes — matching the same "structure now, integrate later" approach already used on the web app for Services/Jobs.

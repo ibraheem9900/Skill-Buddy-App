@@ -1,0 +1,1 @@
+- [SkillBuddy Expo setup](skillbuddy-expo.md) — react-native-maps must stay pinned at 1.18.0 for Expo Go; isolate via platform-specific component files to prevent web bundler failures.
