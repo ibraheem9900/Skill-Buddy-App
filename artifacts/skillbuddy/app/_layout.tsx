@@ -13,36 +13,23 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { AuthProvider } from '@/context/AuthContext';
 import { BookmarkProvider } from '@/context/BookmarkContext';
-import { ActivityIndicator, View } from 'react-native';
-import colors from '@/constants/colors';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
+// Auth gate: if user somehow lands on an auth screen, push them back to tabs.
+// Login/signup are disabled — the app opens directly to the dashboard.
 function AuthGate() {
-  const { isAuthenticated, isLoading, hasSeenOnboarding } = useAuth();
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    if (isLoading) return;
     const inAuth = segments[0] === '(auth)';
-    if (!isAuthenticated && !inAuth) {
-      router.replace(hasSeenOnboarding ? '/(auth)/login' : '/(auth)/onboarding');
-    } else if (isAuthenticated && inAuth) {
-      router.replace('/(tabs)');
-    }
-  }, [isAuthenticated, isLoading, hasSeenOnboarding, segments]);
+    if (inAuth) router.replace('/(tabs)');
+  }, [segments]);
 
-  if (isLoading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.light.primary }}>
-        <ActivityIndicator color="#FFF" size="large" />
-      </View>
-    );
-  }
   return null;
 }
 

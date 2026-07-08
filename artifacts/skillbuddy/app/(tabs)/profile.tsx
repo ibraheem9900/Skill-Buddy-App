@@ -1,11 +1,14 @@
 import React from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
+
+const LOGO_WHITE = require('@/assets/images/logo-white.png');
 
 const c = colors.light;
 
@@ -78,7 +81,9 @@ export default function ProfileScreen() {
       showsVerticalScrollIndicator={false}
     >
       {/* Profile Header */}
-      <View style={[styles.profileHeader, { paddingTop: insets.top + 16 }]}>
+      <View style={[styles.profileHeader, { paddingTop: insets.top + 12 }]}>
+        {/* Logo at top of profile header */}
+        <Image source={LOGO_WHITE} style={styles.headerLogo} contentFit="contain" />
         <View style={styles.avatarWrap}>
           <View style={[styles.avatar, { backgroundColor: c.primary }]}>
             <Text style={styles.avatarText}>{user?.first_name?.charAt(0) ?? 'U'}</Text>
@@ -147,6 +152,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F8F8F8' },
   profileHeader: { backgroundColor: c.primary, alignItems: 'center', paddingBottom: 28, paddingHorizontal: 20 },
+  headerLogo: { width: 130, height: 40, marginBottom: 16 },
   avatarWrap: { position: 'relative', marginBottom: 12 },
   avatar: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.4)' },
   avatarText: { fontFamily: 'Inter_700Bold', fontSize: 36, color: '#FFF' },

@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
@@ -22,6 +23,8 @@ import { CATEGORIES, OFFERS, SERVICES } from '@/data/mockData';
 import ServiceCard from '@/components/ServiceCard';
 import CategoryItem from '@/components/CategoryItem';
 import SpecialOfferCard from '@/components/SpecialOfferCard';
+
+const LOGO_WHITE = require('@/assets/images/logo-white.png');
 
 const { width } = Dimensions.get('window');
 const c = colors.light;
@@ -44,7 +47,16 @@ export default function HomeScreen() {
   return (
     <View style={styles.root}>
       {/* Green Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        {/* Logo + Notification row */}
+        <View style={styles.logoRow}>
+          <Image source={LOGO_WHITE} style={styles.logoImg} contentFit="contain" />
+          <TouchableOpacity style={styles.notifBtn} onPress={() => router.push('/notifications')}>
+            <Feather name="bell" size={20} color="#FFF" />
+            <View style={styles.notifDot} />
+          </TouchableOpacity>
+        </View>
+        {/* Location row */}
         <View style={styles.locationRow}>
           <View style={styles.locationLeft}>
             <MaterialIcons name="location-on" size={18} color="#FFB800" />
@@ -53,10 +65,6 @@ export default function HomeScreen() {
               <Feather name="chevron-down" size={16} color="#FFF" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.notifBtn} onPress={() => router.push('/notifications')}>
-            <Feather name="bell" size={20} color="#FFF" />
-            <View style={styles.notifDot} />
-          </TouchableOpacity>
         </View>
         {/* Search Bar */}
         <Pressable style={styles.searchWrap} onPress={() => router.push('/search')}>
@@ -163,7 +171,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
   },
-  locationRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  logoImg: { width: 140, height: 44 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   locationLeft: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
