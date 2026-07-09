@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -25,16 +25,21 @@ import LogoMark from '@/components/LogoMark';
 
 const { width } = Dimensions.get('window');
 
-// ─── Mock data for new sections ───────────────────────────────────────────────
-
-const HOW_IT_WORKS = [
-  { step: 1, emoji: '🔍', title: 'Browse Services', desc: 'Search or explore categories near you' },
-  { step: 2, emoji: '📋', title: 'Post a Job', desc: 'Describe what you need, set your budget' },
-  { step: 3, emoji: '💬', title: 'Get Bids', desc: 'Pilots send you competitive offers' },
-  { step: 4, emoji: '⭐', title: 'Choose Pilot', desc: 'Pick the best match by rating & price' },
-  { step: 5, emoji: '✅', title: 'Job Done!', desc: 'Pay securely, leave a review' },
+// ─── How It Works data ───────────────────────────────────────────────────────
+const HOW_IT_WORKS: {
+  step: number;
+  icon: React.ComponentProps<typeof Feather>['name'];
+  title: string;
+  desc: string;
+}[] = [
+  { step: 1, icon: 'search',        title: 'Browse Services', desc: 'Search or explore categories near you' },
+  { step: 2, icon: 'file-text',     title: 'Post a Job',      desc: 'Describe your need and set a budget' },
+  { step: 3, icon: 'message-circle',title: 'Get Bids',        desc: 'Pilots send competitive offers' },
+  { step: 4, icon: 'user-check',    title: 'Choose Pilot',    desc: 'Pick the best match by rating & price' },
+  { step: 5, icon: 'check-circle',  title: 'Job Done!',       desc: 'Pay securely and leave a review' },
 ];
 
+// ─── Testimonials data ───────────────────────────────────────────────────────
 const TESTIMONIALS = [
   {
     id: 't1',
@@ -65,28 +70,34 @@ const TESTIMONIALS = [
   },
 ];
 
-const BADGE_TIERS = [
-  { tier: 'Bronze', color: '#CD7F32', min: 0, max: 10, icon: '🥉' },
-  { tier: 'Silver', color: '#A0A0A0', min: 10, max: 50, icon: '🥈' },
-  { tier: 'Gold', color: '#FFB800', min: 50, max: 100, icon: '🥇' },
+// ─── Badge tiers ─────────────────────────────────────────────────────────────
+const BADGE_TIERS: {
+  tier: string;
+  color: string;
+  icon: React.ComponentProps<typeof Feather>['name'];
+}[] = [
+  { tier: 'Bronze', color: '#CD7F32', icon: 'award' },
+  { tier: 'Silver', color: '#A0A0A0', icon: 'award' },
+  { tier: 'Gold',   color: '#FFB800', icon: 'award' },
 ];
 
-// ─── Star Rating helper ────────────────────────────────────────────────────────
+// ─── Inline star row ──────────────────────────────────────────────────────────
 function Stars({ count }: { count: number }) {
   return (
-    <View style={{ flexDirection: 'row', gap: 2 }}>
+    <View style={{ flexDirection: 'row', gap: 1 }}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <MaterialIcons key={i} name="star" size={13} color={i <= count ? '#FFB800' : '#E0E0E0'} />
+        <MaterialIcons key={i} name="star" size={12} color={i <= count ? '#FFB800' : '#E0E0E0'} />
       ))}
     </View>
   );
 }
 
+// ─── Screen ───────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { colors: c, theme } = useTheme();
+  const { colors: c } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [location] = useState('Riga, Latvia');
   const [offerIdx, setOfferIdx] = useState(0);
@@ -97,63 +108,54 @@ export default function HomeScreen() {
   }, []);
 
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
-  const headerBg = c.headerBg;
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* ── Green Header ─────────────────────────────────────────────────── */}
-      <View style={[styles.header, { backgroundColor: headerBg, paddingTop: insets.top + 8 }]}>
-        {/* Logo mark + Notification */}
+      <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 6 }]}>
         <View style={styles.logoRow}>
-          {/* Icon-only mark — white on the green header */}
-          <LogoMark color="#FFFFFF" size={38} />
+          <LogoMark color="#FFFFFF" size={30} />
           <TouchableOpacity
             style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
             onPress={() => router.push('/notifications')}
           >
-            <Feather name="bell" size={20} color="#FFF" />
-            <View style={[styles.notifDot, { borderColor: headerBg }]} />
+            <Feather name="bell" size={18} color="#FFF" />
+            <View style={[styles.notifDot, { borderColor: c.headerBg }]} />
           </TouchableOpacity>
         </View>
 
-        {/* Location */}
         <View style={styles.locationRow}>
-          <MaterialIcons name="location-on" size={18} color="#FFB800" />
+          <MaterialIcons name="location-on" size={16} color="#FFB800" />
           <TouchableOpacity style={styles.locationBtn} onPress={() => router.push('/location')}>
             <Text style={styles.locationText}>{location}</Text>
-            <Feather name="chevron-down" size={16} color="#FFF" />
+            <Feather name="chevron-down" size={14} color="#FFF" />
           </TouchableOpacity>
         </View>
 
-        {/* Search bar */}
         <Pressable style={styles.searchWrap} onPress={() => router.push('/search')}>
           <View style={styles.searchBar}>
-            <Feather name="search" size={18} color="#9E9E9E" />
+            <Feather name="search" size={16} color="#9E9E9E" />
             <Text style={styles.searchPlaceholder}>Search for a service…</Text>
           </View>
           <TouchableOpacity style={styles.filterBtn} onPress={() => router.push('/filter')}>
-            <Feather name="sliders" size={18} color={c.primary} />
+            <Feather name="sliders" size={16} color={c.primary} />
           </TouchableOpacity>
         </Pressable>
       </View>
 
-      {/* ── Content ──────────────────────────────────────────────────────── */}
+      {/* ── Scrollable content ───────────────────────────────────────────── */}
       <ScrollView
+        style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: TAB_HEIGHT + insets.bottom + 20 }}
+        contentContainerStyle={{ paddingBottom: TAB_HEIGHT + insets.bottom + 16 }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={c.primary}
-            colors={[c.primary]}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} colors={[c.primary]} />
         }
       >
-        {/* Special For You */}
-        <Animated.View entering={FadeInDown.delay(50).duration(400)} style={styles.section}>
+        {/* Special Offers */}
+        <Animated.View entering={FadeInDown.delay(40).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>#SpecialForYou</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>Special For You</Text>
             <TouchableOpacity>
               <Text style={[styles.seeAll, { color: c.primary }]}>See All</Text>
             </TouchableOpacity>
@@ -166,7 +168,7 @@ export default function HomeScreen() {
             contentContainerStyle={{ paddingHorizontal: 16 }}
             renderItem={({ item }) => <SpecialOfferCard offer={item} />}
             onMomentumScrollEnd={(e) => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / (width - 32));
+              const idx = Math.round(e.nativeEvent.contentOffset.x / 292);
               setOfferIdx(Math.max(0, Math.min(idx, OFFERS.length - 1)));
             }}
           />
@@ -176,9 +178,7 @@ export default function HomeScreen() {
                 key={i}
                 style={[
                   styles.dot,
-                  offerIdx === i
-                    ? { backgroundColor: c.primary, width: 16 }
-                    : { backgroundColor: c.border },
+                  offerIdx === i ? { backgroundColor: c.primary, width: 14 } : { backgroundColor: c.border },
                 ]}
               />
             ))}
@@ -186,7 +186,7 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* Categories */}
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(80).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>Categories</Text>
             <TouchableOpacity onPress={() => router.push('/categories')}>
@@ -204,7 +204,7 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* Popular Services */}
-        <Animated.View entering={FadeInDown.delay(150).duration(400)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(120).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>Popular Services</Text>
             <TouchableOpacity onPress={() => router.push('/search')}>
@@ -221,8 +221,8 @@ export default function HomeScreen() {
           />
         </Animated.View>
 
-        {/* ── Badges / Rewards Teaser ─────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
+        {/* Earn Badges */}
+        <Animated.View entering={FadeInDown.delay(160).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>Earn Badges</Text>
             <TouchableOpacity>
@@ -233,11 +233,12 @@ export default function HomeScreen() {
             activeOpacity={0.85}
             style={[styles.badgeCard, { backgroundColor: c.card, borderColor: c.border }]}
           >
-            <View style={styles.badgeCardInner}>
-              <View>
-                <Text style={[styles.badgeCardTitle, { color: c.text }]}>
-                  Unlock Real Rewards 🏆
-                </Text>
+            <View style={styles.badgeCardRow}>
+              <View style={styles.badgeCardText}>
+                <View style={styles.badgeCardTitleRow}>
+                  <Feather name="award" size={15} color={c.primary} />
+                  <Text style={[styles.badgeCardTitle, { color: c.text }]}>Unlock Real Rewards</Text>
+                </View>
                 <Text style={[styles.badgeCardSub, { color: c.mutedForeground }]}>
                   Complete jobs to climb the tiers
                 </Text>
@@ -245,16 +246,14 @@ export default function HomeScreen() {
               <View style={styles.badgeTiers}>
                 {BADGE_TIERS.map((b) => (
                   <View key={b.tier} style={styles.badgeTierItem}>
-                    <Text style={styles.badgeTierEmoji}>{b.icon}</Text>
+                    <Feather name={b.icon} size={18} color={b.color} />
                     <Text style={[styles.badgeTierLabel, { color: b.color }]}>{b.tier}</Text>
                   </View>
                 ))}
               </View>
             </View>
             <View style={[styles.badgeProgressBar, { backgroundColor: c.border }]}>
-              <View
-                style={[styles.badgeProgressFill, { backgroundColor: c.primary, width: '30%' }]}
-              />
+              <View style={[styles.badgeProgressFill, { backgroundColor: c.primary, width: '30%' }]} />
             </View>
             <Text style={[styles.badgeProgressLabel, { color: c.mutedForeground }]}>
               3 / 10 jobs to Silver
@@ -262,8 +261,8 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* ── How it Works ────────────────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(250).duration(400)} style={styles.section}>
+        {/* How It Works */}
+        <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>How It Works</Text>
           </View>
@@ -278,7 +277,9 @@ export default function HomeScreen() {
                 <View style={[styles.howStep, { backgroundColor: c.primaryLight }]}>
                   <Text style={[styles.howStepNum, { color: c.primary }]}>{item.step}</Text>
                 </View>
-                <Text style={styles.howEmoji}>{item.emoji}</Text>
+                <View style={[styles.howIconWrap, { backgroundColor: c.accent }]}>
+                  <Feather name={item.icon} size={20} color={c.primary} />
+                </View>
                 <Text style={[styles.howTitle, { color: c.text }]}>{item.title}</Text>
                 <Text style={[styles.howDesc, { color: c.mutedForeground }]}>{item.desc}</Text>
               </View>
@@ -287,7 +288,7 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* Nearby Services */}
-        <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(240).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>Nearby Services</Text>
             <TouchableOpacity onPress={() => router.push('/search')}>
@@ -304,8 +305,8 @@ export default function HomeScreen() {
           />
         </Animated.View>
 
-        {/* ── Testimonials ────────────────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(350).duration(400)} style={[styles.section, { marginBottom: 8 }]}>
+        {/* What People Say */}
+        <Animated.View entering={FadeInDown.delay(280).duration(400)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>What People Say</Text>
           </View>
@@ -317,20 +318,25 @@ export default function HomeScreen() {
             contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
             renderItem={({ item }) => (
               <View style={[styles.testimonialCard, { backgroundColor: c.card, borderColor: c.border }]}>
+                {/* Top row: avatar | name+service | stars */}
                 <View style={styles.testimonialTop}>
                   <View style={[styles.testimonialAvatar, { backgroundColor: item.avatarColor }]}>
                     <Text style={styles.testimonialInitials}>{item.initials}</Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.testimonialName, { color: c.text }]}>{item.name}</Text>
-                    <Text style={[styles.testimonialService, { color: c.mutedForeground }]}>
+                  <View style={styles.testimonialMeta}>
+                    <Text style={[styles.testimonialName, { color: c.text }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.testimonialService, { color: c.mutedForeground }]} numberOfLines={1}>
                       {item.service}
                     </Text>
                   </View>
-                  <Stars count={item.rating} />
+                  <View style={styles.testimonialStars}>
+                    <Stars count={item.rating} />
+                  </View>
                 </View>
                 <Text style={[styles.testimonialComment, { color: c.mutedForeground }]}>
-                  "{item.comment}"
+                  &ldquo;{item.comment}&rdquo;
                 </Text>
               </View>
             )}
@@ -341,80 +347,87 @@ export default function HomeScreen() {
   );
 }
 
+const CARD_W = Math.min(width * 0.78, 300);
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  scroll: { flex: 1 },
+
+  // ── Header ──────────────────────────────────────────────────────────────
   header: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
   },
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 14 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
   locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
+  locationText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#FFF' },
   notifBtn: {
-    position: 'relative',
     backgroundColor: 'rgba(255,255,255,0.15)',
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   notifDot: {
     position: 'absolute',
     top: 8,
     right: 8,
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
     backgroundColor: '#E74C3C',
     borderWidth: 1.5,
   },
-  searchWrap: { flexDirection: 'row', gap: 10 },
+  searchWrap: { flexDirection: 'row', gap: 8 },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     backgroundColor: '#FFF',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  searchPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#9E9E9E' },
+  searchPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#9E9E9E' },
   filterBtn: {
     backgroundColor: '#FFF',
-    width: 46,
-    borderRadius: 14,
+    width: 42,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  section: { marginTop: 20 },
+
+  // ── Sections ─────────────────────────────────────────────────────────────
+  section: { marginTop: 16 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 10,
   },
-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 17 },
-  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 13 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 12 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
+  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 15 },
+  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+  dotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 },
+  dot: { width: 5, height: 5, borderRadius: 3 },
 
-  // Badge card
+  // ── Badge card ────────────────────────────────────────────────────────────
   badgeCard: {
     marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -422,60 +435,89 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  badgeCardInner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  badgeCardTitle: { fontFamily: 'Inter_700Bold', fontSize: 15, marginBottom: 4 },
-  badgeCardSub: { fontFamily: 'Inter_400Regular', fontSize: 12 },
-  badgeTiers: { flexDirection: 'row', gap: 10 },
+  badgeCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  badgeCardText: { flex: 1, gap: 2, marginRight: 10 },
+  badgeCardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  badgeCardTitle: { fontFamily: 'Inter_700Bold', fontSize: 13 },
+  badgeCardSub: { fontFamily: 'Inter_400Regular', fontSize: 11 },
+  badgeTiers: { flexDirection: 'row', gap: 8 },
   badgeTierItem: { alignItems: 'center', gap: 2 },
-  badgeTierEmoji: { fontSize: 22 },
-  badgeTierLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
-  badgeProgressBar: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  badgeTierLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
+  badgeProgressBar: { height: 5, borderRadius: 3, overflow: 'hidden' },
   badgeProgressFill: { height: '100%', borderRadius: 3 },
-  badgeProgressLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 6 },
+  badgeProgressLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 5 },
 
-  // How it works
+  // ── How it works ──────────────────────────────────────────────────────────
   howCard: {
-    width: 140,
-    borderRadius: 16,
-    padding: 14,
+    width: 128,
+    borderRadius: 14,
+    padding: 12,
     borderWidth: 1,
-    alignItems: 'flex-start',
     gap: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
   },
-  howStep: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  howStepNum: { fontFamily: 'Inter_700Bold', fontSize: 11 },
-  howEmoji: { fontSize: 26 },
-  howTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
-  howDesc: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
+  howStep: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  howStepNum: { fontFamily: 'Inter_700Bold', fontSize: 10 },
+  howIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  howTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  howDesc: { fontFamily: 'Inter_400Regular', fontSize: 10, lineHeight: 14 },
 
-  // Testimonials
+  // ── Testimonials ──────────────────────────────────────────────────────────
   testimonialCard: {
-    width: width * 0.72,
-    borderRadius: 16,
-    padding: 16,
+    width: CARD_W,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
-    gap: 10,
+    gap: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 2,
   },
-  testimonialTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Row: avatar (fixed) | meta (flex+shrink) | stars (fixed)
+  testimonialTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   testimonialAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  testimonialInitials: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#FFF' },
-  testimonialName: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
-  testimonialService: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 1 },
-  testimonialComment: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19 },
+  testimonialInitials: { fontFamily: 'Inter_700Bold', fontSize: 13, color: '#FFF' },
+  testimonialMeta: {
+    flex: 1,
+    minWidth: 0,       // allows Text children to truncate properly
+    flexShrink: 1,
+  },
+  testimonialStars: { flexShrink: 0 },
+  testimonialName: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  testimonialService: { fontFamily: 'Inter_400Regular', fontSize: 10, marginTop: 1 },
+  testimonialComment: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 17 },
 });

@@ -159,21 +159,24 @@ export const OFFERS: Offer[] = [
     title: 'Get Special Offer',
     subtitle: 'All Services Available | T&C Applied',
     discount: 40,
-    bg: '#1A1A2E',
+    bg: '#1A4A35',
+    bgImage: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&q=80',
   },
   {
     id: 'o2',
     title: 'First Booking Deal',
     subtitle: 'New users only | Limited time',
     discount: 25,
-    bg: '#16213E',
+    bg: '#1A3A4A',
+    bgImage: 'https://images.unsplash.com/photo-1563453392212-326f5e854473?w=600&q=80',
   },
   {
     id: 'o3',
     title: 'Weekend Savings',
     subtitle: 'Book Sat–Sun and save big',
     discount: 20,
-    bg: '#0F3460',
+    bg: '#3A1A4A',
+    bgImage: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600&q=80',
   },
 ];
 

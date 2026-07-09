@@ -139,6 +139,7 @@ export interface Offer {
   discount: number;
   description?: string;
   bg: string;
+  bgImage?: string;
 }
 
 export interface Review {
