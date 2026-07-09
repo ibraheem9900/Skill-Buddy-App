@@ -3,16 +3,15 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { SERVICES } from '@/data/mockData';
 import ServiceCard from '@/components/ServiceCard';
 import ExploreMap from '@/components/ExploreMap';
 
-const c = colors.light;
-
 export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { colors: c } = useTheme();
   const [query, setQuery] = useState('');
 
   const filtered = SERVICES.filter(
@@ -23,7 +22,7 @@ export default function ExploreScreen() {
   );
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: c.primaryLight }]}>
       {/* Map fills the background */}
       <View style={StyleSheet.absoluteFillObject}>
         <ExploreMap />
@@ -31,18 +30,18 @@ export default function ExploreScreen() {
 
       {/* Search overlay */}
       <View style={[styles.searchOverlay, { top: insets.top + 12 }]}>
-        <View style={styles.searchBar}>
-          <Feather name="search" size={18} color="#9E9E9E" />
+        <View style={[styles.searchBar, { backgroundColor: c.card }]}>
+          <Feather name="search" size={18} color={c.mutedForeground} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: c.text }]}
             placeholder="Search Services"
-            placeholderTextColor="#9E9E9E"
+            placeholderTextColor={c.mutedForeground}
             value={query}
             onChangeText={setQuery}
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => setQuery('')}>
-              <Feather name="x-circle" size={18} color="#9E9E9E" />
+              <Feather name="x-circle" size={18} color={c.mutedForeground} />
             </TouchableOpacity>
           )}
         </View>
@@ -55,9 +54,9 @@ export default function ExploreScreen() {
       </View>
 
       {/* Bottom services panel */}
-      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 10 }]}>
-        <View style={styles.panelHandle} />
-        <Text style={styles.panelTitle}>{filtered.length} Services Nearby</Text>
+      <View style={[styles.bottomPanel, { backgroundColor: c.card, paddingBottom: insets.bottom + 10 }]}>
+        <View style={[styles.panelHandle, { backgroundColor: c.border }]} />
+        <Text style={[styles.panelTitle, { color: c.text }]}>{filtered.length} Services Nearby</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -73,7 +72,7 @@ export default function ExploreScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#E8F5F3' },
+  root: { flex: 1 },
   searchOverlay: {
     position: 'absolute',
     left: 16,
@@ -87,7 +86,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#FFF',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -97,10 +95,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
   },
-  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
+  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
   filterBtn: { width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   bottomPanel: {
-    backgroundColor: '#FFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 12,
@@ -114,14 +111,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#DDD',
     alignSelf: 'center',
     marginBottom: 12,
   },
   panelTitle: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 15,
-    color: '#1A1A1A',
     paddingHorizontal: 20,
     marginBottom: 12,
   },

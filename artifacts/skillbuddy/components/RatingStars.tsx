@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Props {
   rating: number;
@@ -12,7 +12,8 @@ interface Props {
 }
 
 export default function RatingStars({ rating, size = 14, showValue = true, reviewCount, color }: Props) {
-  const starColor = color ?? colors.light.rating;
+  const { colors: c } = useTheme();
+  const starColor = color ?? c.rating;
   const fullStars = Math.floor(rating);
   const hasHalf = rating - fullStars >= 0.5;
 
@@ -26,34 +27,24 @@ export default function RatingStars({ rating, size = 14, showValue = true, revie
             key={i}
             name={filled ? 'star' : half ? 'star-half' : 'star-border'}
             size={size}
-            color={filled || half ? starColor : '#D0D0D0'}
+            color={filled || half ? starColor : c.border}
           />
         );
       })}
       {showValue && (
-        <Text style={[styles.value, { fontSize: size }]}>{rating.toFixed(1)}</Text>
+        <Text style={[styles.value, { fontSize: size, color: c.text }]}>{rating.toFixed(1)}</Text>
       )}
       {reviewCount !== undefined && (
-        <Text style={[styles.count, { fontSize: size }]}>({reviewCount} reviews)</Text>
+        <Text style={[styles.count, { fontSize: size, color: c.mutedForeground }]}>
+          ({reviewCount} reviews)
+        </Text>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  value: {
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1A1A1A',
-    marginLeft: 3,
-  },
-  count: {
-    fontFamily: 'Inter_400Regular',
-    color: '#737373',
-    marginLeft: 2,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  value: { fontFamily: 'Inter_600SemiBold', marginLeft: 3 },
+  count: { fontFamily: 'Inter_400Regular', marginLeft: 2 },
 });

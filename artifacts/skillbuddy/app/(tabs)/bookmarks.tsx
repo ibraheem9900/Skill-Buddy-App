@@ -1,25 +1,23 @@
 import React from 'react';
 import { FlatList, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { useBookmarks } from '@/context/BookmarkContext';
 import ServiceCard from '@/components/ServiceCard';
 import EmptyState from '@/components/EmptyState';
 
-const c = colors.light;
-
 export default function BookmarksScreen() {
   const insets = useSafeAreaInsets();
   const { bookmarks } = useBookmarks();
+  const { colors: c } = useTheme();
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Saved Services</Text>
-        <Text style={styles.count}>{bookmarks.length} saved</Text>
+    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+      <View style={[styles.header, { backgroundColor: c.card, borderBottomColor: c.border }]}>
+        <Text style={[styles.title, { color: c.text }]}>Saved Services</Text>
+        <Text style={[styles.count, { color: c.mutedForeground }]}>{bookmarks.length} saved</Text>
       </View>
 
       {bookmarks.length === 0 ? (
@@ -32,7 +30,7 @@ export default function BookmarksScreen() {
         <FlatList
           data={bookmarks}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: TAB_HEIGHT + 16 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: TAB_HEIGHT + insets.bottom + 16 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item, index }) => (
             <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
@@ -46,17 +44,15 @@ export default function BookmarksScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F8F8F8' },
+  root: { flex: 1 },
   header: {
     paddingHorizontal: 20,
     paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#1A1A1A' },
-  count: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#737373' },
+  title: { fontFamily: 'Inter_700Bold', fontSize: 20 },
+  count: { fontFamily: 'Inter_400Regular', fontSize: 13 },
 });

@@ -1,0 +1,75 @@
+# SkillBuddy Mobile App — Logo Fix, Dark Mode Toggle & Dashboard Polish (Replit Prompt)
+
+Copy everything below this line into Replit AI / your dev agent. Attach the logo files (white icon version + dark/green icon version), the Fiverr app reference screenshots, and the SkillBuddy web homepage screenshots to this same message.
+
+---
+
+## CONTEXT
+
+Today's focus is three things: fixing the logo on the **Dashboard/Home screen** header, implementing a proper light/dark theme toggle with a smooth "paint reveal" transition animation, and fixing/enhancing the Home (Dashboard) screen — both a layout bug (excess blank space at the bottom on mobile) and adding a few more premium sections inspired by the SkillBuddy web homepage and the attached Fiverr app reference, matching SkillBuddy's own color scheme. **Login/Signup screens are explicitly out of scope for now** — they're on hold until backend auth functionality is fully working, so do not touch them in this pass.
+
+---
+
+## TASK 1 — Fix the Logo on the Dashboard (Home) Screen
+
+**Note:** Do NOT touch the Login/Signup screens in this pass — those are on hold until the backend auth functionality is fully wired and working. This task is only about the logo shown on the **Dashboard/Home screen** header.
+
+**Problem:** The current logo on the Home screen header is wrong/not properly implemented (currently showing an oversized or incorrectly colored version).
+
+**Required fix:**
+- Use the **icon-only mark** (the wave/person swoosh symbol, without the "Skillbuddy" wordmark) as the logo in the Home screen's header — small and proportionate, the way professional apps show a compact brand mark in a header bar (not a large full logo-with-text lockup taking up excessive space).
+- Use the correct color variant depending on the background it sits on:
+  - On the Home header's **green background**, use the white icon version.
+  - If the same header appears in **light/white theme areas** elsewhere, use the dark green icon version there instead.
+- Size it consistently (roughly 32–40px in a header context) with proper spacing/alignment alongside the location text and notification bell already in that header, matching the polished, minimal feel of the reference design screenshots.
+- If this same logo placement/component is reused in other headers across the app (not just Home), apply the same fix consistently everywhere it appears — but do not add or change anything on the Login/Signup screens as part of this task.
+
+---
+
+## TASK 2 — Dark Mode / Light Mode Toggle with Paint-Reveal Transition
+
+This is a key premium feature for the app.
+
+**Required behavior:**
+- Add a theme toggle control accessible from the app (e.g. in Settings or as a quick-access icon in the header/profile area — pick whichever placement fits the existing screen designs best) that lets the user manually switch between Light and Dark theme, in addition to (or instead of, if simpler) following the system theme.
+- Implement a full **light-to-dark / dark-to-light color scheme** for every screen already built — backgrounds, text colors, card surfaces, borders, icons — using a proper design-token/theme system (e.g. NativeWind's dark mode support or a custom theme context) so no screen is left half-migrated or mismatched.
+- **No flicker or flash** when switching themes — the transition must feel deliberate and smooth, not an abrupt instant color swap or a visible white/black flash mid-transition.
+- Implement a **"paint reveal" transition animation**: when the user toggles the theme, animate a smooth expanding reveal (e.g. a circular or radial wipe originating from the toggle button's position, or a smooth top-to-bottom/diagonal wipe) that visually "repaints" the entire screen from the old theme to the new one, giving the impression the app is being freshly painted over rather than instantly swapping colors. This should feel premium and intentional — reference how well-polished apps (e.g. Twitter/X's theme switch animation) handle this kind of transition, and replicate that quality level using `react-native-reanimated` (e.g. an animated overlay view that expands/wipes across the screen while the underlying theme value swaps underneath it).
+- Persist the user's theme choice (e.g. via `expo-secure-store` or `AsyncStorage`, since this isn't sensitive data) so it's remembered across app restarts.
+- Test the toggle from multiple screens (Home, Profile, a detail screen) to confirm the animation and color swap work consistently everywhere, not just from one entry point.
+
+---
+
+## TASK 3 — Fix Home (Dashboard) Screen Bottom Gap & Layout
+
+**Problem:** On the current Home screen, there's a large excess blank white space at the bottom of the screen on mobile — the content isn't properly filling/fitting the viewport.
+
+**Required fix:**
+- Audit the Home screen's layout (likely a `ScrollView` or `FlatList` with incorrect `flex`/`minHeight`/content-container sizing) and fix it so content fills the available screen space properly with no unintended empty gap at the bottom, across different device screen sizes (test on a few common heights — e.g. iPhone SE-sized to a larger Android device).
+- Ensure the bottom tab bar and any safe-area insets (notch/home-indicator on iOS, gesture bar on Android) are properly accounted for using `useSafeAreaInsets` (from `react-native-safe-area-context`) so content isn't clipped by or awkwardly spaced from the tab bar or device chrome.
+- The screen should end naturally after the last content section (with reasonable bottom padding for comfortable scrolling), not leave a large dead empty area.
+
+---
+
+## TASK 4 — Enhance the Home (Dashboard) Screen with Additional Sections
+
+Using the attached SkillBuddy **web homepage** screenshots and the attached **Fiverr app** screenshots purely as visual/structural inspiration (not to be copied wholesale — adapt to SkillBuddy's own green color scheme, rounded card style, and existing component patterns already used on Home/Explore/Search), select and add a few more premium-feeling sections to the mobile Dashboard, similar to what's already on web. Recommended additions, matching what's already proven to work well on the web homepage:
+
+- **Badges/Rewards teaser** — a compact card or banner referencing the Bronze/Silver/Gold SkillBuddy badge system from the web ("Earn Badges, Unlock Real Rewards") that links to a full badges screen (can be a simple placeholder screen for now if the full badges screen isn't built yet).
+- **"How it works" mini-section** — a compact horizontal-scroll or stacked version of the 5-step "Book a Service → Post a Job → Get Bids → Choose the SkillBuddy → Job Done" flow from the web, adapted to a mobile-friendly compact card format.
+- **Testimonials/reviews teaser** — a small horizontally-scrollable card carousel showing a couple of short customer quotes with star ratings and names/initials (matching the testimonial card style from the web), using mock data.
+- Keep whichever of these fits naturally without cluttering the screen — prioritize a clean, premium feel over cramming in everything; it's fine to leave one or two of these out if they don't fit well, use good design judgment matching the existing Home screen's visual rhythm.
+- All new sections must use the same entrance animation pattern (staggered fade + slide-in) already specified for the rest of the Home screen, and must work correctly in both light and dark theme per Task 2.
+
+---
+
+## REFERENCE
+
+- Live web app for exact color scheme, spacing, and section styling to match: `https://skill-buddy-nine.vercel.app/`
+- Attached: SkillBuddy logo files (icon-only, both color variants), Fiverr app screenshots (for general dashboard polish inspiration only — do not copy Fiverr's dark theme as the default, SkillBuddy's brand green stays primary), SkillBuddy web homepage section screenshots.
+
+---
+
+## SCOPE BOUNDARY
+
+Focus only on today's four tasks: the Dashboard/Home screen logo fix, the dark/light theme toggle with its paint-reveal transition, the Home screen bottom-gap layout fix, and the additional Home screen sections. **Do not make any changes to the Login/Signup screens in this pass** — those remain on hold until backend auth functionality is fully wired and working. Do not modify the auth API integration, navigation structure, or any other screens beyond what's needed to apply the new theme system consistently. If extending the theme system touches shared components (buttons, cards, inputs) used across many screens, that's expected and fine — but don't redesign those components' layouts beyond adding theme support.

@@ -1,12 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import type { Offer } from '@/types';
 
 interface Props { offer: Offer }
 
 export default function SpecialOfferCard({ offer }: Props) {
-  const c = colors.light;
+  const { colors: c } = useTheme();
   return (
     <View style={[styles.card, { backgroundColor: offer.bg }]}>
       <View style={styles.content}>

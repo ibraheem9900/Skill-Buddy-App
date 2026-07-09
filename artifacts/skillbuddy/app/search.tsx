@@ -4,16 +4,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { SERVICES } from '@/data/mockData';
 import ServiceCard from '@/components/ServiceCard';
 import EmptyState from '@/components/EmptyState';
 
-const c = colors.light;
-
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { colors: c } = useTheme();
   const inputRef = useRef<TextInput>(null);
   const [query, setQuery] = useState('Home Cleaning');
 
@@ -30,21 +29,21 @@ export default function SearchScreen() {
   }, []);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {/* Search Header */}
-      <View style={styles.searchHeader}>
+      <View style={[styles.searchHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Feather name="arrow-left" size={22} color="#1A1A1A" />
+          <Feather name="arrow-left" size={22} color={c.text} />
         </TouchableOpacity>
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, { backgroundColor: c.input }]}>
           <Feather name="search" size={18} color={c.primary} />
           <TextInput
             ref={inputRef}
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: c.text }]}
             value={query}
             onChangeText={setQuery}
             placeholder="Search services..."
-            placeholderTextColor="#9E9E9E"
+            placeholderTextColor={c.mutedForeground}
             returnKeyType="search"
             autoCorrect={false}
           />
@@ -57,45 +56,62 @@ export default function SearchScreen() {
           )}
         </View>
         <TouchableOpacity onPress={() => router.push('/filter')}>
-          <Feather name="sliders" size={20} color="#1A1A1A" />
+          <Feather name="sliders" size={20} color={c.text} />
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.resultCount}>
-        {filtered.length} Result{filtered.length !== 1 ? 's' : ''} Found
-      </Text>
+      {/* Results count */}
+      <View style={[styles.resultRow, { borderBottomColor: c.border }]}>
+        <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
+          {filtered.length} results for{' '}
+          <Text style={{ color: c.text, fontFamily: 'Inter_600SemiBold' }}>"{query}"</Text>
+        </Text>
+      </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(s) => s.id}
-        contentContainerStyle={{ padding: 16, paddingTop: 4, gap: 0 }}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <EmptyState
-            icon="search"
-            title="No Results Found"
-            subtitle={`No services match "${query}". Try a different search term.`}
-          />
-        }
-        renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(index * 50).duration(300)}>
-            <ServiceCard service={item} variant="list" />
-          </Animated.View>
-        )}
-      />
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon="search"
+          title="No Results"
+          subtitle={`No services match "${query}". Try a different search term.`}
+        />
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(s) => s.id}
+          contentContainerStyle={{ padding: 16, gap: 0 }}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item, index }) => (
+            <Animated.View entering={FadeInDown.delay(index * 50).duration(300)}>
+              <ServiceCard service={item} variant="list" />
+            </Animated.View>
+          )}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FFF' },
-  searchHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  searchBar: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1.5, borderColor: c.primary, borderRadius: 25,
-    paddingHorizontal: 14, paddingVertical: 10,
+  root: { flex: 1 },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: 1,
   },
-  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
   clearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  resultCount: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#1A1A1A', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
+  resultRow: { paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1 },
+  resultCount: { fontFamily: 'Inter_400Regular', fontSize: 13 },
 });

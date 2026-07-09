@@ -5,7 +5,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { useBookmarks } from '@/context/BookmarkContext';
 import type { Service } from '@/types';
 
@@ -19,9 +19,9 @@ interface Props {
 export default function ServiceCard({ service, variant = 'vertical' }: Props) {
   const router = useRouter();
   const { isBookmarked, toggleBookmark } = useBookmarks();
+  const { colors: c } = useTheme();
   const scale = useSharedValue(1);
   const bookmarked = isBookmarked(service.id);
-  const c = colors.light;
 
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -40,7 +40,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
   if (variant === 'list') {
     return (
       <AnimatedTouchable
-        style={[styles.listCard, animStyle]}
+        style={[styles.listCard, { backgroundColor: c.card }, animStyle]}
         activeOpacity={1}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
@@ -51,15 +51,15 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
           <View style={[styles.chip, { backgroundColor: c.primaryLight }]}>
             <Text style={[styles.chipText, { color: c.primary }]}>{service.category}</Text>
           </View>
-          <Text style={styles.listTitle} numberOfLines={2}>{service.title}</Text>
+          <Text style={[styles.listTitle, { color: c.text }]} numberOfLines={2}>{service.title}</Text>
           <View style={styles.providerRow}>
             <Feather name="user" size={12} color={c.mutedForeground} />
-            <Text style={styles.providerName}>{service.provider.name}</Text>
+            <Text style={[styles.providerName, { color: c.mutedForeground }]}>{service.provider.name}</Text>
           </View>
           <Text style={[styles.price, { color: c.primary }]}>${service.price.toFixed(2)}</Text>
         </View>
         <TouchableOpacity style={styles.listBookmark} onPress={handleBookmark}>
-          <Feather name="bookmark" size={18} color={bookmarked ? c.primary : c.primary} fill={bookmarked ? c.primary : 'none'} />
+          <Feather name="bookmark" size={18} color={c.primary} />
         </TouchableOpacity>
       </AnimatedTouchable>
     );
@@ -68,7 +68,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
   // Vertical card (for horizontal scrolls on home)
   return (
     <AnimatedTouchable
-      style={[styles.card, animStyle]}
+      style={[styles.card, { backgroundColor: c.card }, animStyle]}
       activeOpacity={1}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
@@ -87,10 +87,10 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
         </TouchableOpacity>
       </View>
       <View style={styles.body}>
-        <Text style={styles.title} numberOfLines={2}>{service.title}</Text>
+        <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>{service.title}</Text>
         <View style={styles.providerRow}>
           <Feather name="user" size={12} color={c.mutedForeground} />
-          <Text style={styles.providerName}>{service.provider.name}</Text>
+          <Text style={[styles.providerName, { color: c.mutedForeground }]}>{service.provider.name}</Text>
         </View>
         <Text style={[styles.price, { color: c.primary }]}>${service.price.toFixed(2)}</Text>
       </View>
@@ -101,7 +101,6 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
 const styles = StyleSheet.create({
   card: {
     width: 175,
-    backgroundColor: '#FFF',
     borderRadius: 16,
     overflow: 'hidden',
     marginRight: 14,
@@ -129,14 +128,12 @@ const styles = StyleSheet.create({
   bookmarkBtn: { position: 'absolute', top: 8, right: 8 },
   bookmarkBg: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   body: { padding: 10, gap: 3 },
-  title: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#1A1A1A', lineHeight: 18 },
+  title: { fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18 },
   providerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  providerName: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#737373' },
+  providerName: { fontFamily: 'Inter_400Regular', fontSize: 12 },
   price: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  // List variant
   listCard: {
     flexDirection: 'row',
-    backgroundColor: '#FFF',
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 12,
@@ -150,7 +147,7 @@ const styles = StyleSheet.create({
   },
   listImage: { width: 85, height: 85, borderRadius: 12 },
   listBody: { flex: 1, paddingHorizontal: 12, gap: 3 },
-  listTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#1A1A1A' },
+  listTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
   listBookmark: { padding: 4 },
   chip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
   chipText: { fontFamily: 'Inter_500Medium', fontSize: 11 },

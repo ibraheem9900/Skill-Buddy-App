@@ -6,9 +6,7 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
-import colors from '@/constants/colors';
-
-const c = colors.light;
+import { useTheme } from '@/context/ThemeContext';
 
 function NativeTabLayout() {
   return (
@@ -38,30 +36,36 @@ function NativeTabLayout() {
 }
 
 function ClassicTabLayout() {
+  const { colors: c, theme } = useTheme();
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
+  const isDark = theme === 'dark';
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: c.primary,
-        tabBarInactiveTintColor: '#9E9E9E',
+        tabBarActiveTintColor: c.tabBarActive,
+        tabBarInactiveTintColor: c.tabBarInactive,
         tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 2 },
         tabBarStyle: {
           position: 'absolute',
-          backgroundColor: isIOS ? 'transparent' : '#FFF',
+          backgroundColor: isIOS ? 'transparent' : c.tabBarBg,
           borderTopWidth: 0.5,
-          borderTopColor: '#E8E8E8',
+          borderTopColor: c.border,
           elevation: 0,
           height: isWeb ? 84 : 60,
           paddingBottom: isWeb ? 34 : 6,
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView intensity={90} tint="light" style={StyleSheet.absoluteFill} />
+            <BlurView
+              intensity={90}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
           ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#FFF' }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: c.tabBarBg }]} />
           ) : null,
       }}
     >
