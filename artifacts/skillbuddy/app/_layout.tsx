@@ -43,7 +43,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen
           name="notifications"
-          options={{ headerShown: true, title: 'Notification', headerBackTitle: 'Back', animation: 'slide_from_right' }}
+          options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="search"
@@ -63,11 +63,11 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="location"
-          options={{ headerShown: true, title: 'Enter Your Location', headerBackTitle: 'Back' }}
+          options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="filter"
-          options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom' }}
+          options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom' }}
         />
         <Stack.Screen
           name="chat/[id]"

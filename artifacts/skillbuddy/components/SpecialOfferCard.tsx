@@ -3,11 +3,11 @@ import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native
 import { Feather } from '@expo/vector-icons';
 import type { Offer } from '@/types';
 
-interface Props { offer: Offer }
+interface Props { offer: Offer; cardWidth?: number }
 
-export default function SpecialOfferCard({ offer }: Props) {
+export default function SpecialOfferCard({ offer, cardWidth }: Props) {
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, cardWidth ? { width: cardWidth } : undefined]}>
       <ImageBackground
         source={{ uri: offer.bgImage }}
         style={styles.bg}

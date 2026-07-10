@@ -1,0 +1,169 @@
+# SkillBuddy Mobile App — Dashboard & Explore Section Deep Fix (Replit Prompt)
+
+Copy everything below this line into Replit AI / your dev agent. Attach the provided logo file (icon-only, transparent background) and all the new screenshots showing the current broken state to this same message — they show exactly what's wrong right now.
+
+---
+
+## CONTEXT
+
+Today's work is scoped to **only two areas: the Dashboard (Home) screen and the Explore screen** — do not touch any other screen, and do not touch Login/Signup (still on hold). Several things from previous passes are still broken or incomplete, plus new bugs have appeared (duplicate headers, non-working filters, wrong dark theme colors). This prompt lists every issue specifically — fix each one exactly as described, do not skip or partially address any item.
+
+---
+
+## TASK 1 — Logo: Use the Exact Provided File, Not a Recreation
+
+**Problem:** The logo is still not correctly implemented after the last pass.
+
+**Required fix:**
+- Use the **exact logo image file attached to this prompt** (the icon-only wave/person mark) as an actual image asset in the project (e.g. `assets/logo-icon.png` or `.svg` if an SVG version is provided) — do **not** attempt to recreate, redraw, or approximate the icon using code/shapes. Import and render the real provided file.
+- If the attached file has a background that needs removing, remove the background properly so it's a clean transparent-background icon before adding it to the project — the icon shape itself must exactly match the provided design, not a lookalike.
+- Use the white version of the icon on the green header background, sized small and proportionate (roughly 32–36px), positioned in the Home screen header.
+- Do not scale, stretch, recolor (beyond the light/dark variant swap), or otherwise modify the icon's proportions.
+
+---
+
+## TASK 2 — Header Layout: Logo & Notification Bell Positioned Too High
+
+**Problem:** The logo and notification bell in the Home screen header currently sit too close to the top of the screen, overlapping or crowding the status bar / device notch area.
+
+**Required fix:**
+- Use `useSafeAreaInsets` (from `react-native-safe-area-context`) to properly push the header content down below the status bar/notch on all devices, with reasonable, consistent padding above the logo/bell row (not cramped, not excessive).
+- Verify this looks correct on both notch-style devices (iPhone with dynamic island/notch) and standard Android status bars.
+
+---
+
+## TASK 3 — Fix the Remaining Bottom White Gap on the Home Screen
+
+**Problem:** This was flagged in the previous pass and is still not fixed — there is still a large empty white gap at the bottom of the Home screen below the last content section.
+
+**Required fix:**
+- This time, actually trace the root cause: check whether the `ScrollView`/screen container has a fixed `minHeight` or `flex: 1` on an inner content wrapper that's forcing extra height beyond the actual content, check whether the bottom tab bar's height is being double-counted in padding, and check `contentContainerStyle` on the scroll view.
+- After the fix, the screen must end shortly after the last real content section (Popular Services or whichever section is last), with only small, natural bottom padding for comfortable scrolling — not a large dead space.
+- Test on at least two different simulated screen heights to confirm this isn't just fixed for one device size.
+
+---
+
+## TASK 4 — Fix the "Special For You" Offer Card: Show One Full Card at a Time
+
+**Problem:** Currently the offer card carousel shows roughly half of one card and a sliver of the next card peeking in — it should show one card fully at a time.
+
+**Required fix:**
+- Size each carousel card to the full available width of its container (minus consistent side padding matching the rest of the screen's horizontal padding), so exactly **one complete card is visible per swipe**, with no partial/cut-off neighboring card showing.
+- Keep the horizontal swipe gesture and pagination dots, but snap cleanly to each full card (use `snapToInterval`/`pagingEnabled` on the horizontal `FlatList`/`ScrollView`, matching the card width + margin exactly).
+
+---
+
+## TASK 5 — Fix the Notification Screen: Duplicate Header & Duplicate Back Buttons
+
+**Problem (see screenshot):** The Notification screen currently shows the word "Notification" **twice**, stacked — once as a plain small header and again as a larger bold header with the "2 NEW" badge — and **two back arrow buttons**, one above the other. This looks broken.
+
+**Required fix:**
+- This is almost certainly caused by both a custom header component being rendered inside the screen AND React Navigation's default stack header being shown at the same time. Fix this by either:
+  - Disabling the default navigation header for this screen (`headerShown: false` in the screen's navigation options) and keeping only the custom header component, OR
+  - Removing the custom in-screen header and configuring the navigation stack's built-in header with the correct title, back button, and the "2 NEW" badge as a custom `headerRight` component.
+- End result must be **exactly one** back arrow and **exactly one** "Notification" title with the "2 NEW" pill badge, matching the clean single-header design from earlier reference screenshots.
+- Audit other screens for the same double-header bug (particularly the Location screen per Task 6 below, and Filter per Task 7) — this is likely a systemic issue, not isolated to Notifications, so check the navigation setup pattern used across all screens and fix it consistently everywhere it's duplicated.
+
+---
+
+## TASK 6 — Fix the Location Screen: Same Duplicate Header Issue
+
+**Problem (see screenshot):** The "Enter Your Location" screen shows the same duplicate-header bug — "Enter Your Location" appears as one header, then "Choose Location" appears again right below it as a second header with its own back arrow.
+
+**Required fix:**
+- Apply the same fix as Task 5: one screen, one header, one back button, one title. Decide on a single correct title for this screen (e.g. "Enter Your Location") and remove the duplicate "Choose Location" header entirely — don't stack two different header labels.
+- Below the single header: search input ("Search city or address..."), "Use current location" row with GPS icon, and a list of location results — this part of the screen is fine as shown, just remove the duplicate header above it.
+
+---
+
+## TASK 7 — Filter Bar/Buttons Not Functional
+
+**Problem:** The filter controls on the Explore/Search screens are currently not actually filtering anything — tapping filter options doesn't change the results.
+
+**Required fix:**
+- Wire up real local state for each filter control (Category selection, Price Range slider, Reviews rating radio, Available Date selection) so that changing any of them actually updates a `filters` state object.
+- On tapping "Apply" (see Task 8 for the new bottom-sheet behavior), apply these filters to the mock services/results data (filter the mock array in memory based on category match, price range bounds, minimum rating, and date availability) and re-render the results list with the filtered set.
+- "Reset Filter" must clear all filter state back to defaults and show the unfiltered full results list.
+- If a filter combination results in zero matches, show a proper empty state ("No services match your filters" + a "Reset Filter" shortcut) rather than a blank list.
+
+---
+
+## TASK 8 — Filter Should Open as a Bottom Sheet, Not However It Currently Opens
+
+**Problem:** Tapping the filter icon button currently doesn't open the polished, correct interaction pattern.
+
+**Required fix (see the attached reference screenshot of a rounded bottom-sheet filter panel):**
+- Tapping the filter icon (on Home, Explore, or Search results — wherever it appears) must open the Filter panel as a **bottom sheet**: sliding up smoothly from the bottom of the screen, covering roughly half the screen height by default, with **rounded top corners** and a small drag-handle bar centered at the top (matching the reference screenshot's rounded-top-sheet style with the drag indicator).
+- The sheet must be **draggable** — the user can drag the handle further up to see more content/filters, or drag down to dismiss it, with natural momentum/snapping (use a proper bottom-sheet library such as `@gorhom/bottom-sheet`, which is the standard for this kind of interaction in React Native, rather than a basic `Modal`).
+- Include a close (X) button in the top-right of the sheet as an alternative way to dismiss it, matching the reference screenshot.
+- A dimmed backdrop should appear behind the sheet while it's open, tapping the backdrop should dismiss the sheet (same as a cancel/no-change dismissal).
+- All filter controls (Category pills, Price Range slider, Reviews radio list, Available Date pills, Reset Filter / Apply buttons) live inside this bottom sheet, matching the layout already specified in earlier prompts — just corrected to open via this bottom-sheet pattern instead of however it currently opens.
+
+---
+
+## TASK 9 — Dashboard Needs an Actual Premium Feel (Not Flat/Hardcoded-Looking)
+
+**Problem:** The overall Dashboard currently feels flat, generic, and "hardcoded" rather than polished.
+
+**Required fix — apply across every section of the Home screen:**
+- Consistent card elevation/shadow treatment (subtle shadow, consistent corner radius across all cards — offer cards, category icons, service cards, badge card) so surfaces feel layered and intentional, not flat rectangles.
+- Consistent spacing rhythm between sections (equal vertical spacing between "Special For You," "Categories," "Earn Badges," "How It Works," "Popular Services," etc.) — audit for any section that's cramped or has inconsistent margins compared to the others.
+- Section headers (e.g. "Categories," "Popular Services") must have consistent typography weight/size and consistent "See all" link styling across every section — no section should look stylistically different from the others.
+- Apply the staggered fade/slide entrance animation (already specified in earlier prompts) consistently across every section so the whole screen feels alive on load, not static.
+- Make sure icons (category icons, badge icons, etc.) are crisp, consistently sized within their circular backgrounds, and use the same icon library/style throughout — no mismatched icon sets.
+
+---
+
+## TASK 10 — Fix the "Earn Badges" Section Styling
+
+**Problem:** The Earn Badges card currently doesn't look right/polished (see screenshot).
+
+**Required fix:**
+- Card should have a clean white/surface background with proper padding, rounded corners, and subtle shadow matching Task 9's card treatment.
+- Layout: title "Unlock Real Rewards" + subtitle "Complete jobs to climb the tiers" on the left, with the three badge tier icons (Bronze/Silver/Gold) clearly laid out on the right with their labels beneath each icon, properly aligned and evenly spaced (not cramped together).
+- Below that: a progress bar showing progress toward the next tier (e.g. "3/10 jobs to Silver") with the filled portion in the SkillBuddy green and the track in a light grey — smoothly animated when the value changes/loads.
+- "Earn Badges" section title + "Learn more" link in the section header, styled consistently with other section headers per Task 9.
+
+---
+
+## TASK 11 — Fix Dark Theme Colors: Must Stay On-Brand, Not Just Black/Grey
+
+**Problem:** In dark mode, the app is currently turning plain black/dark-grey everywhere, losing the SkillBuddy green brand color entirely.
+
+**Required fix:**
+- Dark theme must still clearly be a **SkillBuddy-branded dark theme**, not a generic black app. Keep the primary green as the primary accent color in dark mode too — used for buttons, active states, progress bars, badges, links, and the header background (the header can use a deeper/darker shade of the brand green rather than pure black, e.g. a darkened variant of the existing green, not desaturated to grey/black).
+- Background surfaces (cards, screen background) should shift to appropriate dark tones (near-black or dark charcoal for the base background, slightly lighter dark grey for elevated cards) — but every green accent element must remain visibly green, not converted to grey/white/black.
+- Update the theme-token system (from the earlier dark mode task) to define a proper dark-mode color palette with its own primary/background/surface/text tokens — rather than just inverting light-mode colors mathematically, which is likely why everything is going flat black/grey right now.
+- Re-test the paint-reveal theme transition animation after this fix to confirm it still works smoothly with the corrected color tokens.
+
+---
+
+## TASK 12 — Fix the Explore Screen to Match the Map + Pins + Cards Layout
+
+**Problem:** The current Explore screen implementation doesn't match the intended design.
+
+**Required fix (see attached reference screenshot of the correct Explore layout):**
+- **Top:** search bar ("Search Services") with a filter icon button beside it (opens the same bottom-sheet filter from Task 8), floating over the top of the map.
+- **Map area (majority of the screen):** an interactive map (`react-native-maps`) showing custom circular pin markers at service/provider locations within the visible area, with one larger marker (concentric circle / pulsing radius style, matching the reference) indicating the user's current location — this is the primary visual, not a placeholder or "Map view available on device" text (build the actual map component; if map rendering needs a native device/simulator to fully test, still implement the real `react-native-maps` integration rather than a text placeholder).
+- **Bottom:** horizontally scrollable service cards that overlap the bottom edge of the map (photo, star rating badge top-left, bookmark icon top-right, service title, provider name with small icon, price) — tapping a card should pan/center the map to that service's pin, and tapping a pin should scroll the card row to that service's card, keeping both in sync.
+- A small floating circular "center on my location" button should sit above the card row, bottom-right of the map area, matching the reference screenshot.
+- Bottom tab bar remains visible throughout with "Explore" shown as the active tab.
+
+---
+
+## REFERENCE — Categories Structure (per SkillBuddy module spec)
+
+Use this exact hierarchy for Category browsing on both Home and Explore (Category → Subservices → Service Details), and make sure mock category data reflects real category names rather than placeholders:
+
+- **Cleaning** → House Cleaning, Floor Cleaning, Office Cleaning, Carpet Cleaning
+- **Repairing** → (general handyman repair subservices)
+- **Plumbing** → (plumbing subservices)
+- **Shifting & Moving**, **Painting**, **Laundry**, **AC Repair**, **Car Repair** (and any others already in the mock data) should each similarly have a subservices list, even if using reasonable placeholder subservice names for now.
+
+Each service card (in Popular Services, Search Results, and Explore) should show: name, category, average price in EUR, and (per the spec) an equivalent credit points value shown alongside the price — add a small credit-points label next to the price on service cards if not already present (e.g. "$180.00 · 1800 pts", using the 1 EUR = 0.1 credit point... actually confirm the direction: since 1 Euro spent = 0.1 credit point *earned*, the displayed "equivalent points" on a price tag should be illustrative — show it as roughly 10 points per €1 spent for consistency, i.e. €180 ≈ 1800 points, matching the ratio, and note this can be adjusted once real backend pricing logic exists).
+
+---
+
+## SCOPE BOUNDARY
+
+Only touch the Home (Dashboard) and Explore screens today, plus the Notification and Location screens **only** to fix their duplicate-header bug (Tasks 5–6), and the Filter bottom sheet since it's shared across these screens (Tasks 7–8). Do not touch Login/Signup screens. Do not modify auth logic or navigation structure beyond what's needed to fix the duplicate-header bug. Fix every single item listed above — this list reflects real, specific problems from live testing, not general polish suggestions, so nothing here should be skipped or left partially done.

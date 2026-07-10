@@ -1,1 +1,2 @@
 - [SkillBuddy Expo setup](skillbuddy-expo.md) — react-native-maps must stay pinned at 1.18.0 for Expo Go; isolate via platform-specific component files to prevent web bundler failures.
+- [SkillBuddy logo](skillbuddy-logo.md) — use real PNG asset (assets/images/logo-icon.png, bg removed), rendered via LogoImage with tintColor prop (not style) for white/green/light variants.
