@@ -10,33 +10,24 @@ import type { Notification } from '@/types';
 
 function NotifItem({ item, index, c }: { item: Notification; index: number; c: any }) {
   const NOTIF_ICONS: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; bg: string; color: string }> = {
-    booking: { icon: 'event', bg: c.primaryLight, color: c.primary },
-    offer: { icon: 'local-offer', bg: '#FFF8E6', color: '#F39C12' },
-    review: { icon: 'star-border', bg: c.muted, color: c.mutedForeground },
-    payment: { icon: 'account-balance-wallet', bg: c.primaryLight, color: c.primary },
-    system: { icon: 'notifications', bg: c.muted, color: c.mutedForeground },
+    booking: { icon: 'event',                    bg: c.primaryLight,  color: c.primary },
+    offer:   { icon: 'local-offer',              bg: '#FFF8E6',       color: '#F39C12' },
+    review:  { icon: 'star-border',              bg: c.muted,         color: c.mutedForeground },
+    payment: { icon: 'account-balance-wallet',   bg: c.primaryLight,  color: c.primary },
+    system:  { icon: 'notifications',            bg: c.muted,         color: c.mutedForeground },
   };
   const meta = NOTIF_ICONS[item.type] ?? NOTIF_ICONS.system;
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 40).duration(300)}>
-      <View
-        style={[
-          styles.item,
-          { backgroundColor: !item.isRead ? c.primaryLight : c.surface },
-        ]}
-      >
+      <View style={[styles.item, { backgroundColor: !item.isRead ? c.primaryLight : c.surface }]}>
         <View style={[styles.notifIcon, { backgroundColor: meta.bg }]}>
           <MaterialIcons name={meta.icon} size={22} color={meta.color} />
         </View>
         <View style={styles.itemBody}>
           <View style={styles.itemTop}>
             <Text
-              style={[
-                styles.itemTitle,
-                { color: c.text },
-                !item.isRead && { fontFamily: 'Inter_700Bold' },
-              ]}
+              style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Inter_700Bold' }]}
             >
               {item.title}
             </Text>
@@ -59,7 +50,7 @@ export default function NotificationsScreen() {
   const unread = NOTIFICATIONS.filter((n) => !n.isRead).length;
 
   const sections = [
-    { title: 'TODAY', data: NOTIFICATIONS.filter((_, i) => i < 3) },
+    { title: 'TODAY',     data: NOTIFICATIONS.filter((_, i) => i < 3) },
     { title: 'YESTERDAY', data: NOTIFICATIONS.filter((_, i) => i >= 3) },
   ];
 
@@ -67,8 +58,18 @@ export default function NotificationsScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface }]}>
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border, paddingTop: insets.top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()}>
+      {/*
+        ── Safe-area spacer ────────────────────────────────────────────────────
+        A dedicated View sized exactly to insets.top pushes ALL header content
+        safely below the notch / dynamic island on any device.
+        This is more reliable than mixing paddingTop + paddingVertical in the
+        same style array (RN style merging can silently drop one of them).
+      */}
+      <View style={{ height: insets.top, backgroundColor: c.surface }} />
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Feather name="arrow-left" size={22} color={c.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: c.text }]}>Notification</Text>
@@ -83,10 +84,10 @@ export default function NotificationsScreen() {
         sections={sections}
         keyExtractor={(n) => n.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         renderSectionHeader={({ section }) => (
-          <View style={[styles.sectionHeader, { backgroundColor: c.background }]}>
-            <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{section.title}</Text>
+          <View style={[styles.sectionHdr, { backgroundColor: c.background }]}>
+            <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>{section.title}</Text>
             <TouchableOpacity>
               <Text style={[styles.markAll, { color: c.primary }]}>Mark all as read</Text>
             </TouchableOpacity>
@@ -96,7 +97,7 @@ export default function NotificationsScreen() {
           const idx = globalIdx++;
           return <NotifItem item={item} index={idx} c={c} />;
         }}
-        ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: c.border }]} />}
+        ItemSeparatorComponent={() => <View style={[styles.sep, { backgroundColor: c.border }]} />}
       />
     </View>
   );
@@ -104,39 +105,65 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+
+  // header — NO paddingVertical here; vertical spacing is set explicitly below
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
     gap: 12,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: { flex: 1, fontFamily: 'Inter_700Bold', fontSize: 20 },
   badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   badgeText: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#FFF' },
-  sectionHeader: {
+
+  sectionHdr: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
+  sectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
   markAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
     gap: 14,
   },
-  notifIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  notifIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   itemBody: { flex: 1 },
-  itemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  itemTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
   itemTitle: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14, marginRight: 8 },
   itemTime: { fontFamily: 'Inter_400Regular', fontSize: 12, flexShrink: 0 },
   itemMsg: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4, flexShrink: 0 },
-  separator: { height: 1 },
+  sep: { height: StyleSheet.hairlineWidth },
 });

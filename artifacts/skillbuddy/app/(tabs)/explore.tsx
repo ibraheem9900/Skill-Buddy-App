@@ -1,3 +1,17 @@
+/**
+ * Explore screen — full-screen map with overlaid search bar and bottom card row.
+ *
+ * Layout:
+ *   • Map fills the whole screen (absolute fill)
+ *   • Search bar floats at the top (absolute, below safe-area inset)
+ *   • Bottom panel is positioned above the tab bar with correct offset
+ *
+ * Platform strategy:
+ *   • Metro automatically resolves `@/components/ExploreMap` →
+ *       ExploreMap.native.tsx  on iOS / Android
+ *       ExploreMap.tsx         on Web
+ *   • No explicit .native import anywhere in this file → web bundler is safe.
+ */
 import React, { useCallback, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -17,19 +31,24 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { SERVICES } from '@/data/mockData';
 import type { Service } from '@/types';
-// Metro automatically picks ExploreMap.native.tsx on device, ExploreMap.tsx on web
+// Metro picks ExploreMap.native.tsx on device, ExploreMap.tsx on web
 import ExploreMap from '@/components/ExploreMap';
 
-// ─── Mock coordinates (Riga, Latvia) ─────────────────────────────────────────
-const USER_LOCATION = { latitude: 56.9496, longitude: 24.1052 };
+// ─── Constants ────────────────────────────────────────────────────────────────
+const { width: SCREEN_W } = Dimensions.get('window');
+const CARD_W   = 220;
+const CARD_GAP = 12;
+// Tab bar is absolute-positioned; we must reserve its height explicitly
+const TAB_BAR_H = Platform.OS === 'web' ? 84 : 60;
 
+// ─── Mock coordinates around Riga, Latvia ────────────────────────────────────
+const USER_LOCATION  = { latitude: 56.9496, longitude: 24.1052 };
 const INITIAL_REGION = {
   latitude: 56.9496,
   longitude: 24.1052,
   latitudeDelta: 0.035,
   longitudeDelta: 0.035,
 };
-
 const SERVICE_COORDS: Record<string, { latitude: number; longitude: number }> = {
   s1: { latitude: 56.9450, longitude: 24.1100 },
   s2: { latitude: 56.9520, longitude: 24.0980 },
@@ -39,11 +58,7 @@ const SERVICE_COORDS: Record<string, { latitude: number; longitude: number }> = 
   s6: { latitude: 56.9500, longitude: 24.0850 },
 };
 
-const { width: SCREEN_W } = Dimensions.get('window');
-const CARD_W = 220;
-const CARD_GAP = 12;
-
-// ─── Mini service card ────────────────────────────────────────────────────────
+// ─── Service card ─────────────────────────────────────────────────────────────
 function ExploreCard({
   service,
   selected,
@@ -61,15 +76,15 @@ function ExploreCard({
         {
           backgroundColor: c.card,
           borderColor: selected ? c.primary : c.border,
-          borderWidth: selected ? 2 : 1,
+          borderWidth: selected ? 2 : StyleSheet.hairlineWidth,
         },
       ]}
       onPress={onPress}
-      activeOpacity={0.85}
+      activeOpacity={0.88}
     >
       <View style={styles.cardImgWrap}>
         <Image source={{ uri: service.image }} style={styles.cardImg} />
-        <View style={[styles.ratingBadge, { backgroundColor: 'rgba(0,0,0,0.55)' }]}>
+        <View style={styles.ratingBadge}>
           <MaterialIcons name="star" size={10} color="#FFB800" />
           <Text style={styles.ratingText}>{service.rating.toFixed(1)}</Text>
         </View>
@@ -78,8 +93,8 @@ function ExploreCard({
         <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={1}>
           {service.title}
         </Text>
-        <View style={styles.cardProviderRow}>
-          <MaterialIcons name="person" size={12} color={c.mutedForeground} />
+        <View style={styles.cardRow}>
+          <MaterialIcons name="person" size={11} color={c.mutedForeground} />
           <Text style={[styles.cardProvider, { color: c.mutedForeground }]} numberOfLines={1}>
             {service.provider.name}
           </Text>
@@ -93,14 +108,14 @@ function ExploreCard({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const router  = useRouter();
   const { colors: c } = useTheme();
-  const [query, setQuery] = useState('');
+
+  const [query,      setQuery]      = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // mapRef is typed as any to avoid importing MapView type on web
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapRef = useRef<any>(null);
+  const mapRef      = useRef<any>(null);
   const flatListRef = useRef<FlatList<Service>>(null);
 
   const filtered = SERVICES.filter(
@@ -110,6 +125,12 @@ export default function ExploreScreen() {
       s.category.toLowerCase().includes(query.toLowerCase()),
   );
 
+  const pins = filtered.map((s) => ({
+    id: s.id,
+    coordinate: SERVICE_COORDS[s.id] ?? USER_LOCATION,
+  }));
+
+  // Marker tapped → scroll card list to that service
   const handleMarkerPress = useCallback(
     (id: string) => {
       setSelectedId(id);
@@ -121,19 +142,23 @@ export default function ExploreScreen() {
     [filtered],
   );
 
+  // Card tapped → pan map to that service's pin
   const handleCardPress = useCallback((service: Service) => {
     setSelectedId(service.id);
-    const coord = SERVICE_COORDS[service.id];
-    if (coord && mapRef.current && Platform.OS !== 'web') {
-      mapRef.current.animateToRegion(
-        { ...coord, latitudeDelta: 0.018, longitudeDelta: 0.018 },
-        500,
-      );
+    if (Platform.OS !== 'web') {
+      const coord = SERVICE_COORDS[service.id];
+      if (coord && mapRef.current) {
+        mapRef.current.animateToRegion(
+          { ...coord, latitudeDelta: 0.018, longitudeDelta: 0.018 },
+          500,
+        );
+      }
     }
   }, []);
 
+  // FAB → re-center on user location
   const handleCenter = useCallback(() => {
-    if (mapRef.current && Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && mapRef.current) {
       mapRef.current.animateToRegion(
         { ...USER_LOCATION, latitudeDelta: 0.035, longitudeDelta: 0.035 },
         500,
@@ -141,14 +166,13 @@ export default function ExploreScreen() {
     }
   }, []);
 
-  const pins = filtered.map((s) => ({
-    id: s.id,
-    coordinate: SERVICE_COORDS[s.id] ?? USER_LOCATION,
-  }));
+  // The bottom panel height: cards (≈175px) + panel chrome (≈60px)
+  const PANEL_H = 235;
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      {/* Map — fills the background */}
+
+      {/* ── Map — absolute fill ─────────────────────────────────────────────── */}
       <View style={StyleSheet.absoluteFillObject}>
         <ExploreMap
           ref={mapRef}
@@ -161,7 +185,7 @@ export default function ExploreScreen() {
         />
       </View>
 
-      {/* Search bar overlay */}
+      {/* ── Search bar — floats over map below status bar ───────────────────── */}
       <Animated.View
         entering={FadeInDown.duration(350)}
         style={[styles.searchOverlay, { top: insets.top + 10 }]}
@@ -190,8 +214,17 @@ export default function ExploreScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Bottom service-card panel */}
-      <View style={[styles.bottomPanel, { backgroundColor: c.card }]}>
+      {/* ── Bottom panel — positioned above the floating tab bar ───────────── */}
+      <View
+        style={[
+          styles.bottomPanel,
+          {
+            backgroundColor: c.card,
+            // Sit exactly on top of the absolute tab bar
+            bottom: TAB_BAR_H,
+          },
+        ]}
+      >
         <View style={[styles.panelHandle, { backgroundColor: c.border }]} />
 
         <View style={styles.panelHeader}>
@@ -211,11 +244,7 @@ export default function ExploreScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={{
-            paddingHorizontal: 16,
-            gap: CARD_GAP,
-            paddingBottom: insets.bottom + 8,
-          }}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: CARD_GAP, paddingBottom: 12 }}
           snapToInterval={CARD_W + CARD_GAP}
           decelerationRate="fast"
           getItemLayout={(_, index) => ({
@@ -245,6 +274,8 @@ export default function ExploreScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+
+  // ── Search overlay
   searchOverlay: {
     position: 'absolute',
     left: 16,
@@ -260,11 +291,11 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 11,
-    elevation: 5,
+    paddingVertical: 12,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.14,
     shadowRadius: 8,
   },
   searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
@@ -274,18 +305,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  // ── Bottom panel
   bottomPanel: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 10,
-    elevation: 12,
+    elevation: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.14,
     shadowRadius: 12,
   },
   panelHandle: {
@@ -303,8 +335,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   panelTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
-  clearBtn: { fontFamily: 'Inter_500Medium', fontSize: 13 },
-  // Cards
+  clearBtn:   { fontFamily: 'Inter_500Medium', fontSize: 13 },
+
+  // ── Cards
   card: {
     width: CARD_W,
     borderRadius: 16,
@@ -316,14 +349,15 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardImgWrap: { position: 'relative' },
-  cardImg: { width: '100%', height: 110 },
+  cardImg: { width: '100%', height: 105 },
   ratingBadge: {
     position: 'absolute',
-    top: 8,
-    left: 8,
+    top: 7,
+    left: 7,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
+    backgroundColor: 'rgba(0,0,0,0.52)',
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -331,9 +365,10 @@ const styles = StyleSheet.create({
   ratingText: { fontFamily: 'Inter_700Bold', fontSize: 10, color: '#FFF' },
   cardBody: { padding: 10, gap: 3 },
   cardTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
-  cardProviderRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardProvider: { fontFamily: 'Inter_400Regular', fontSize: 11, flex: 1 },
   cardPrice: { fontFamily: 'Inter_700Bold', fontSize: 14, marginTop: 2 },
+
   emptyWrap: { alignItems: 'center', paddingVertical: 24 },
   emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
 });

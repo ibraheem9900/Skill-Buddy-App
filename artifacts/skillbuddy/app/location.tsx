@@ -14,12 +14,12 @@ import { useTheme } from '@/context/ThemeContext';
 
 const SUGGESTIONS = [
   { id: '1', name: 'Tallinn City Center', sub: 'Tallinn, Estonia' },
-  { id: '2', name: 'Riga Old Town', sub: 'Riga, Latvia' },
-  { id: '3', name: 'Vilnius Old Town', sub: 'Vilnius, Lithuania' },
-  { id: '4', name: 'Tartu', sub: 'Tartu, Estonia' },
-  { id: '5', name: 'Pärnu', sub: 'Pärnu, Estonia' },
-  { id: '6', name: 'Kaunas', sub: 'Kaunas, Lithuania' },
-  { id: '7', name: 'Jūrmala', sub: 'Jūrmala, Latvia' },
+  { id: '2', name: 'Riga Old Town',        sub: 'Riga, Latvia' },
+  { id: '3', name: 'Vilnius Old Town',     sub: 'Vilnius, Lithuania' },
+  { id: '4', name: 'Tartu',               sub: 'Tartu, Estonia' },
+  { id: '5', name: 'Pärnu',              sub: 'Pärnu, Estonia' },
+  { id: '6', name: 'Kaunas',              sub: 'Kaunas, Lithuania' },
+  { id: '7', name: 'Jūrmala',            sub: 'Jūrmala, Latvia' },
 ];
 
 export default function LocationScreen() {
@@ -32,26 +32,35 @@ export default function LocationScreen() {
     ? SUGGESTIONS.filter(
         (s) =>
           s.name.toLowerCase().includes(query.toLowerCase()) ||
-          s.sub.toLowerCase().includes(query.toLowerCase())
+          s.sub.toLowerCase().includes(query.toLowerCase()),
       )
     : SUGGESTIONS;
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: c.border, paddingTop: insets.top + 6 }]}>
+      {/*
+        ── Safe-area spacer ────────────────────────────────────────────────────
+        Explicit View with height = insets.top ensures the header content sits
+        safely below the notch/status bar on every device — no padding conflicts.
+      */}
+      <View style={{ height: insets.top, backgroundColor: c.background }} />
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <View style={[styles.header, { borderBottomColor: c.border }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={[styles.backBtn, { backgroundColor: c.muted }]}
         >
           <Feather name="arrow-left" size={20} color={c.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: c.text }]}>Enter Your Location</Text>
+        <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
+          Enter Your Location
+        </Text>
       </View>
 
-      {/* Search bar */}
+      {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <View style={[styles.searchRow, { backgroundColor: c.muted }]}>
-        <Feather name="search" size={18} color={c.mutedForeground} style={{ marginLeft: 14 }} />
+        <Feather name="search" size={18} color={c.mutedForeground} style={styles.searchIcon} />
         <TextInput
           style={[styles.input, { color: c.text }]}
           placeholder="Search city or address…"
@@ -63,18 +72,14 @@ export default function LocationScreen() {
           underlineColorAndroid="transparent"
         />
         {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery('')} style={{ marginRight: 12 }}>
+          <TouchableOpacity onPress={() => setQuery('')} style={styles.clearBtn}>
             <Feather name="x-circle" size={18} color={c.mutedForeground} />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Use current location */}
-      <TouchableOpacity
-        style={[styles.currentRow]}
-        onPress={() => router.back()}
-        activeOpacity={0.7}
-      >
+      {/* ── Use current location ────────────────────────────────────────────── */}
+      <TouchableOpacity style={styles.currentRow} onPress={() => router.back()} activeOpacity={0.7}>
         <View style={[styles.currentIcon, { backgroundColor: c.primaryLight }]}>
           <MaterialIcons name="my-location" size={18} color={c.primary} />
         </View>
@@ -87,7 +92,7 @@ export default function LocationScreen() {
 
       <View style={[styles.divider, { backgroundColor: c.border }]} />
 
-      {/* Results list */}
+      {/* ── Results ─────────────────────────────────────────────────────────── */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
@@ -102,11 +107,7 @@ export default function LocationScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.resultRow}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.resultRow} onPress={() => router.back()} activeOpacity={0.7}>
             <View style={[styles.resultIcon, { backgroundColor: c.muted }]}>
               <MaterialIcons name="place" size={18} color={c.mutedForeground} />
             </View>
@@ -117,7 +118,9 @@ export default function LocationScreen() {
             <Feather name="chevron-right" size={16} color={c.mutedForeground} />
           </TouchableOpacity>
         )}
-        ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: c.border }]} />}
+        ItemSeparatorComponent={() => (
+          <View style={[styles.sep, { backgroundColor: c.border }]} />
+        )}
       />
     </View>
   );
@@ -125,11 +128,14 @@ export default function LocationScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+
+  // Single horizontal row: back btn + title, NO paddingVertical shorthand
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -139,29 +145,39 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+  title: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+    flex: 1,
+  },
+
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
+    marginTop: 14,
+    marginBottom: 4,
     borderRadius: 14,
-    gap: 8,
+    overflow: 'hidden',
   },
+  searchIcon: { marginLeft: 14 },
   input: {
     flex: 1,
-    paddingVertical: 12,
-    paddingRight: 4,
+    paddingVertical: 13,
+    paddingHorizontal: 8,
     fontFamily: 'Inter_400Regular',
     fontSize: 15,
   },
+  clearBtn: { paddingHorizontal: 12 },
+
   currentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
     gap: 12,
   },
   currentIcon: {
@@ -173,12 +189,15 @@ const styles = StyleSheet.create({
   },
   currentLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
   currentSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
-  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16, marginBottom: 8 },
+
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16, marginBottom: 4 },
+
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
     gap: 12,
   },
   resultIcon: {
@@ -190,7 +209,8 @@ const styles = StyleSheet.create({
   },
   resultName: { fontFamily: 'Inter_500Medium', fontSize: 14 },
   resultSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
-  separator: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+
+  sep: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
   empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
   emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
 });
