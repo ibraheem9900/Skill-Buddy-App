@@ -111,7 +111,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 8 }]}>
         {/* Logo + notification row */}
         <View style={styles.logoRow}>
-          <LogoImage variant="white" height={30} />
+          <LogoImage variant="white" height={42} />
           <TouchableOpacity
             style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
             onPress={() => router.push('/notifications')}
@@ -146,7 +146,7 @@ export default function HomeScreen() {
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: TAB_H + insets.bottom + 8 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} colors={[c.primary]} />
         }

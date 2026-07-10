@@ -1,0 +1,125 @@
+CONTEXT
+
+This is a direct follow-up to the previous Dashboard/Explore fix prompt. Testing the latest build shows: the logo is still wrong, the bottom gap is still not fixed, the Explore screen has not been touched at all (still showing the old placeholder), and the Notification/Location screens now have a new problem — their headers collide with the device's camera cutout/notch because of missing safe-area spacing. Fix all of this now, properly, and actually verify each one before considering it complete.
+
+
+TASK 1 — Logo Size Still Wrong
+
+Problem: The logo icon in the Home header is too small/thin and doesn't read clearly as the brand mark.
+
+Required fix:
+
+
+Increase the logo icon's size in the Home header to a clearly visible, properly proportioned size (test around 40–44px — large enough to be legible and recognizable as the SkillBuddy mark, not a thin sliver).
+Keep it using the exact provided icon asset (per the previous prompt — do not redraw it), just corrected to a proper display size.
+Confirm it sits vertically centered and aligned properly next to the location text below it and the notification bell beside it — the whole header row (logo, location, bell) should look balanced, not lopsided.
+
+
+
+TASK 2 — Bottom White Gap on Home Screen — STILL NOT FIXED
+
+Problem: This has now been reported twice and is still present. The previous fix attempt did not work.
+
+Required fix — be thorough this time:
+
+
+Do not guess — actually inspect the rendered layout tree. Common causes to check specifically:
+
+Is the screen's root container using flex: 1 combined with a ScrollView that also has flex: 1 on its content container? (This combination often forces the scroll content to stretch to fill the screen height even when content is shorter, creating dead space below content when content is short, or clipping when content is long — the fix is to NOT set flexGrow/flex on the scroll content container, and instead let it size to its natural content height.)
+Is there a fixed-height View (e.g. an old placeholder spacer, or a leftover minHeight: '100%' or similar) still present below the last real section (Popular Services / testimonials)?
+Is the bottom tab bar's height being reserved twice — once by React Navigation's tab bar automatically, and again by manual paddingBottom added in the screen?
+
+
+
+After identifying and fixing the actual cause, confirm the screen now ends naturally right after the last content section with only small, consistent bottom padding (e.g. 16–24px) — no large empty area.
+Test by adding/removing a mock section temporarily to confirm the scroll content height responds correctly to content length (proving it's not hardcoded).
+
+
+
+TASK 3 — Notification Screen: Header Now Collides With Camera Cutout/Notch (New Issue)
+
+Problem (see screenshot): The duplicate-header bug from before is now fixed (good — only one header shows now), but the single remaining header sits too high — the "Notification" title text is now partially covered by the device's camera cutout/notch at the top of the screen, because there's no safe-area top padding on this screen.
+
+Required fix:
+
+
+Add proper useSafeAreaInsets() top padding to this screen's header (same fix already applied correctly on the Home screen — replicate that exact pattern here) so the back arrow, "Notification" title, and "2 NEW" badge sit safely below the notch/status bar with clean spacing above them, never overlapping the device's camera cutout.
+Double check the header background/spacing looks intentional (proper padding on all sides of the header row), not just pushed down as a minimal patch.
+
+
+
+TASK 4 — Location Screen: Same Notch Collision + Header Layout Issue
+
+Problem (see screenshot): Same root cause as Task 3 — "Enter Your Location" title is colliding with/wrapping awkwardly around the camera cutout because of missing safe-area top padding. Additionally, the header layout is inconsistent: the back arrow and title currently appear to wrap onto two lines / sit oddly separated, unlike the clean single-row header style used elsewhere (back arrow + title on one horizontal row).
+
+Required fix:
+
+
+Apply the same useSafeAreaInsets() top padding fix as Task 3.
+Fix the header layout to a single horizontal row: back arrow on the left, "Enter Your Location" title next to it, vertically centered together — matching the clean header style used on other screens (e.g. the corrected Notification screen), not wrapping the title to two lines.
+Also fix the search input's current styling — it's showing a heavy black border that looks like an unintended focus/outline style; give it the same soft grey rounded input styling used elsewhere in the app (light grey background or thin light-grey border, not a bold black outline), consistent with the search bars on Home/Explore.
+
+
+
+TASK 5 — Explore Screen: Not Implemented Yet — This Still Needs to Be Built
+
+Problem: The Explore screen is completely unchanged from before — it still shows the plain "Map view available on device" text placeholder instead of an actual map. This task was specified in detail in the previous prompt and needs to actually be built now.
+
+Required fix — implement fully this time:
+
+
+Install and set up react-native-maps (with Expo's config plugin if using Expo, via expo install react-native-maps) — this is a real, buildable dependency, not something that only "works on device" as an excuse to skip it. It renders in Expo Go / development builds on both iOS and Android simulators/devices.
+Build the actual map view: a MapView component filling the majority of the screen below the search bar, centered on a mock/default location (e.g. Riga, Latvia coordinates, matching the location shown elsewhere in the app), with:
+
+Multiple custom circular pin Marker components at nearby mock service locations (use 4–6 mock coordinates spread around the center point).
+One larger, visually distinct marker (e.g. a custom marker component with a pulsing/concentric-circle style, using a simple Reanimated scale-pulse animation) representing the user's current location at the center.
+
+
+
+Below/overlapping the bottom of the map: keep the existing horizontally scrollable service cards (photo, rating badge, bookmark icon, title, provider, price) — but now wire tapping a card to animate the map region (mapRef.current.animateToRegion(...)) to center on that service's coordinate, and tapping a marker to scroll the card list to the matching card.
+Add the floating circular "center on my location" button, bottom-right of the map, above the card row.
+Remove the "Map view available on device" placeholder text entirely — it should never appear again; the real map must render in its place.
+If there's a genuine technical blocker preventing react-native-maps from rendering in this specific environment, do not silently fall back to a text placeholder — instead clearly report the specific error/limitation encountered so it can be addressed, rather than leaving a placeholder in the final product.
+
+
+
+TASK 6 — Dark Theme Still Showing Generic Colors — Not Actually Fixed
+
+Problem: This was raised in the previous prompt and is still unresolved — dark mode still shows plain/generic dark colors instead of a proper SkillBuddy-branded dark palette with the green accent preserved.
+
+Required fix — this time define and apply an explicit dark palette:
+
+
+Create explicit, named dark-mode color tokens (not a mathematical inversion of light-mode tokens). Suggested palette to implement:
+
+background: near-black/dark charcoal (e.g. #121212 or similar)
+surface (cards): slightly lighter dark grey (e.g. #1E1E1E)
+primary (brand green — must remain clearly green in dark mode): a slightly brightened/adjusted version of the light-mode SkillBuddy green so it stays vibrant and legible on dark backgrounds (do not let this become desaturated grey)
+primaryHeaderBackground: a deep, darkened shade of the brand green (not pure black) for headers/hero areas that use the green background in light mode
+textPrimary: near-white
+textSecondary: light grey
+border/divider: subtle dark grey
+
+
+
+Go through every themed screen/component (Home header, cards, buttons, badges, progress bars, bottom tab bar, bottom sheet) and confirm each one is actually pulling from these new tokens — audit for any component still using a hardcoded light-mode color or a raw black/grey value instead of the token system.
+After this fix, toggling dark mode should clearly still look like SkillBuddy (green accents visible throughout — buttons, active tab, progress bars, links), just adapted for a dark background — not a generic black-and-white dark mode.
+Re-verify the paint-reveal transition animation still works correctly with the corrected palette.
+
+
+
+VERIFICATION CHECKLIST — Confirm Each Before Reporting Done
+
+
+ Logo is clearly visible and properly sized in the Home header
+ No empty gap at the bottom of the Home screen — content ends naturally
+ Notification screen header sits safely below the notch, single clean header row
+ Location screen header sits safely below the notch, single clean header row, search input styling corrected
+ Explore screen shows a real interactive map with pins, synced to the service card row, "center on my location" button present — placeholder text is gone
+ Dark mode clearly preserves the SkillBuddy green brand color throughout — not generic black/grey
+
+
+
+SCOPE BOUNDARY
+
+Only touch Home, Explore, Notification, and Location screens, plus the shared theme token system for Task 6. Do not touch Login/Signup. This is a bug-fix pass on previously-specified work — prioritize actually completing and verifying each item over adding anything new.

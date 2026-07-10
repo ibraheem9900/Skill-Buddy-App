@@ -37,9 +37,9 @@ export default function LocationScreen() {
     : SUGGESTIONS;
 
   return (
-    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+    <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: c.border }]}>
+      <View style={[styles.header, { borderBottomColor: c.border, paddingTop: insets.top + 6 }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={[styles.backBtn, { backgroundColor: c.muted }]}
@@ -60,6 +60,7 @@ export default function LocationScreen() {
           onChangeText={setQuery}
           autoFocus
           returnKeyType="search"
+          underlineColorAndroid="transparent"
         />
         {query.length > 0 && (
           <TouchableOpacity onPress={() => setQuery('')} style={{ marginRight: 12 }}>

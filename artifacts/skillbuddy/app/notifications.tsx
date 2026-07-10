@@ -66,8 +66,8 @@ export default function NotificationsScreen() {
   let globalIdx = 0;
 
   return (
-    <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+    <View style={[styles.root, { backgroundColor: c.surface }]}>
+      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border, paddingTop: insets.top + 6 }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Feather name="arrow-left" size={22} color={c.text} />
         </TouchableOpacity>
