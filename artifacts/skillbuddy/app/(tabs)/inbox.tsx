@@ -8,7 +8,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { CHAT_THREADS } from '@/data/mockData';
 import EmptyState from '@/components/EmptyState';
 
-export default function ChatScreen() {
+export default function InboxScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();

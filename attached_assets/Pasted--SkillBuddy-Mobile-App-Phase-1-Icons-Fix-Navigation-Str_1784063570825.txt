@@ -1,0 +1,122 @@
+# SkillBuddy Mobile App — Phase 1: Icons Fix, Navigation Structure, Dashboard & Services (Replit Prompt)
+
+Copy everything below this line into Replit AI / your dev agent. This is Phase 1 of a larger module-by-module build following the attached SkillBuddy module specification document exactly — attach that document to this prompt as well, and refer back to it for any detail not fully spelled out here.
+
+---
+
+## CONTEXT
+
+This app is being built module-by-module against a detailed specification document. Phase 1 covers: fixing the critical bug where icons aren't rendering at all on-device, adding proper loaders and page-transition animations, correcting the bottom navigation structure, fully building out the Dashboard (Home) screen per Module 1B/2, and building the Services section per Module 3. Every detail below must match the specification precisely — this is not a rough approximation pass, it's a precise implementation pass.
+
+---
+
+## TASK 1 — CRITICAL: Fix Icons Not Rendering on Device (iOS & Android)
+
+**Problem:** Icons are currently not showing up at all when running the app on a real phone (both iOS and Android need to be confirmed working).
+
+**Required fix — diagnose and fix properly:**
+- If using `lucide-react-native` or `@expo/vector-icons`, confirm the icon font is actually being loaded before first render. For `@expo/vector-icons`, fonts are usually bundled automatically with Expo, but if using `lucide-react-native` or another SVG-based icon set, confirm the package is correctly installed and that no font-loading step (`expo-font` / `useFonts`) is missing — SVG-based icon libraries like `lucide-react-native` don't need font loading at all, so if icons are missing there, check for incorrect import paths, wrong prop names (e.g. `size`/`color` vs `width`/`height`), or a version mismatch with the installed React Native/Expo SDK version.
+- Check that this isn't a Metro bundler cache issue — try a clean start (`expo start -c`) to rule out stale bundling.
+- Check that any icon component isn't accidentally rendering with `color="transparent"`, `opacity: 0`, or zero `size` inherited from a broken theme-token reference (especially if this broke around the same time as the dark mode theme-token work from a previous phase — check whether icon `color` props are pulling from a theme token that's now undefined/broken).
+- Verify the fix by confirming icons render correctly in a physical device build or Expo Go on both an iOS and an Android device/simulator — not just in a web preview, since icon rendering issues often differ between web and native.
+- This is blocking essentially all other visual work, so treat it as the highest priority item in this pass.
+
+---
+
+## TASK 2 — Loaders & Smooth Page-Transition Animations with the SkillBuddy Icon
+
+**Required additions:**
+- **Loaders:** Add skeleton/shimmer loaders for any screen fetching data (Dashboard sections, Services list, Job list once built in Phase 2) instead of blank screens or generic spinners — consistent shimmer style (light grey animated gradient sweep) across the app.
+- **Page-transition animations:** Implement smooth, consistent transition animations between screens app-wide (stack push/pop, tab switches) using React Navigation's transition config, tuned to feel snappy and native, not default/abrupt.
+- **Branded loading moments:** For longer loading states (initial app load/splash, or any full-screen loading state), use the SkillBuddy icon (the exact provided logo asset — do not redraw it) with a subtle animation (e.g. a gentle pulse, fade, or rotation loop using `react-native-reanimated`) as a branded loading indicator, rather than a generic platform spinner — this reinforces brand identity during wait states.
+
+---
+
+## TASK 3 — Fix Logo Size on Dashboard Header (Still Needs Correcting)
+
+- The logo icon in the Home/Dashboard header must be clearly visible and properly sized (not the thin/tiny version seen previously) — confirm this explicitly as part of this phase since it was reported as unresolved before.
+- Use the exact provided logo asset file, sized appropriately (~40–44px), positioned with proper safe-area top padding so it never collides with the device notch/status bar.
+
+---
+
+## TASK 4 — Correct Bottom Navigation Structure
+
+**Required structure — exactly 5 tabs, in this order:**
+1. **Home** (Dashboard)
+2. **Services**
+3. **Jobs**
+4. **Inbox**
+5. **Profile**
+
+- Replace whatever tab set currently exists (Explore/Bookmark/Chat/Book, etc. from earlier design-reference passes) with this exact 5-tab structure — this matches the actual product specification, not the earlier generic template screenshots used for visual style reference only.
+- Each tab icon must be a proper, appropriate icon (Home icon, a services/grid icon, a briefcase/job icon, a chat/inbox icon, a person/profile icon) using the now-fixed icon system from Task 1.
+- Active tab shown in the SkillBuddy green (icon + label), inactive tabs in muted grey, consistent with the existing tab bar visual style already established (rounded active-tab background treatment).
+- **Critical:** ensure the tab bar respects safe-area bottom insets on both platforms so it never overlaps or gets obscured by the iOS home-indicator gesture bar or the Android gesture navigation bar — use `useSafeAreaInsets()` bottom value to add appropriate bottom padding/height to the tab bar itself, tested on both a notch-style iPhone and a modern gesture-nav Android device.
+- Note: Wallet-related information (per the spec) lives inside the Profile section's Payment/Wallet area (Task 6, to be fully built in Phase 2) rather than as its own separate tab.
+
+---
+
+## TASK 5 — Dashboard (Home Screen) — Full Build Per Module 1B & 2
+
+Rebuild the Home screen to include every element specified below. Use mock data structured realistically (a mock "current user" object, mock past bookings, mock popular services) so the logic described below can be demonstrated even without live backend data yet.
+
+**Required elements, top to bottom:**
+
+1. **Header** (green background, safe-area aware per Task 3): small logo icon, location selector ("Riga, Latvia" style, tappable), notification bell with unread-count badge (tappable → Notifications screen), search bar with filter icon beside it.
+
+2. **Welcome banner**: "Welcome back, [User's Name]" style greeting using the mock logged-in user's name — must feel personalized, not generic.
+
+3. **Credit Points balance**: a compact card/banner showing the user's current credit points balance (mock value), with the note that 1 point is earned per €1 spent — styled as a clean stat card, not just plain text.
+
+4. **Quick-access tiles**: four tappable tiles/cards for **Browse Services**, **My Bookings**, **Chat**, **Profile** — each navigating to the corresponding section. Use clear icons + labels, laid out as a clean row or 2x2 grid depending on what fits the existing visual style best.
+
+5. **"Special For You" offers carousel**: swipeable promo cards (already built in a previous phase — keep this, just confirm it still shows one full card at a time, matching the earlier fix).
+
+6. **Categories section**: horizontal scrollable row of category icons — **use the real category list from the module spec** (Cleaning, Repairing, Plumbing, Shifting & Moving, Painting, Laundry, AC Repair, Car Repair, Beauty, Pets, Photography, Babysitting, Barbering, Dog Training, Party Organizing, and any others implied by the spec's examples) with **appropriate, recognizable icons per category** and a subtle **icon micro-animation** on tap (e.g. a small bounce/scale pulse when pressed) for tactile feedback. "See all" link navigates to the full Category Gallery (Task 7).
+
+7. **Personalized / Popular Services section**: 
+   - **If the mock user has past bookings**, show services related to those past bookings' categories (e.g. if they've booked Cleaning before, prioritize showing more Cleaning-related services here).
+   - **If the mock user is new with no booking history**, fall back to showing the most popular services overall (highest mock rating/review count), rather than an empty or generic section.
+   - Implement this as a simple conditional function against the mock data so the logic is real and demonstrable (`getPersonalizedServices(user, allServices)` style function), not hardcoded to always show the same thing regardless of user state.
+
+8. **SkillBuddy Specialties / "Why Us" section**: adapt the web app's "What Makes Us Special" section (Built on Trust, Verified Experts, Transparent Pricing, etc.) into a mobile-friendly card format — reference the earlier web homepage screenshots for exact copy/content, adapted visually to fit mobile (e.g. a vertical stack of 3–4 feature cards with icon + title + short description, or a horizontal swipeable version).
+
+9. **Offers section**: a section similar to the web's "Special offers, just for you" / Badges promotional content — can reuse/extend the existing "Earn Badges" card from the previous phase, plus one additional offer-style card if it fits naturally (e.g. a referral/invite-friends style card, adapting the general concept from the web without copying unrelated branding).
+
+10. **Bottom padding**: confirm the screen still ends cleanly after the last section with no dead empty space (this was a recurring bug in earlier phases — verify it's still correctly fixed after adding these new sections).
+
+- Apply the staggered fade/slide entrance animation consistently to every section listed above.
+- Confirm every section renders correctly and legibly in both light and dark theme (using the correct on-brand dark palette from the earlier dark-mode fix).
+
+---
+
+## TASK 6 — Services Section — Full Build Per Module 3
+
+**Key screens to build:**
+
+1. **Category Gallery** (opens from Home's "See all" on Categories): a full grid of all service categories (per the same category list as Task 5's Categories section), each with its icon, opening into that category's subservices list on tap.
+
+2. **Subservices List** (Category → Subservices): tapping a category (e.g. "Cleaning") shows its subservices list — per the spec's example: **Cleaning → House Cleaning, Floor Cleaning, Office Cleaning, Carpet Cleaning**. Build out a reasonable, realistic subservices list for every category using this pattern (e.g. Repairing → general handyman/appliance repair subservices, Plumbing → pipe repair/installation subservices, etc. — use good judgment for categories not explicitly detailed in the spec, keeping names realistic and specific).
+
+3. **Service Detail screen** (Subservice → Service Details, e.g. tapping into a specific listed service): full description, past project image gallery, client reviews section — reuse the existing Service Detail screen layout/tabs (About / Gallery / Review) already built in an earlier phase, just make sure it's properly wired into this new Category → Subservices → Service Detail navigation flow.
+
+4. **Search screen with filters**: search bar with **live filtering as the user types** (auto-suggest matching service/category names from the mock data as they type, shown as a dropdown suggestion list beneath the search bar) — this is a specific requirement from the spec, not just a static search-then-submit pattern. The existing Filter bottom sheet (Category, Price Range, Reviews, Available Date) from the previous phase applies here too.
+
+5. **"Request a quotation" button**: at the bottom of the Category Gallery screen, add a clearly visible button/banner (e.g. "Can't find what you need? Get a custom quote") that opens a simple request form (service description text field + optional contact preference) for services not currently available on the platform — per the spec's requirement, this can submit to a mock/stub handler for now since there's no backend endpoint for it yet.
+
+**UI requirements per the spec:**
+- Every service card (in Popular Services, Search Results, Subservices lists) must show: **name, category, average price in EUR, AND the equivalent credit points value simultaneously** (e.g. "$180.00 · 1800 pts") — both must always be visible together, not one or the other.
+- The "no results" state (empty search/filter results) must include a direct link/button to the custom quotation request form AND a "Start Live Chat" option (stub this to navigate toward the Inbox/support flow, to be fully built in Phase 2) — per the spec's requirement that a dead-end empty state always offers a path forward.
+
+---
+
+## REFERENCE
+
+- Full module specification document (attached) — Modules 1B, 2, and 3 are the primary reference for this phase; refer to it for any category/subservice naming or dashboard element not explicitly detailed above.
+- Live web app for visual/color reference: `https://skill-buddy-nine.vercel.app/`
+
+---
+
+## SCOPE BOUNDARY
+
+This phase covers: the icon rendering fix (app-wide, critical), loaders and transition animations, the corrected 5-tab navigation structure, the full Dashboard build, and the full Services/Categories section. **Do not build Jobs, Inbox/Chat, Profile deep sections, Payment, Notifications, or Ticketing in this pass** — those are Phase 2 and will be specified in a separate follow-up prompt once this phase is verified working. Do not touch Login/Signup screens (still on hold pending backend auth completion). Verify each task actually works on-device before considering this phase complete — given the pattern of previous phases where fixes were reported done but weren't actually working, test thoroughly before reporting completion.

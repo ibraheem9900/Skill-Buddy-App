@@ -16,6 +16,10 @@ interface Props {
   variant?: 'horizontal' | 'vertical' | 'list';
 }
 
+function creditPoints(price: number): number {
+  return Math.round(price);
+}
+
 export default function ServiceCard({ service, variant = 'vertical' }: Props) {
   const router = useRouter();
   const { isBookmarked, toggleBookmark } = useBookmarks();
@@ -37,6 +41,8 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
     router.push(`/service/${service.id}` as any);
   };
 
+  const priceLabel = `€${service.price.toFixed(2)} · ${creditPoints(service.price)} pts`;
+
   if (variant === 'list') {
     return (
       <AnimatedTouchable
@@ -56,7 +62,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
             <Feather name="user" size={12} color={c.mutedForeground} />
             <Text style={[styles.providerName, { color: c.mutedForeground }]}>{service.provider.name}</Text>
           </View>
-          <Text style={[styles.price, { color: c.primary }]}>${service.price.toFixed(2)}</Text>
+          <Text style={[styles.price, { color: c.primary }]}>{priceLabel}</Text>
         </View>
         <TouchableOpacity style={styles.listBookmark} onPress={handleBookmark}>
           <Feather name="bookmark" size={18} color={c.primary} />
@@ -92,7 +98,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
           <Feather name="user" size={12} color={c.mutedForeground} />
           <Text style={[styles.providerName, { color: c.mutedForeground }]}>{service.provider.name}</Text>
         </View>
-        <Text style={[styles.price, { color: c.primary }]}>${service.price.toFixed(2)}</Text>
+        <Text style={[styles.price, { color: c.primary }]}>{priceLabel}</Text>
       </View>
     </AnimatedTouchable>
   );
@@ -131,7 +137,7 @@ const styles = StyleSheet.create({
   title: { fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18 },
   providerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   providerName: { fontFamily: 'Inter_400Regular', fontSize: 12 },
-  price: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  price: { fontFamily: 'Inter_700Bold', fontSize: 13 },
   listCard: {
     flexDirection: 'row',
     borderRadius: 16,

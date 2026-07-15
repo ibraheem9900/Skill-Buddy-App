@@ -1,0 +1,73 @@
+# SkillBuddy Mobile App — CRITICAL Follow-Up: Icons Still Broken + Services Flow Fix (Replit Prompt)
+
+Copy everything below this line into Replit AI / your dev agent.
+
+---
+
+## CONTEXT
+
+This is the **third time** the icon rendering issue is being reported — it was flagged as the top-priority Task 1 in the previous phase and is still not fixed. Icons are missing not just on content screens but on the **bottom navigation bar itself and back-arrow buttons** — this is a fundamental, app-wide problem, not a cosmetic one, and it must be root-caused and actually fixed this time, not just reported as fixed. Alongside this, the Services section's screen flow doesn't match the intended structure and the bottom tab bar disappears entirely when viewing a service.
+
+---
+
+## TASK 1 — CRITICAL, HIGHEST PRIORITY: Actually Fix Icons App-Wide (Bottom Nav, Back Arrows, Everywhere)
+
+**Do not report this task as done until you have visually confirmed, on an actual running build (Expo Go or a dev build on a real device/simulator — not just code that "should" work), that:**
+- The 5 bottom navigation tab icons (Home, Services, Jobs, Inbox, Profile) are visible.
+- Every back-arrow button throughout the app is visible.
+- Every other icon used anywhere in the app (search icon, filter icon, notification bell, category icons, star ratings, bookmark icon, etc.) is visible.
+
+**Systematic debugging steps to actually find the root cause this time:**
+1. Check which icon package is installed (`package.json`) — confirm it's actually installed (`node_modules` present) and the version is compatible with the installed Expo SDK version. A version mismatch between `expo`, `react-native`, and the icon package is a very common cause of silent icon failures.
+2. If using `@expo/vector-icons`: these require no extra font-loading in modern Expo projects, but confirm the import syntax is correct (e.g. `import { Ionicons } from '@expo/vector-icons'` and usage `<Ionicons name="home" size={24} color="#4F9D82" />` with a **valid icon name** from that specific icon set — an invalid/misspelled `name` prop silently renders nothing rather than throwing a visible error, which is a very common cause of "icons just don't show up").
+3. If using `lucide-react-native`: confirm it's imported per-icon correctly (e.g. `import { Home } from 'lucide-react-native'`) and rendered as a component (`<Home size={24} color="#4F9D82" />`), and that the `lucide-react-native` peer dependency `react-native-svg` is installed (this library requires `react-native-svg` to render at all — **this is a very likely missing piece** if icons are completely invisible app-wide rather than just individually broken).
+4. Do a completely clean reinstall and cache clear: delete `node_modules` and lockfile, reinstall dependencies, then start with `expo start -c` (clears Metro cache) to rule out stale/corrupted bundling.
+5. Temporarily render a single icon in complete isolation on a blank test screen with a hardcoded color and size (no theme tokens, no dynamic props) to confirm whether the icon library works at all in this project — if even that fails, the issue is fundamental (missing dependency/setup); if that works but icons elsewhere don't, the issue is in how icons are being invoked elsewhere (likely broken theme-token color values passed as `color` props, per the hypothesis from the last phase).
+6. Fix whichever root cause is found, then re-verify all icons across the whole app (nav bar, back arrows, and every screen-level icon) are visible before moving to any other task in this prompt.
+
+---
+
+## TASK 2 — Bottom Navigation Bar Disappears on Service Detail / Services Screens
+
+**Problem:** When opening the Services section (browsing into a category, or viewing a service detail screen like the one in the reference screenshot), the bottom tab bar disappears entirely instead of staying visible.
+
+**Required fix:**
+- Confirm the navigation structure: Services-related screens (Category Gallery, Subservices List, Search Results) should be nested inside the **Services tab's stack navigator**, so the bottom tab bar remains visible while browsing within that tab — same pattern as it presumably already works for Home.
+- The **individual Service Detail screen** (full-screen hero image, About/Gallery/Review tabs, Book Now bar — like the reference screenshot) is a reasonable exception where hiding the tab bar can be intentional (many apps hide the tab bar on a deep, focused detail screen to maximize content space) — but this must be a **deliberate choice** confirmed with `tabBarStyle: { display: 'none' }` (or equivalent) set only on that specific screen, not an accidental side effect of broken navigation nesting. If the tab bar is currently disappearing on the Category Gallery or Subservices list screens too (not just the deep Service Detail screen), that's the actual bug to fix — those intermediate browsing screens must keep the tab bar visible.
+
+---
+
+## TASK 3 — Fix the Services Section Screen Flow/Order
+
+**Problem:** The current flow doesn't match the intended structure — right now it shows categories, and selecting one jumps somewhere incorrect ("apni services" / a wrong intermediate screen) instead of the correct flow.
+
+**Required correct flow for the Services tab:**
+1. **Top of screen**: search bar + filter icon button (opens the existing Filter bottom sheet — Category, Price Range, Reviews, Available Date).
+2. **Below that**: the Categories row/grid (per Module 3 — Cleaning, Repairing, Plumbing, etc. with icons).
+3. **Below that**: a Services list (populated from mock data) — by default showing a general/popular mix, but **filtered live** based on: whichever category the user has tapped/selected above (if any), and/or whichever filters are applied via the filter sheet. Selecting a category should filter this same on-screen list in place — it should NOT navigate to a separate, different screen structure; the category selection and the resulting filtered services should feel like one continuous screen, matching how filtering works on the SkillBuddy website's Services page.
+4. **Tapping any individual service card** in that list opens the full Service Detail screen — exactly matching the reference screenshot already provided (hero image with Demo Video overlay, thumbnail strip, category tag + rating, title + address, About/Gallery/Review tabs, sticky Total Price + Book Now bar at the bottom). This part is already correctly built — just make sure it's reachable via this corrected flow and looks exactly as it already does in the reference screenshot (do not change the Service Detail screen itself, it's correct).
+- This structure (Filters → Categories → Filtered Services List → Service Detail) should be the **single Services tab screen's behavior**, not multiple disconnected screens for categories vs. services — reference the SkillBuddy website's own Services page structure for how filtering and category selection work together in one continuous view.
+
+---
+
+## TASK 4 — Dashboard Visual Polish: Fiverr/Upwork-Level UI, Website-Matching UX
+
+**Problem:** The Dashboard's current headings/overall polish don't yet look professional enough.
+
+**Required fix:**
+- Visual quality bar: study the general design quality level of apps like Fiverr and Upwork (clean typography hierarchy, generous but consistent spacing, subtle card elevation, confident use of whitespace, clear visual hierarchy between section titles and content) and bring the Dashboard's visual polish up to that standard — this is about **execution quality**, not copying their specific layouts (SkillBuddy's actual structure/sections stay as already specified in the Phase 1 prompt).
+- Section headings specifically: consistent font weight/size for every section title ("Categories," "Popular Services," "Special For You," etc.), consistent spacing above/below each heading, and a consistent "See all" link style — audit every section heading on the Dashboard and make sure none of them look inconsistent with the others.
+- UX/interaction patterns (how filtering, search, and navigation actually behave) should match the **SkillBuddy website's** UX patterns (`https://skill-buddy-nine.vercel.app/`) adapted for mobile — not Fiverr/Upwork's specific interaction patterns, just their general visual polish level.
+
+---
+
+## TASK 5 — No Emojis, Proper Icon Everywhere (Reconfirm)
+
+- Reconfirm zero emojis exist anywhere in the app (this was established as a rule in an earlier phase) — audit again now that more screens have been built, since new screens/sections added since then may have introduced emoji placeholders.
+- Every icon used anywhere (including the back-arrow button, which was specifically flagged as currently invisible) must be an appropriate, purpose-matched icon from the now-fixed icon library (Task 1) — a left-chevron or arrow-left icon for back buttons, specifically.
+
+---
+
+## SCOPE BOUNDARY
+
+This is a critical bug-fix pass — Task 1 (icons) is the highest priority and blocks proper verification of everything else, so fix it first and confirm it visually before moving on. Do not proceed to claim Tasks 2–5 are complete without actually testing on a real running build. Do not touch Login/Signup screens. Do not start Phase 2 work (Jobs, Inbox, Profile deep sections) until this critical pass is confirmed working — see the separate Phase 2 prompt for that work, to be started only after this one is verified.

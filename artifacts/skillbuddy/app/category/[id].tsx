@@ -3,73 +3,119 @@ import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import colors from '@/constants/colors';
-import { CATEGORIES, SERVICES } from '@/data/mockData';
-
-const c = colors.light;
+import { useTheme } from '@/context/ThemeContext';
+import { CATEGORIES, SUBSERVICES } from '@/data/mockData';
+import { getServiceForSubservice } from '@/lib/serviceLookup';
 
 export default function CategoryDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { colors: c } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
+
   const category = CATEGORIES.find((cat) => cat.id === id) ?? CATEGORIES[0];
-  const services = SERVICES.filter((s) => s.categoryId === id);
+  const subservices = SUBSERVICES.filter((ss) => ss.categoryId === id);
+
+  const handleSubservicePress = (subserviceId: string) => {
+    const service = getServiceForSubservice(subserviceId);
+    router.push(`/service/${service.id}` as any);
+  };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.primary }]}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
           <Feather name="arrow-left" size={22} color="#FFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{category.name} Services:</Text>
-        <TouchableOpacity>
-          <Feather name="more-vertical" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{category.name}</Text>
+        <View style={{ width: 38 }} />
       </View>
 
       <FlatList
-        data={services.length > 0 ? services : SERVICES}
-        keyExtractor={(s) => s.id}
-        numColumns={2}
-        contentContainerStyle={{ padding: 12 }}
-        columnWrapperStyle={{ gap: 12, marginBottom: 12 }}
+        data={subservices}
+        keyExtractor={(ss) => ss.id}
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyWrap}>
+            <Feather name="inbox" size={40} color={c.border} />
+            <Text style={[styles.emptyText, { color: c.mutedForeground }]}>No subservices found.</Text>
+          </View>
+        }
         renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(index * 60).duration(350)} style={styles.gridCard}>
+          <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
             <TouchableOpacity
-              style={styles.card}
-              onPress={() => router.push(`/service/${item.id}` as any)}
-              activeOpacity={0.85}
+              style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
+              onPress={() => handleSubservicePress(item.id)}
+              activeOpacity={0.82}
             >
-              <Image source={{ uri: item.image }} style={styles.cardImage} contentFit="cover" />
+              <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
+                <Feather name="tool" size={20} color={c.primary} />
+              </View>
               <View style={styles.cardBody}>
-                <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-                <Text style={styles.avgPrice}>
-                  Avg. Project: ${item.avgPriceMin ?? item.price}–${item.avgPriceMax ?? item.price + 50}
+                <Text style={[styles.cardTitle, { color: c.text }]}>{item.name}</Text>
+                <Text style={[styles.cardDesc, { color: c.mutedForeground }]} numberOfLines={2}>
+                  {item.description}
                 </Text>
               </View>
+              <Feather name="chevron-right" size={20} color={c.mutedForeground} />
             </TouchableOpacity>
           </Animated.View>
         )}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F8F8F8' },
+  root: { flex: 1 },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#FFF', flex: 1, marginHorizontal: 12 },
-  gridCard: { flex: 1 },
-  card: { backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6 },
-  cardImage: { width: '100%', height: 130 },
-  cardBody: { padding: 10 },
-  cardTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#1A1A1A', marginBottom: 4 },
-  avgPrice: { fontFamily: 'Inter_400Regular', fontSize: 12, color: c.primary },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  headerTitle: {
+    flex: 1,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+    color: '#FFF',
+    textAlign: 'center',
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  iconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: { flex: 1 },
+  cardTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, marginBottom: 3 },
+  cardDesc: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 18 },
+  emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
+  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
 });

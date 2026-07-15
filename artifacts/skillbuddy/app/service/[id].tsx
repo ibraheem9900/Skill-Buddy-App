@@ -15,6 +15,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
+import { getServiceById } from '@/lib/serviceLookup';
 import RatingStars from '@/components/RatingStars';
 import { useBookmarks } from '@/context/BookmarkContext';
 
@@ -30,7 +31,7 @@ export default function ServiceDetailScreen() {
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const { colors: c } = useTheme();
 
-  const service = SERVICES.find((s) => s.id === id) ?? SERVICES[0];
+  const service = (id ? getServiceById(id) : undefined) ?? SERVICES[0];
   const reviews = MOCK_REVIEWS.slice(0, 4);
 
   const [activeTab, setActiveTab] = useState<Tab>('About');

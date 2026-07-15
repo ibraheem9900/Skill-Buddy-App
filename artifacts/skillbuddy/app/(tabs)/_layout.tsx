@@ -1,11 +1,12 @@
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context/ThemeContext';
 
 function NativeTabLayout() {
@@ -15,17 +16,17 @@ function NativeTabLayout() {
         <Icon sf={{ default: 'house', selected: 'house.fill' }} />
         <Label>Home</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="explore">
-        <Icon sf={{ default: 'safari', selected: 'safari.fill' }} />
-        <Label>Explore</Label>
+      <NativeTabs.Trigger name="services">
+        <Icon sf={{ default: 'square.grid.2x2', selected: 'square.grid.2x2.fill' }} />
+        <Label>Services</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="bookmarks">
-        <Icon sf={{ default: 'bookmark', selected: 'bookmark.fill' }} />
-        <Label>Bookmark</Label>
+      <NativeTabs.Trigger name="jobs">
+        <Icon sf={{ default: 'briefcase', selected: 'briefcase.fill' }} />
+        <Label>Jobs</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="chat">
+      <NativeTabs.Trigger name="inbox">
         <Icon sf={{ default: 'bubble.left', selected: 'bubble.left.fill' }} />
-        <Label>Chat</Label>
+        <Label>Inbox</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: 'person', selected: 'person.fill' }} />
@@ -37,6 +38,7 @@ function NativeTabLayout() {
 
 function ClassicTabLayout() {
   const { colors: c, theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
   const isDark = theme === 'dark';
@@ -51,11 +53,12 @@ function ClassicTabLayout() {
         tabBarStyle: {
           position: 'absolute',
           backgroundColor: isIOS ? 'transparent' : c.tabBarBg,
-          borderTopWidth: 0.5,
+          borderTopWidth: isWeb ? 1 : 0.5,
           borderTopColor: c.border,
           elevation: 0,
-          height: isWeb ? 84 : 60,
-          paddingBottom: isWeb ? 34 : 6,
+          ...(isWeb
+            ? { height: 84, paddingBottom: 34 }
+            : { paddingBottom: insets.bottom }),
         },
         tabBarBackground: () =>
           isIOS ? (
@@ -82,33 +85,33 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="services"
         options={{
-          title: 'Explore',
+          title: 'Services',
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView name="safari" tintColor={color} size={22} />
+              <SymbolView name="square.grid.2x2" tintColor={color} size={22} />
             ) : (
-              <Feather name="compass" size={22} color={color} />
+              <MaterialCommunityIcons name="view-grid-outline" size={22} color={color} />
             ),
         }}
       />
       <Tabs.Screen
-        name="bookmarks"
+        name="jobs"
         options={{
-          title: 'Bookmark',
+          title: 'Jobs',
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView name="bookmark" tintColor={color} size={22} />
+              <SymbolView name="briefcase" tintColor={color} size={22} />
             ) : (
-              <Feather name="bookmark" size={22} color={color} />
+              <Feather name="briefcase" size={22} color={color} />
             ),
         }}
       />
       <Tabs.Screen
-        name="chat"
+        name="inbox"
         options={{
-          title: 'Chat',
+          title: 'Inbox',
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="bubble.left" tintColor={color} size={22} />
