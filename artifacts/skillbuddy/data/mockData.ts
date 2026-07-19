@@ -1,4 +1,5 @@
-import type { Category, Service, Offer, Notification, ChatThread, Booking, Review } from '@/types';
+import type { Category, Service, Offer, Notification, ChatThread, Booking, Review, Job, Bid, BidProvider } from '@/types';
+import { calculateProviderScore } from '@/lib/scoring';
 
 // ─── Current User (mock) ──────────────────────────────────────────────────────
 export interface MockUser {
@@ -447,6 +448,108 @@ export const MOCK_BOOKINGS: Booking[] = [
     address: '415 Madison Ave, Riga',
     isUrgent: true,
   },
+];
+
+// ─── Bidding Providers (Phase 2 — Jobs & Bidding) ─────────────────────────────
+// Extended provider pool with the fields the scoring engine needs:
+// distanceKm, responseTimeMin, plus rating/badge/credibility already on Provider.
+export const BID_PROVIDERS: BidProvider[] = [
+  { id: 'bp1', name: 'Jenny Wilson',   rating: 4.9, reviewCount: 365, jobsDone: 142, badge: 3, credibility: 97, specialty: 'Home Cleaning',  location: 'Riga, Latvia', isOnline: true,  distanceKm: 1.5, responseTimeMin: 4 },
+  { id: 'bp2', name: 'Wade Warren',    rating: 4.6, reviewCount: 210, jobsDone: 89,  badge: 2, credibility: 92, specialty: 'Ironing & Laundry', location: 'Riga, Latvia', isOnline: false, distanceKm: 4.2, responseTimeMin: 12 },
+  { id: 'bp3', name: 'Esther Howard',  rating: 4.4, reviewCount: 178, jobsDone: 67,  badge: 1, credibility: 88, specialty: 'Repairing',       location: 'Riga, Latvia', isOnline: true,  distanceKm: 7.8, responseTimeMin: 22 },
+  { id: 'bp4', name: 'Marcus Lee',     rating: 5.0, reviewCount: 320, jobsDone: 210, badge: 3, credibility: 99, specialty: 'Photography',      location: 'Riga, Latvia', isOnline: true,  distanceKm: 0.8, responseTimeMin: 3 },
+  { id: 'bp5', name: 'Dianne Russell', rating: 3.8, reviewCount: 45,  jobsDone: 22,  badge: 1, credibility: 78, specialty: 'Plumbing',        location: 'Riga, Latvia', isOnline: true,  distanceKm: 12.4, responseTimeMin: 45 },
+  { id: 'bp6', name: 'Cody Fisher',    rating: 4.2, reviewCount: 96,  jobsDone: 34,  badge: 1, credibility: 82, specialty: 'Shifting',        location: 'Riga, Latvia', isOnline: false, distanceKm: 6.1, responseTimeMin: 18 },
+  { id: 'bp7', name: 'Leslie Alexander', rating: 4.9, reviewCount: 401, jobsDone: 156, badge: 3, credibility: 96, specialty: 'Painting',      location: 'Riga, Latvia', isOnline: true,  distanceKm: 2.3, responseTimeMin: 7 },
+  { id: 'bp8', name: 'Guy Hawkins',    rating: 3.2, reviewCount: 18,  jobsDone: 6,   badge: 0, credibility: 62, specialty: 'Cleaning',        location: 'Riga, Latvia', isOnline: true,  distanceKm: 15.0, responseTimeMin: 90 },
+];
+
+// ─── Mock Jobs (Phase 2) ───────────────────────────────────────────────────────
+const now = Date.now();
+
+export const MOCK_JOBS: Job[] = [
+  {
+    id: 'j1',
+    clientId: CURRENT_USER.id,
+    clientName: CURRENT_USER.name,
+    title: 'Deep clean my 2-bedroom apartment',
+    description: 'Need a thorough clean before guests arrive — kitchen, bathrooms, floors, and windows. Please bring your own cleaning supplies.',
+    categoryId: '1',
+    category: 'Cleaning',
+    date: 'Today',
+    time: '4:00 PM',
+    expectedHours: 3,
+    hourlyRate: 20,
+    expectedPrice: 60,
+    photos: [],
+    urgency: 'urgent',
+    status: 'bidding',
+    biddingEndsAt: now + 30 * 60 * 1000,
+    biddingDurationMs: 30 * 60 * 1000,
+    location: 'Riga, Latvia',
+  },
+  {
+    id: 'j2',
+    clientId: CURRENT_USER.id,
+    clientName: CURRENT_USER.name,
+    title: 'Fix leaking kitchen pipe',
+    description: 'Pipe under the kitchen sink has been leaking for two days. Needs inspection and repair, possibly a part replacement.',
+    categoryId: '3',
+    category: 'Plumbing',
+    date: 'Tomorrow',
+    time: '10:00 AM',
+    expectedHours: 2,
+    hourlyRate: 25,
+    expectedPrice: 50,
+    photos: [],
+    urgency: 'regular',
+    status: 'bidding',
+    biddingEndsAt: now + 3 * 60 * 60 * 1000,
+    biddingDurationMs: 3 * 60 * 60 * 1000,
+    location: 'Riga, Latvia',
+  },
+  {
+    id: 'j3',
+    clientId: CURRENT_USER.id,
+    clientName: CURRENT_USER.name,
+    title: 'Repaint living room walls',
+    description: 'Single accent wall plus touch-ups on the rest of the living room. Paint will be provided by us (sage green).',
+    categoryId: '5',
+    category: 'Painting',
+    date: 'Jan 28, 2026',
+    time: '9:00 AM',
+    expectedHours: 5,
+    hourlyRate: 18,
+    expectedPrice: 90,
+    photos: [],
+    urgency: 'regular',
+    status: 'assigned',
+    biddingEndsAt: now - 60 * 60 * 1000,
+    biddingDurationMs: 3 * 60 * 60 * 1000,
+    location: 'Riga, Latvia',
+    assignedProviderId: 'bp7',
+  },
+];
+
+// ─── Mock Bids — generated with real scoring, not a hardcoded order ──────────
+function makeBid(id: string, jobId: string, provider: BidProvider, price: number, eta: string, minutesAgo: number): Bid {
+  return {
+    id,
+    jobId,
+    provider,
+    price,
+    eta,
+    createdAt: now - minutesAgo * 60 * 1000,
+    score: calculateProviderScore(provider).total,
+  };
+}
+
+export const MOCK_BIDS: Bid[] = [
+  makeBid('bid1', 'j1', BID_PROVIDERS[0], 65, '25 min', 8),
+  makeBid('bid2', 'j1', BID_PROVIDERS[7], 50, '40 min', 5),
+  makeBid('bid3', 'j1', BID_PROVIDERS[4], 55, '35 min', 3),
+  makeBid('bid4', 'j2', BID_PROVIDERS[4], 55, '1 hr', 20),
+  makeBid('bid5', 'j2', BID_PROVIDERS[2], 60, '45 min', 10),
 ];
 
 export const MOCK_REVIEWS: Review[] = [

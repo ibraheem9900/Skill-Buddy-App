@@ -16,6 +16,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/context/AuthContext';
 import { BookmarkProvider } from '@/context/BookmarkContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { RoleProvider } from '@/context/RoleContext';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
@@ -106,6 +107,7 @@ export default function RootLayout() {
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
+              <RoleProvider>
               <BookmarkProvider>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
@@ -113,6 +115,7 @@ export default function RootLayout() {
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </BookmarkProvider>
+              </RoleProvider>
             </AuthProvider>
           </QueryClientProvider>
         </ThemeProvider>

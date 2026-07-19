@@ -152,3 +152,44 @@ export interface Review {
   comment: string;
   date: string;
 }
+
+// ─── Jobs & Bidding (Phase 2) ──────────────────────────────────────────────────
+export type JobUrgency = 'urgent' | 'regular';
+export type JobStatus = 'bidding' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'expired';
+
+export interface Job {
+  id: string;
+  clientId: string;
+  clientName: string;
+  title: string;
+  description: string;
+  categoryId: string;
+  category: string;
+  date: string;
+  time: string;
+  expectedHours: number;
+  hourlyRate: number;
+  expectedPrice: number;
+  photos: string[];
+  urgency: JobUrgency;
+  status: JobStatus;
+  biddingEndsAt: number;
+  biddingDurationMs: number;
+  location: string;
+  assignedProviderId?: string;
+}
+
+export interface BidProvider extends Provider {
+  distanceKm: number;
+  responseTimeMin: number;
+}
+
+export interface Bid {
+  id: string;
+  jobId: string;
+  provider: BidProvider;
+  price: number;
+  eta: string;
+  createdAt: number;
+  score: number;
+}
