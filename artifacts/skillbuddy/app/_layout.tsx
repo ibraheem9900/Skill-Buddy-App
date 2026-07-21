@@ -15,8 +15,9 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/context/AuthContext';
 import { BookmarkProvider } from '@/context/BookmarkContext';
-import { ThemeProvider } from '@/context/ThemeContext';
+import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { RoleProvider } from '@/context/RoleContext';
+import { FilterProvider } from '@/context/FilterContext';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
@@ -36,10 +37,17 @@ function AuthGate() {
 }
 
 function RootLayoutNav() {
+  const { colors: c } = useTheme();
   return (
     <>
       <AuthGate />
-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          contentStyle: { backgroundColor: c.background },
+        }}
+      >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen
@@ -108,6 +116,7 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <RoleProvider>
+              <FilterProvider>
               <BookmarkProvider>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
@@ -115,6 +124,7 @@ export default function RootLayout() {
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </BookmarkProvider>
+              </FilterProvider>
               </RoleProvider>
             </AuthProvider>
           </QueryClientProvider>

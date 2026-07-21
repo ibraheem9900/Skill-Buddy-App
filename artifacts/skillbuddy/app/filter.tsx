@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { CATEGORIES } from '@/data/mockData';
+import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
@@ -47,11 +48,13 @@ export default function FilterScreen() {
   const { colors: c } = useTheme();
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  const [selectedCat, setSelectedCat] = useState('All');
-  const [selectedRating, setSelectedRating] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [minPrice, setMinPrice] = useState(20);
-  const [maxPrice, setMaxPrice] = useState(200);
+  const { filters, setFilters, resetFilters: resetContextFilters } = useServiceFilters();
+  const initialCatName = CATEGORIES.find((cat) => cat.id === filters.categoryId)?.name ?? 'All';
+  const [selectedCat, setSelectedCat] = useState(initialCatName);
+  const [selectedRating, setSelectedRating] = useState<number | null>(filters.minRating);
+  const [selectedDate, setSelectedDate] = useState<string | null>(filters.date);
+  const [minPrice, setMinPrice] = useState(filters.minPrice);
+  const [maxPrice, setMaxPrice] = useState(filters.maxPrice);
 
   const catTabs = ['All', ...CATEGORIES.slice(0, 6).map((cat) => cat.name)];
 
@@ -81,11 +84,22 @@ export default function FilterScreen() {
     setSelectedCat('All');
     setSelectedRating(null);
     setSelectedDate(null);
-    setMinPrice(20);
-    setMaxPrice(200);
+    setMinPrice(DEFAULT_FILTERS.minPrice);
+    setMaxPrice(DEFAULT_FILTERS.maxPrice);
+    resetContextFilters();
   };
 
-  const applyFilters = () => dismiss();
+  const applyFilters = () => {
+    const categoryId = selectedCat === 'All' ? null : CATEGORIES.find((cat) => cat.name === selectedCat)?.id ?? null;
+    setFilters({
+      categoryId,
+      minPrice,
+      maxPrice,
+      minRating: selectedRating,
+      date: selectedDate,
+    });
+    dismiss();
+  };
 
   return (
     <View style={styles.root}>

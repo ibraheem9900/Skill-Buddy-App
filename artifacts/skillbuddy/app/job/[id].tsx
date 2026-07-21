@@ -11,6 +11,7 @@ import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
 import BidCard from '@/components/BidCard';
 import EmptyState from '@/components/EmptyState';
+import BrandedLoader from '@/components/BrandedLoader';
 import type { Bid, BidProvider } from '@/types';
 
 type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
@@ -40,6 +41,12 @@ export default function BiddingDashboardScreen() {
   const [showAll, setShowAll] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('recommended');
   const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
+  const [screenLoading, setScreenLoading] = useState(true);
+
+  useEffect(() => {
+    const t = setTimeout(() => setScreenLoading(false), 400);
+    return () => clearTimeout(t);
+  }, []);
 
   // Simulate live bids trickling in while the dashboard is open.
   useEffect(() => {
@@ -53,6 +60,14 @@ export default function BiddingDashboardScreen() {
     }, 6000);
     return () => clearInterval(interval);
   }, [job, expired]);
+
+  if (screenLoading) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+        <BrandedLoader size={44} />
+      </View>
+    );
+  }
 
   if (!job) {
     return (

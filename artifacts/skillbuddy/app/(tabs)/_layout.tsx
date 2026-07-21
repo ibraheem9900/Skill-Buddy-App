@@ -8,6 +8,7 @@ import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context/ThemeContext';
+import AnimatedTabIcon from '@/components/AnimatedTabIcon';
 
 function NativeTabLayout() {
   return (
@@ -76,60 +77,85 @@ function ClassicTabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="house" tintColor={color} size={22} />
-            ) : (
-              <Feather name="home" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+              {(col) =>
+                isIOS ? (
+                  <SymbolView name="house" tintColor={col} size={22} />
+                ) : (
+                  <Feather name="home" size={22} color={col} />
+                )
+              }
+            </AnimatedTabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="services"
         options={{
           title: 'Services',
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="square.grid.2x2" tintColor={color} size={22} />
-            ) : (
-              <MaterialCommunityIcons name="view-grid-outline" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+              {(col) =>
+                isIOS ? (
+                  <SymbolView name="square.grid.2x2" tintColor={col} size={22} />
+                ) : (
+                  <MaterialCommunityIcons name="view-grid-outline" size={22} color={col} />
+                )
+              }
+            </AnimatedTabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="jobs"
         options={{
           title: 'Jobs',
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="briefcase" tintColor={color} size={22} />
-            ) : (
-              <Feather name="briefcase" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+              {(col) =>
+                isIOS ? (
+                  <SymbolView name="briefcase" tintColor={col} size={22} />
+                ) : (
+                  <Feather name="briefcase" size={22} color={col} />
+                )
+              }
+            </AnimatedTabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="inbox"
         options={{
           title: 'Inbox',
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="bubble.left" tintColor={color} size={22} />
-            ) : (
-              <Feather name="message-circle" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+              {(col) =>
+                isIOS ? (
+                  <SymbolView name="bubble.left" tintColor={col} size={22} />
+                ) : (
+                  <Feather name="message-circle" size={22} color={col} />
+                )
+              }
+            </AnimatedTabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="person" tintColor={color} size={22} />
-            ) : (
-              <Feather name="user" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+              {(col) =>
+                isIOS ? (
+                  <SymbolView name="person" tintColor={col} size={22} />
+                ) : (
+                  <Feather name="user" size={22} color={col} />
+                )
+              }
+            </AnimatedTabIcon>
+          ),
         }}
       />
     </Tabs>

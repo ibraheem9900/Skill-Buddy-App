@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -17,6 +17,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
 import { getServiceById } from '@/lib/serviceLookup';
 import RatingStars from '@/components/RatingStars';
+import BrandedLoader from '@/components/BrandedLoader';
 import { useBookmarks } from '@/context/BookmarkContext';
 
 const W = Dimensions.get('window').width;
@@ -36,10 +37,24 @@ export default function ServiceDetailScreen() {
 
   const [activeTab, setActiveTab] = useState<Tab>('About');
   const [selectedImage, setSelectedImage] = useState(0);
+  const [screenLoading, setScreenLoading] = useState(true);
+
+  useEffect(() => {
+    const t = setTimeout(() => setScreenLoading(false), 400);
+    return () => clearTimeout(t);
+  }, []);
 
   const images = [service.image, ...(service.images ?? [])].filter(Boolean).slice(0, 5);
 
   const bookmarked = isBookmarked(service.id);
+
+  if (screenLoading) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.surface }]}>
+        <BrandedLoader size={44} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface }]}>

@@ -4,7 +4,7 @@
  * No navigation away from this screen; the bottom tab bar stays visible throughout.
  * Tapping an individual service card goes to /service/[id].
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -22,6 +22,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { CATEGORIES, SERVICES } from '@/data/mockData';
+import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 import ServiceCard from '@/components/ServiceCard';
 
 const ALL_ID = '__all__';
@@ -34,10 +35,19 @@ export default function ServicesScreen() {
 
   const [query, setQuery] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
+  const { filters, activeCount } = useServiceFilters();
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
 
-  // Live-filter services by selected category AND search query — updates on every keystroke
+  // The filter bottom sheet's category selection stays in sync with the
+  // on-screen category row — whichever was set most recently wins.
+  useEffect(() => {
+    if (filters.categoryId) setSelectedCatId(filters.categoryId);
+  }, [filters.categoryId]);
+
+  // Live-filter services by category, search query, AND the bottom-sheet
+  // filters (price range, minimum rating) — the Apply button now genuinely
+  // changes what's shown here instead of just closing the sheet.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return SERVICES.filter((s) => {
@@ -47,9 +57,11 @@ export default function ServicesScreen() {
         s.title.toLowerCase().includes(q) ||
         s.category.toLowerCase().includes(q) ||
         s.provider.name.toLowerCase().includes(q);
-      return matchCat && matchQ;
+      const matchPrice = s.price >= filters.minPrice && s.price <= filters.maxPrice;
+      const matchRating = !filters.minRating || s.rating >= filters.minRating;
+      return matchCat && matchQ && matchPrice && matchRating;
     });
-  }, [query, selectedCatId]);
+  }, [query, selectedCatId, filters]);
 
   const handleCategoryPress = (id: string) => {
     setSelectedCatId((prev) => (prev === id ? ALL_ID : id));
@@ -103,6 +115,11 @@ export default function ServicesScreen() {
             activeOpacity={0.8}
           >
             <Feather name="sliders" size={16} color={c.primary} />
+            {activeCount > 0 && (
+              <View style={[styles.filterBadge, { backgroundColor: c.destructive, borderColor: c.surface }]}>
+                <Text style={styles.filterBadgeText}>{activeCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -289,7 +306,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  filterBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 9, color: '#FFF' },
 
   // ── Category chips ──────────────────────────────────────────────────────────
   catSection: { paddingTop: 20 },
