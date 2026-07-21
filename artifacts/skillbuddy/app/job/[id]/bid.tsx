@@ -4,9 +4,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import BackButton from '@/components/BackButton';
 import { CURRENT_USER, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
+import InlineLoader from '@/components/InlineLoader';
 import EmptyState from '@/components/EmptyState';
 import type { Bid, BidProvider } from '@/types';
 
@@ -41,6 +43,7 @@ export default function ProviderJobBidScreen() {
   const [price, setPrice] = useState(existingBid ? String(existingBid.price) : String(job?.expectedPrice ?? ''));
   const [eta, setEta] = useState(existingBid?.eta ?? '30 min');
   const [submitted, setSubmitted] = useState(!!existingBid);
+  const [submitting, setSubmitting] = useState(false);
 
   if (!job) {
     return (
@@ -52,12 +55,13 @@ export default function ProviderJobBidScreen() {
 
   const myScore = calculateProviderScore(ME_AS_PROVIDER);
 
-  const submitBid = () => {
+  const submitBid = async () => {
     const priceNum = parseFloat(price);
     if (!priceNum || priceNum <= 0) {
       Alert.alert('Invalid price', 'Please enter a valid bid amount.');
       return;
     }
+    setSubmitting(true);
     const bid: Bid = {
       id: existingBid?.id ?? `bid_${job.id}_me_${Date.now()}`,
       jobId: job.id,
@@ -67,9 +71,11 @@ export default function ProviderJobBidScreen() {
       createdAt: Date.now(),
       score: myScore.total,
     };
+    await new Promise((resolve) => setTimeout(resolve, 450));
     const idx = MOCK_BIDS.findIndex((b) => b.id === bid.id);
     if (idx >= 0) MOCK_BIDS[idx] = bid;
     else MOCK_BIDS.push(bid);
+    setSubmitting(false);
     setSubmitted(true);
   };
 
@@ -98,9 +104,7 @@ export default function ProviderJobBidScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Feather name="arrow-left" size={22} color={c.text} />
-        </TouchableOpacity>
+        <BackButton />
         <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>Job Details</Text>
         <View style={{ width: 22 }} />
       </View>
@@ -207,8 +211,14 @@ export default function ProviderJobBidScreen() {
               ))}
             </View>
 
-            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={submitBid}>
-              <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
+            <TouchableOpacity
+              style={[styles.submitBtn, { backgroundColor: c.primary, opacity: submitting ? 0.8 : 1 }]}
+              onPress={submitBid}
+              disabled={submitting}
+            >
+              {submitting ? <InlineLoader size={20} /> : (
+                <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
+              )}
             </TouchableOpacity>
 
             {submitted && (

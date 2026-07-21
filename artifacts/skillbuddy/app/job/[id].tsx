@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import BackButton from '@/components/BackButton';
 import { BID_PROVIDERS, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
@@ -122,9 +123,7 @@ export default function BiddingDashboardScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Feather name="arrow-left" size={22} color={c.text} />
-        </TouchableOpacity>
+        <BackButton />
         <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
         <TouchableOpacity onPress={cancelJob} style={styles.backBtn}>
           <Feather name="x-circle" size={20} color={c.destructive} />

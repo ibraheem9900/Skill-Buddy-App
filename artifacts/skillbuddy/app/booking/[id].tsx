@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import colors from '@/constants/colors';
 import { SERVICES } from '@/data/mockData';
+import BackButton from '@/components/BackButton';
 
 const c = colors.light;
 
@@ -51,9 +52,7 @@ export default function BookingScreen() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.primary }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Feather name="arrow-left" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <BackButton />
         <View style={styles.headerMid}>
           <Text style={styles.headerTitle}>Select Service</Text>
           <Text style={styles.headerSubtitle}>Appointment Time:</Text>

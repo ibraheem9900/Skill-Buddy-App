@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { CATEGORIES, SUBSERVICES } from '@/data/mockData';
 import { getServiceForSubservice } from '@/lib/serviceLookup';
+import BackButton from '@/components/BackButton';
 
 export default function CategoryDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -26,11 +27,9 @@ export default function CategoryDetailScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.primary }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-          <Feather name="arrow-left" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <BackButton />
         <Text style={styles.headerTitle}>{category.name}</Text>
-        <View style={{ width: 38 }} />
+        <View style={{ width: 40 }} />
       </View>
 
       <FlatList

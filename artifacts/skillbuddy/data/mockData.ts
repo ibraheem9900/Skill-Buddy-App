@@ -8,8 +8,21 @@ export interface MockUser {
   firstName: string;
   lastName: string;
   email: string;
+  phone: string;
+  username: string;
+  personalCode: string;
+  address: string;
   creditPoints: number;
   pastBookingCategoryIds: string[];
+  jobsDone: number;
+  activeJobs: number;
+  duePayments: number;
+  faceVerification: 'verified' | 'pending' | 'rejected';
+  residencePermit: 'verified' | 'pending' | 'rejected';
+  primarySkill: string;
+  secondarySkill: string;
+  maskedCard: string;
+  iban: string;
 }
 
 export const CURRENT_USER: MockUser = {
@@ -18,9 +31,52 @@ export const CURRENT_USER: MockUser = {
   firstName: 'Alex',
   lastName: 'Johnson',
   email: 'alex.johnson@example.com',
+  phone: '+371 2xxx xx45',
+  username: 'alex.johnson',
+  personalCode: 'SB-2024-88213',
+  address: 'Riga, Latvia',
   creditPoints: 340,
   pastBookingCategoryIds: ['1', '6', '4'], // Cleaning, Laundry, Shifting — derived from MOCK_BOOKINGS
+  jobsDone: 24,
+  activeJobs: 2,
+  duePayments: 45,
+  faceVerification: 'verified',
+  residencePermit: 'pending',
+  primarySkill: 'Home Cleaning',
+  secondarySkill: 'Laundry & Ironing',
+  maskedCard: '•••• •••• •••• 4242',
+  iban: 'LV•• XXXX •••• •••• 7821',
 };
+
+export interface CreditTransaction {
+  id: string;
+  date: string;
+  description: string;
+  change: number;
+  balanceAfter: number;
+}
+
+export const CREDIT_HISTORY: CreditTransaction[] = [
+  { id: 'ct1', date: 'Jan 18, 2026', description: 'Earned — Deep House Cleaning booking', change: 18, balanceAfter: 340 },
+  { id: 'ct2', date: 'Jan 12, 2026', description: 'Redeemed — €5 off next booking', change: -50, balanceAfter: 322 },
+  { id: 'ct3', date: 'Jan 5, 2026', description: 'Earned — Floor Cleaning booking', change: 12, balanceAfter: 372 },
+  { id: 'ct4', date: 'Dec 28, 2025', description: 'Earned — Referral bonus', change: 100, balanceAfter: 360 },
+  { id: 'ct5', date: 'Dec 15, 2025', description: 'Earned — Cloth Ironing booking', change: 6, balanceAfter: 260 },
+];
+
+export interface JobHistoryEntry {
+  id: string;
+  clientName: string;
+  date: string;
+  category: string;
+  ratingGiven: number;
+}
+
+export const PROVIDER_JOB_HISTORY: JobHistoryEntry[] = [
+  { id: 'jh1', clientName: 'Martin Luther', date: 'Jan 15, 2026', category: 'Home Cleaning', ratingGiven: 5 },
+  { id: 'jh2', clientName: 'Sarah Connor', date: 'Jan 9, 2026', category: 'Laundry', ratingGiven: 4 },
+  { id: 'jh3', clientName: 'Johan Smith', date: 'Dec 30, 2025', category: 'Home Cleaning', ratingGiven: 5 },
+];
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 export const CATEGORIES: Category[] = [

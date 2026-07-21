@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/context/ThemeContext';
+import BackButton from '@/components/BackButton';
+import InlineLoader from '@/components/InlineLoader';
 import { CATEGORIES, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
 import type { Job, JobUrgency } from '@/types';
 
@@ -34,6 +36,7 @@ export default function PostJobScreen() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [urgency, setUrgency] = useState<JobUrgency>('regular');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   const wordCount = description.trim().length ? description.trim().split(/\s+/).length : 0;
   const rateNum = parseFloat(hourlyRate) || 0;
@@ -68,8 +71,9 @@ export default function PostJobScreen() {
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
+    setSubmitting(true);
 
     const durationMs = urgency === 'urgent' ? 30 * 60 * 1000 : 3 * 60 * 60 * 1000;
     const newJob: Job = {
@@ -92,6 +96,8 @@ export default function PostJobScreen() {
       biddingDurationMs: durationMs,
       location: 'Riga, Latvia',
     };
+    // Small delay so the loading state is visible — mirrors a real network round-trip.
+    await new Promise((resolve) => setTimeout(resolve, 500));
     MOCK_JOBS.unshift(newJob);
     router.replace(`/job/${newJob.id}` as any);
   };
@@ -99,9 +105,7 @@ export default function PostJobScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Feather name="arrow-left" size={22} color={c.text} />
-        </TouchableOpacity>
+        <BackButton />
         <Text style={[styles.headerTitle, { color: c.text }]}>Post a Job</Text>
         <View style={{ width: 22 }} />
       </View>
@@ -293,8 +297,12 @@ export default function PostJobScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={handleSubmit}>
-          <Text style={styles.submitText}>Post Job & Start Bidding</Text>
+        <TouchableOpacity
+          style={[styles.submitBtn, { backgroundColor: c.primary, opacity: submitting ? 0.8 : 1 }]}
+          onPress={handleSubmit}
+          disabled={submitting}
+        >
+          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>Post Job & Start Bidding</Text>}
         </TouchableOpacity>
       </ScrollView>
     </View>

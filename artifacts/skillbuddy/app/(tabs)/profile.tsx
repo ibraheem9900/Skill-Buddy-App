@@ -6,7 +6,9 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
-import LogoMark from '@/components/LogoMark';
+import { useRole } from '@/context/RoleContext';
+import { CURRENT_USER } from '@/data/mockData';
+import LogoImage from '@/components/LogoImage';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -21,14 +23,18 @@ interface MenuItem {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const { colors: c, theme, toggleTheme } = useTheme();
+  const { activeRole, isBothRoles, toggleRole } = useRole();
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
   const toggleBtnRef = useRef<View>(null);
 
-  const name = user ? `${user.first_name} ${user.last_name}` : 'Guest User';
-  const email = user?.email ?? 'user@skillbuddy.com';
+  // Consistent, single source of truth for the logged-in identity — matches
+  // Home's greeting and the Jobs client identity, so a name change anywhere
+  // (CURRENT_USER) reflects everywhere.
+  const name = CURRENT_USER.name;
+  const email = CURRENT_USER.email;
 
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
@@ -49,27 +55,26 @@ export default function ProfileScreen() {
     }
   };
 
-  const SECTIONS: { title: string; items: MenuItem[] }[] = [
+  const clientSections: { title: string; items: MenuItem[] }[] = [
     {
       title: 'General',
       items: [
         { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
-        { icon: 'briefcase', label: 'Professional Info' },
-        { icon: 'file-text', label: 'Documents' },
-        { icon: 'star', label: 'Credit Points', badge: `${user?.credit_points ?? 0} pts` },
+        { icon: 'briefcase', label: 'Professional Info', route: '/profile/professional' },
+        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
+        { icon: 'star', label: 'Credit Points', route: '/profile/credit-points', badge: `${CURRENT_USER.creditPoints} pts` },
       ],
     },
     {
       title: 'Payments',
       items: [
-        { icon: 'credit-card', label: 'Payment Methods' },
-        { icon: 'dollar-sign', label: 'Wallet & Earnings' },
-        { icon: 'clock', label: 'Transaction History' },
+        { icon: 'credit-card', label: 'Wallet & Payments', route: '/profile/wallet' },
       ],
     },
     {
-      title: 'Appearance',
+      title: 'Settings',
       items: [
+        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
         {
           icon: theme === 'dark' ? 'sun' : 'moon',
           label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
@@ -79,14 +84,14 @@ export default function ProfileScreen() {
       ],
     },
     {
-      title: 'Support',
+      title: 'Support & Safety',
       items: [
-        { icon: 'help-circle', label: 'Help & Support' },
-        { icon: 'message-circle', label: 'Contact Support' },
-        { icon: 'book-open', label: 'FAQs' },
-        { icon: 'shield', label: 'Privacy & Policy' },
-        { icon: 'file', label: 'Terms & Conditions' },
-        { icon: 'info', label: 'About Us' },
+        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
+        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
+        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
+        { icon: 'info', label: 'About Us', route: '/profile/legal?type=about' },
+        { icon: 'file', label: 'Privacy & Cookie Policy', route: '/profile/legal?type=privacy' },
+        { icon: 'shield', label: 'Terms & Conditions', route: '/profile/legal?type=terms' },
       ],
     },
     {
@@ -97,6 +102,51 @@ export default function ProfileScreen() {
     },
   ];
 
+  const providerSections: { title: string; items: MenuItem[] }[] = [
+    {
+      title: 'General',
+      items: [
+        { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
+        { icon: 'award', label: 'Professional Info', route: '/profile/professional' },
+        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
+      ],
+    },
+    {
+      title: 'Earnings',
+      items: [
+        { icon: 'dollar-sign', label: 'Wallet & Earnings', route: '/profile/wallet' },
+      ],
+    },
+    {
+      title: 'Settings',
+      items: [
+        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
+        {
+          icon: theme === 'dark' ? 'sun' : 'moon',
+          label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+          action: handleThemeToggle,
+          isThemeToggle: true,
+        },
+      ],
+    },
+    {
+      title: 'Support & Safety',
+      items: [
+        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
+        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
+        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
+      ],
+    },
+    {
+      title: '',
+      items: [
+        { icon: 'log-out', label: 'Log Out', action: handleLogout, color: c.destructive },
+      ],
+    },
+  ];
+
+  const SECTIONS = activeRole === 'CLIENT' ? clientSections : providerSections;
+
   return (
     <ScrollView
       style={[styles.root, { backgroundColor: c.background }]}
@@ -105,9 +155,9 @@ export default function ProfileScreen() {
     >
       {/* Profile Header */}
       <View style={[styles.profileHeader, { backgroundColor: c.headerBg, paddingTop: insets.top + 12 }]}>
-        {/* Logo mark + theme toggle row */}
+        {/* Logo mark + theme toggle row — real brand asset, consistent size with Home header */}
         <View style={styles.headerTopRow}>
-          <LogoMark color="#FFFFFF" size={34} />
+          <LogoImage variant="white" height={40} />
           <View ref={toggleBtnRef} collapsable={false}>
             <TouchableOpacity
               style={styles.themeToggleBtn}
@@ -119,9 +169,26 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {isBothRoles && (
+          <View style={styles.roleSwitchWrap}>
+            <TouchableOpacity
+              style={[styles.roleSwitchOption, activeRole === 'CLIENT' && styles.roleSwitchActive]}
+              onPress={() => activeRole !== 'CLIENT' && toggleRole()}
+            >
+              <Text style={[styles.roleSwitchText, activeRole === 'CLIENT' && { color: c.primary }]}>Client</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.roleSwitchOption, activeRole === 'PROVIDER' && styles.roleSwitchActive]}
+              onPress={() => activeRole !== 'PROVIDER' && toggleRole()}
+            >
+              <Text style={[styles.roleSwitchText, activeRole === 'PROVIDER' && { color: c.primary }]}>SkillBuddy Pilot</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.avatarWrap}>
           <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'rgba(255,255,255,0.4)' }]}>
-            <Text style={styles.avatarText}>{user?.first_name?.charAt(0) ?? 'U'}</Text>
+            <Text style={styles.avatarText}>{CURRENT_USER.firstName.charAt(0)}</Text>
           </View>
           <TouchableOpacity style={[styles.editAvatarBtn, { backgroundColor: c.primary, borderColor: '#FFF' }]}>
             <Feather name="camera" size={14} color="#FFF" />
@@ -129,20 +196,18 @@ export default function ProfileScreen() {
         </View>
         <Text style={styles.name}>{name}</Text>
         <Text style={styles.email}>{email}</Text>
-        {user?.role && (
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>{user.role}</Text>
-          </View>
-        )}
+        <View style={styles.roleBadge}>
+          <Text style={styles.roleText}>{activeRole === 'CLIENT' ? 'Client' : 'SkillBuddy Pilot'}</Text>
+        </View>
       </View>
 
       {/* Stats Row */}
       <Animated.View entering={FadeInDown.delay(80).duration(400)}>
         <View style={[styles.statsRow, { backgroundColor: c.card, shadowColor: '#000' }]}>
           {[
-            { label: 'Jobs Done', value: user?.jobs_done ?? 24 },
-            { label: 'Active Jobs', value: user?.active_jobs ?? 2 },
-            { label: 'Credit Pts', value: user?.credit_points ?? 48 },
+            { label: 'Jobs Done', value: CURRENT_USER.jobsDone },
+            { label: 'Active Jobs', value: CURRENT_USER.activeJobs },
+            { label: 'Credit Pts', value: CURRENT_USER.creditPoints },
           ].map((stat, i) => (
             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
               <Text style={[styles.statValue, { color: c.primary }]}>{stat.value}</Text>
@@ -220,6 +285,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  roleSwitchWrap: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 16,
+  },
+  roleSwitchOption: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9 },
+  roleSwitchActive: { backgroundColor: '#FFFFFF' },
+  roleSwitchText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
   avatarWrap: { position: 'relative', marginBottom: 12 },
   avatar: {
     width: 88,

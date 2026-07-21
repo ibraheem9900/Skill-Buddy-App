@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
 import { authApi } from '@/services/api';
+import BackButton from '@/components/BackButton';
 
 const c = colors.light;
 
@@ -36,9 +37,7 @@ export default function EditProfileScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Feather name="arrow-left" size={22} color="#1A1A1A" />
-        </TouchableOpacity>
+        <BackButton />
         <Text style={styles.title}>Edit Profile</Text>
         <TouchableOpacity onPress={handleSave} disabled={loading}>
           {loading ? <ActivityIndicator size="small" color={c.primary} /> : (

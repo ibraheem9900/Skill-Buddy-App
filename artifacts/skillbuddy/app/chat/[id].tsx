@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import colors from '@/constants/colors';
 import { CHAT_THREADS } from '@/data/mockData';
+import BackButton from '@/components/BackButton';
 import type { ChatMessage } from '@/types';
 
 const c = colors.light;
@@ -102,11 +103,7 @@ export default function ChatThreadScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: c.primary }]}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
-              <Feather name="arrow-left" size={18} color="#FFF" />
-            </View>
-          </TouchableOpacity>
+          <BackButton color="#FFF" style={{ backgroundColor: 'rgba(255,255,255,0.25)', shadowOpacity: 0 }} />
           <View style={[styles.headerAvatar, { backgroundColor: '#FFF' }]}>
             <Text style={[styles.headerAvatarText, { color: c.primary }]}>{thread.participant.name.charAt(0)}</Text>
           </View>
@@ -122,7 +119,7 @@ export default function ChatThreadScreen() {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         {/* Date separator */}

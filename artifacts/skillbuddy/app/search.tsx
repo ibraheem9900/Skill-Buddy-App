@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import BackButton from '@/components/BackButton';
 import { useTheme } from '@/context/ThemeContext';
 import { SERVICES, CATEGORIES, SUBSERVICES } from '@/data/mockData';
 import { getServiceForSubservice } from '@/lib/serviceLookup';
@@ -131,9 +132,7 @@ export default function SearchScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {/* Search Header */}
       <View style={[styles.searchHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Feather name="arrow-left" size={22} color={c.text} />
-        </TouchableOpacity>
+        <BackButton />
         <View style={[styles.searchBar, { backgroundColor: c.input }]}>
           <Feather name="search" size={18} color={c.primary} />
           <TextInput
