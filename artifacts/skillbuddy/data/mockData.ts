@@ -27,12 +27,12 @@ export interface MockUser {
 
 export const CURRENT_USER: MockUser = {
   id: 'u1',
-  name: 'Alex Johnson',
-  firstName: 'Alex',
-  lastName: 'Johnson',
-  email: 'alex.johnson@example.com',
+  name: 'Marta Ozola',
+  firstName: 'Marta',
+  lastName: 'Ozola',
+  email: 'marta.ozola@example.com',
   phone: '+371 2xxx xx45',
-  username: 'alex.johnson',
+  username: 'marta.ozola',
   personalCode: 'SB-2024-88213',
   address: 'Riga, Latvia',
   creditPoints: 340,

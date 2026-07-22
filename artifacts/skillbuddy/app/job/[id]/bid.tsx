@@ -10,6 +10,7 @@ import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
 import InlineLoader from '@/components/InlineLoader';
 import EmptyState from '@/components/EmptyState';
+import { useAppAlert } from '@/context/AlertModalContext';
 import type { Bid, BidProvider } from '@/types';
 
 // The mock-logged-in provider identity (used when submitting a bid as a Pilot).
@@ -33,6 +34,7 @@ export default function ProviderJobBidScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
   const existingBid = useMemo(
@@ -58,7 +60,7 @@ export default function ProviderJobBidScreen() {
   const submitBid = async () => {
     const priceNum = parseFloat(price);
     if (!priceNum || priceNum <= 0) {
-      Alert.alert('Invalid price', 'Please enter a valid bid amount.');
+      showAlert({ title: 'Invalid price', message: 'Please enter a valid bid amount.', icon: 'alert-circle' });
       return;
     }
     setSubmitting(true);
@@ -80,18 +82,23 @@ export default function ProviderJobBidScreen() {
   };
 
   const cancelBid = () => {
-    Alert.alert('Cancel Bid', 'Are you sure you want to withdraw your bid?', [
-      { text: 'Keep Bid', style: 'cancel' },
-      {
-        text: 'Cancel Bid',
-        style: 'destructive',
-        onPress: () => {
-          const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
-          if (idx >= 0) MOCK_BIDS.splice(idx, 1);
-          setSubmitted(false);
+    showAlert({
+      title: 'Cancel Bid',
+      message: 'Are you sure you want to withdraw your bid?',
+      icon: 'alert-triangle',
+      buttons: [
+        { text: 'Keep Bid', style: 'cancel' },
+        {
+          text: 'Cancel Bid',
+          style: 'destructive',
+          onPress: () => {
+            const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
+            if (idx >= 0) MOCK_BIDS.splice(idx, 1);
+            setSubmitted(false);
+          },
         },
-      },
-    ]);
+      ],
+    });
   };
 
   const adjustPrice = (delta: number) => {

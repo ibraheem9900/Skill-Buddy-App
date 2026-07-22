@@ -21,6 +21,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { CATEGORIES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
+import RangeSlider from '@/components/RangeSlider';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
@@ -160,9 +161,16 @@ export default function FilterScreen() {
               <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Min</Text>
               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{minPrice}</Text>
             </View>
-            <View style={[styles.sliderTrack, { backgroundColor: c.border }]}>
-              <View style={[styles.sliderFill, { backgroundColor: c.primary }]} />
-            </View>
+            <RangeSlider
+              min={0}
+              max={400}
+              valueMin={minPrice}
+              valueMax={maxPrice}
+              onChange={(lo, hi) => {
+                setMinPrice(lo);
+                setMaxPrice(hi);
+              }}
+            />
             <View style={[styles.priceBox, { borderColor: c.border, backgroundColor: c.muted }]}>
               <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Max</Text>
               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{maxPrice}</Text>

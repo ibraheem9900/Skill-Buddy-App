@@ -12,6 +12,7 @@ import CountdownTimer from '@/components/CountdownTimer';
 import BidCard from '@/components/BidCard';
 import EmptyState from '@/components/EmptyState';
 import BrandedLoader from '@/components/BrandedLoader';
+import { useAppAlert } from '@/context/AlertModalContext';
 import type { Bid, BidProvider } from '@/types';
 
 type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
@@ -34,6 +35,7 @@ export default function BiddingDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
   const [bids, setBids] = useState<Bid[]>(() => MOCK_BIDS.filter((b) => b.jobId === id));
@@ -42,6 +44,17 @@ export default function BiddingDashboardScreen() {
   const [sortMode, setSortMode] = useState<SortMode>('recommended');
   const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
   const [screenLoading, setScreenLoading] = useState(true);
+
+  const sortedForAll = useMemo(() => {
+    const arr = [...bids];
+    switch (sortMode) {
+      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
+      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
+      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
+      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
+      default: return arr.sort((a, b) => b.score - a.score);
+    }
+  }, [bids, sortMode]);
 
   useEffect(() => {
     const t = setTimeout(() => setScreenLoading(false), 400);
@@ -80,17 +93,6 @@ export default function BiddingDashboardScreen() {
   const sortedByScore = [...bids].sort((a, b) => b.score - a.score);
   const top3 = sortedByScore.slice(0, 3);
 
-  const sortedForAll = useMemo(() => {
-    const arr = [...bids];
-    switch (sortMode) {
-      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
-      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
-      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
-      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
-      default: return arr.sort((a, b) => b.score - a.score);
-    }
-  }, [bids, sortMode]);
-
   const restartTimer = () => {
     job.biddingEndsAt = Date.now() + job.biddingDurationMs;
     setExpired(false);
@@ -104,31 +106,41 @@ export default function BiddingDashboardScreen() {
   };
 
   const cancelJob = () => {
-    Alert.alert('Cancel Job', 'Are you sure? No cancellation fee applies at this stage.', [
-      { text: 'Keep Job', style: 'cancel' },
-      {
-        text: 'Cancel Job',
-        style: 'destructive',
-        onPress: () => {
-          job.status = 'cancelled';
-          router.back();
+    showAlert({
+      title: 'Cancel Job',
+      message: 'Are you sure? No cancellation fee applies at this stage.',
+      icon: 'alert-triangle',
+      buttons: [
+        { text: 'Keep Job', style: 'cancel' },
+        {
+          text: 'Cancel Job',
+          style: 'destructive',
+          onPress: () => {
+            job.status = 'cancelled';
+            router.back();
+          },
         },
-      },
-    ]);
+      ],
+    });
   };
 
   const acceptBid = (bid: Bid) => {
-    Alert.alert('Accept this bid?', `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Accept',
-        onPress: () => {
-          job.status = 'assigned';
-          job.assignedProviderId = bid.provider.id;
-          router.back();
+    showAlert({
+      title: 'Accept this bid?',
+      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`,
+      icon: 'check-circle',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: () => {
+            job.status = 'assigned';
+            job.assignedProviderId = bid.provider.id;
+            router.back();
+          },
         },
-      },
-    ]);
+      ],
+    });
   };
 
   const openChat = (provider: BidProvider) => {

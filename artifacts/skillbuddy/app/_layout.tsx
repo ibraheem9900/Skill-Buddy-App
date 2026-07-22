@@ -18,6 +18,7 @@ import { BookmarkProvider } from '@/context/BookmarkContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { FilterProvider } from '@/context/FilterContext';
+import { AlertModalProvider } from '@/context/AlertModalContext';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
@@ -76,7 +77,12 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="filter"
-          options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom' }}
+          options={{
+            headerShown: false,
+            presentation: 'transparentModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
         />
         <Stack.Screen
           name="chat/[id]"
@@ -117,6 +123,7 @@ export default function RootLayout() {
             <AuthProvider>
               <RoleProvider>
               <FilterProvider>
+              <AlertModalProvider>
               <BookmarkProvider>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
@@ -124,6 +131,7 @@ export default function RootLayout() {
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </BookmarkProvider>
+              </AlertModalProvider>
               </FilterProvider>
               </RoleProvider>
             </AuthProvider>

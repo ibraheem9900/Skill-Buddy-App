@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import colors from '@/constants/colors';
 import { SERVICES } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
+import { useAppAlert } from '@/context/AlertModalContext';
 
 const c = colors.light;
 
@@ -38,14 +39,16 @@ export default function BookingScreen() {
 
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedTime, setSelectedTime] = useState('11:00 AM - 12:00 PM');
+  const showAlert = useAppAlert();
 
   const handleSubmit = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert(
-      'Booking Confirmed!',
-      `Your ${service.title} service is booked for ${DAYS[selectedDay].month} ${DAYS[selectedDay].date} at ${selectedTime}.`,
-      [{ text: 'View Bookings', onPress: () => router.replace('/(tabs)') }]
-    );
+    showAlert({
+      title: 'Booking Confirmed!',
+      message: `Your ${service.title} service is booked for ${DAYS[selectedDay].month} ${DAYS[selectedDay].date} at ${selectedTime}.`,
+      icon: 'check-circle',
+      buttons: [{ text: 'View Bookings', onPress: () => router.replace('/(tabs)') }],
+    });
   };
 
   return (
