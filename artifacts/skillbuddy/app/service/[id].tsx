@@ -12,7 +12,14 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  useSharedValue,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
 import { getServiceById } from '@/lib/serviceLookup';
@@ -47,6 +54,32 @@ export default function ServiceDetailScreen() {
   const images = [service.image, ...(service.images ?? [])].filter(Boolean).slice(0, 5);
 
   const bookmarked = isBookmarked(service.id);
+  const scrollY = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  // Hero image: subtle parallax (slower scroll-away) + zoom on pull-down bounce.
+  const heroStyle = useAnimatedStyle(() => {
+    const y = scrollY.value;
+    const scale = y < 0 ? 1 - y / 300 : 1;
+    const translateY = y < 0 ? 0 : -y * 0.4;
+    return { transform: [{ scale }, { translateY }] };
+  });
+
+  // Floating header bar: transparent-over-image at top, fades to a solid
+  // surface once the hero has scrolled mostly out of view.
+  const floatingHeaderStyle = useAnimatedStyle(() => ({
+    backgroundColor: c.surface,
+    opacity: interpolate(scrollY.value, [180, 260], [0, 1], Extrapolation.CLAMP),
+  }));
+
+  const floatingTitleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [200, 260], [0, 1], Extrapolation.CLAMP),
+  }));
 
   if (screenLoading) {
     return (
@@ -58,52 +91,63 @@ export default function ServiceDetailScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface }]}>
-      {/* Hero */}
-      <View style={{ height: 300 }}>
-        <Image source={{ uri: images[selectedImage] }} style={styles.heroImage} contentFit="cover" />
-        {/* Back / Bookmark */}
-        <View style={[styles.heroOverlay, { top: insets.top + 8 }]}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
-            <Feather name="arrow-left" size={20} color="#1A1A1A" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(service)}>
-            <MaterialIcons
-              name={bookmarked ? 'bookmark' : 'bookmark-border'}
-              size={22}
-              color={bookmarked ? c.primary : '#1A1A1A'}
-            />
-          </TouchableOpacity>
-        </View>
-        {/* Thumbnail strip */}
-        {images.length > 1 && (
-          <FlatList
-            data={images}
-            keyExtractor={(_, i) => String(i)}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.thumbStrip}
-            contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
-            renderItem={({ item, index }) => (
-              <TouchableOpacity onPress={() => setSelectedImage(index)} activeOpacity={0.8}>
-                <Image
-                  source={{ uri: item }}
-                  style={[
-                    styles.thumb,
-                    index === selectedImage && { borderWidth: 2, borderColor: c.primary },
-                  ]}
-                  contentFit="cover"
-                />
-              </TouchableOpacity>
-            )}
+      {/* Floating header — transparent over the hero image, fades to a solid
+          surface with the title once the hero has scrolled past. Back and
+          bookmark stay accessible throughout. */}
+      <Animated.View style={[styles.floatingHeader, { top: 0, paddingTop: insets.top + 8 }, floatingHeaderStyle]} />
+      <View style={[styles.floatingHeaderRow, { top: insets.top + 8 }]}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={20} color="#1A1A1A" />
+        </TouchableOpacity>
+        <Animated.Text style={[styles.floatingTitle, { color: c.text }, floatingTitleStyle]} numberOfLines={1}>
+          {service.title}
+        </Animated.Text>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(service)}>
+          <MaterialIcons
+            name={bookmarked ? 'bookmark' : 'bookmark-border'}
+            size={22}
+            color={bookmarked ? c.primary : '#1A1A1A'}
           />
-        )}
+        </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <Animated.ScrollView
         style={styles.body}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
       >
+        {/* Hero — scrolls away naturally with the rest of the content, with
+            a subtle parallax/zoom effect instead of staying stuck in place. */}
+        <View style={{ height: 300, overflow: 'hidden' }}>
+          <Animated.View style={heroStyle}>
+            <Image source={{ uri: images[selectedImage] }} style={styles.heroImage} contentFit="cover" />
+          </Animated.View>
+          {/* Thumbnail strip */}
+          {images.length > 1 && (
+            <FlatList
+              data={images}
+              keyExtractor={(_, i) => String(i)}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.thumbStrip}
+              contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity onPress={() => setSelectedImage(index)} activeOpacity={0.8}>
+                  <Image
+                    source={{ uri: item }}
+                    style={[
+                      styles.thumb,
+                      index === selectedImage && { borderWidth: 2, borderColor: c.primary },
+                    ]}
+                    contentFit="cover"
+                  />
+                </TouchableOpacity>
+              )}
+            />
+          )}
+        </View>
         {/* Title row */}
         <View style={styles.titleRow}>
           <View style={{ flex: 1 }}>
@@ -224,7 +268,7 @@ export default function ServiceDetailScreen() {
             ))}
           </Animated.View>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/* Bottom Bar */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, backgroundColor: c.surface, borderTopColor: c.border }]}>
@@ -245,6 +289,30 @@ export default function ServiceDetailScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   heroImage: { width: '100%', height: 300 },
+  floatingHeader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 90,
+    zIndex: 10,
+  },
+  floatingHeaderRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  floatingTitle: {
+    flex: 1,
+    marginHorizontal: 10,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 16,
+    textAlign: 'center',
+  },
   heroOverlay: {
     position: 'absolute',
     left: 0,

@@ -9,6 +9,7 @@ import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context/ThemeContext';
 import AnimatedTabIcon from '@/components/AnimatedTabIcon';
+import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
 
 function NativeTabLayout() {
   return (
@@ -79,13 +80,7 @@ function ClassicTabLayout() {
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) =>
-                isIOS ? (
-                  <SymbolView name="house" tintColor={col} size={22} />
-                ) : (
-                  <Feather name="home" size={22} color={col} />
-                )
-              }
+              {(col) => <DoorTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -96,13 +91,7 @@ function ClassicTabLayout() {
           title: 'Services',
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) =>
-                isIOS ? (
-                  <SymbolView name="square.grid.2x2" tintColor={col} size={22} />
-                ) : (
-                  <MaterialCommunityIcons name="view-grid-outline" size={22} color={col} />
-                )
-              }
+              {(col) => <GridBlocksTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -113,13 +102,7 @@ function ClassicTabLayout() {
           title: 'Jobs',
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) =>
-                isIOS ? (
-                  <SymbolView name="briefcase" tintColor={col} size={22} />
-                ) : (
-                  <Feather name="briefcase" size={22} color={col} />
-                )
-              }
+              {(col) => <BriefcaseTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -130,13 +113,7 @@ function ClassicTabLayout() {
           title: 'Inbox',
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) =>
-                isIOS ? (
-                  <SymbolView name="bubble.left" tintColor={col} size={22} />
-                ) : (
-                  <Feather name="message-circle" size={22} color={col} />
-                )
-              }
+              {(col) => <ChatPopTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -147,13 +124,7 @@ function ClassicTabLayout() {
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) =>
-                isIOS ? (
-                  <SymbolView name="person" tintColor={col} size={22} />
-                ) : (
-                  <Feather name="user" size={22} color={col} />
-                )
-              }
+              {(col) => <EyesTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
