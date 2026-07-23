@@ -157,7 +157,7 @@ export default function ProfileScreen() {
       <View style={[styles.profileHeader, { backgroundColor: c.headerBg, paddingTop: insets.top + 12 }]}>
         {/* Logo mark + theme toggle row — real brand asset, consistent size with Home header */}
         <View style={styles.headerTopRow}>
-          <LogoImage variant="white" height={40} />
+          <LogoImage variant="white" height={52} />
           <View ref={toggleBtnRef} collapsable={false}>
             <TouchableOpacity
               style={styles.themeToggleBtn}
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   roleSwitchOption: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9 },
   roleSwitchActive: { backgroundColor: '#FFFFFF' },
-  roleSwitchText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+  roleSwitchText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
   avatarWrap: { position: 'relative', marginBottom: 12 },
   avatar: {
     width: 88,
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 3,
   },
-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 36, color: '#FFF' },
+  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 36, color: '#FFF' },
   editAvatarBtn: {
     position: 'absolute',
     bottom: 0,
@@ -316,15 +316,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
   },
-  name: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#FFF', marginBottom: 2 },
-  email: { fontFamily: 'Inter_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)', marginBottom: 10 },
+  name: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#FFF', marginBottom: 2 },
+  email: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)', marginBottom: 10 },
   roleBadge: {
     paddingHorizontal: 14,
     paddingVertical: 4,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  roleText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
+  roleText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
   statsRow: {
     flexDirection: 'row',
     marginHorizontal: 16,
@@ -336,10 +336,10 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   statItem: { flex: 1, alignItems: 'center', paddingVertical: 16 },
-  statValue: { fontFamily: 'Inter_700Bold', fontSize: 20 },
-  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
+  statValue: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
+  statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
   sectionTitle: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Manrope_600SemiBold',
     fontSize: 12,
     marginTop: 20,
     marginBottom: 8,
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
   menuCard: { marginHorizontal: 16, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
   menuIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  menuLabel: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14 },
+  menuLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
-  badgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 });

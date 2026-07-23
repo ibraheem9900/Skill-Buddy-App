@@ -4,13 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
 
-const c = colors.light;
 
 export default function EditProfileScreen() {
+  const { colors: c } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, refreshUser } = useAuth();
@@ -35,10 +36,10 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <BackButton />
-        <Text style={styles.title}>Edit Profile</Text>
+        <Text style={[styles.title, { color: c.text }]}>Edit Profile</Text>
         <TouchableOpacity onPress={handleSave} disabled={loading}>
           {loading ? <ActivityIndicator size="small" color={c.primary} /> : (
             <Text style={[styles.saveText, { color: c.primary }]}>Save</Text>
@@ -60,15 +61,15 @@ export default function EditProfileScreen() {
           { label: 'Phone', value: phone, set: setPhone, icon: 'phone' as const, keyboardType: 'phone-pad' as const },
         ].map((f) => (
           <View key={f.label}>
-            <Text style={styles.label}>{f.label}</Text>
-            <View style={styles.inputRow}>
+            <Text style={[styles.label, { color: c.text }]}>{f.label}</Text>
+            <View style={[styles.inputRow, { backgroundColor: c.muted, borderColor: c.border }]}>
               <Feather name={f.icon} size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: c.text }]}
                 value={f.value}
                 onChangeText={f.set}
                 placeholder={f.label}
-                placeholderTextColor="#9E9E9E"
+                placeholderTextColor={c.mutedForeground}
                 keyboardType={f.keyboardType}
                 autoCapitalize={f.label === 'Phone' ? 'none' : 'words'}
               />
@@ -77,10 +78,10 @@ export default function EditProfileScreen() {
         ))}
 
         <View>
-          <Text style={styles.label}>Email (read-only)</Text>
-          <View style={[styles.inputRow, { backgroundColor: '#F0F0F0' }]}>
-            <Feather name="mail" size={18} color="#9E9E9E" style={{ marginRight: 10 }} />
-            <Text style={styles.readOnly}>{user?.email ?? ''}</Text>
+          <Text style={[styles.label, { color: c.text }]}>Email (read-only)</Text>
+          <View style={[styles.inputRow, { backgroundColor: c.muted, borderColor: c.border }]}>
+            <Feather name="mail" size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
+            <Text style={[styles.readOnly, { color: c.mutedForeground }]}>{user?.email ?? ''}</Text>
           </View>
         </View>
       </ScrollView>
@@ -91,16 +92,16 @@ export default function EditProfileScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFF' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  title: { flex: 1, fontFamily: 'Inter_700Bold', fontSize: 18, color: '#1A1A1A' },
-  saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+  title: { flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 18, color: '#1A1A1A' },
+  saveText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   avatarWrap: { width: 88, height: 88, borderRadius: 44, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginBottom: 8, position: 'relative' },
-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 36 },
+  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 36 },
   cameraBtn: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
+  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
   inputRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5',
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E8E8E8',
   },
-  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
-  readOnly: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#9E9E9E' },
+  input: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A' },
+  readOnly: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#9E9E9E' },
 });

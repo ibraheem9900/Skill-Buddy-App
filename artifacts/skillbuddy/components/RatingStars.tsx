@@ -45,6 +45,6 @@ export default function RatingStars({ rating, size = 14, showValue = true, revie
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  value: { fontFamily: 'Inter_600SemiBold', marginLeft: 3 },
-  count: { fontFamily: 'Inter_400Regular', marginLeft: 2 },
+  value: { fontFamily: 'Manrope_600SemiBold', marginLeft: 3 },
+  count: { fontFamily: 'Manrope_400Regular', marginLeft: 2 },
 });

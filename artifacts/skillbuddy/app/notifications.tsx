@@ -27,7 +27,7 @@ function NotifItem({ item, index, c }: { item: Notification; index: number; c: a
         <View style={styles.itemBody}>
           <View style={styles.itemTop}>
             <Text
-              style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Inter_700Bold' }]}
+              style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Manrope_700Bold' }]}
             >
               {item.title}
             </Text>
@@ -123,9 +123,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { flex: 1, fontFamily: 'Inter_700Bold', fontSize: 20 },
+  title: { flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 20 },
   badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
-  badgeText: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#FFF' },
+  badgeText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: '#FFF' },
 
   sectionHdr: {
     flexDirection: 'row',
@@ -135,8 +135,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
   },
-  sectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
-  markAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
+  markAll: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
 
   item: {
     flexDirection: 'row',
@@ -161,9 +161,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 4,
   },
-  itemTitle: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14, marginRight: 8 },
-  itemTime: { fontFamily: 'Inter_400Regular', fontSize: 12, flexShrink: 0 },
-  itemMsg: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20 },
+  itemTitle: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginRight: 8 },
+  itemTime: { fontFamily: 'Manrope_400Regular', fontSize: 12, flexShrink: 0 },
+  itemMsg: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4, flexShrink: 0 },
   sep: { height: StyleSheet.hairlineWidth },
 });

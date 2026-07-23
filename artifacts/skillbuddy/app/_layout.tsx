@@ -5,12 +5,12 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
   useFonts,
-} from '@expo-google-fonts/inter';
+} from '@expo-google-fonts/manrope';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/context/AuthContext';
@@ -19,6 +19,8 @@ import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { FilterProvider } from '@/context/FilterContext';
 import { AlertModalProvider } from '@/context/AlertModalContext';
+import NavigationLoaderOverlay from '@/components/NavigationLoaderOverlay';
+import { LanguageProvider } from '@/context/LanguageContext';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
@@ -97,16 +99,17 @@ function RootLayoutNav() {
           options={{ headerShown: false, animation: 'slide_from_bottom' }}
         />
       </Stack>
+      <NavigationLoaderOverlay />
     </>
   );
 }
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
   });
 
   useEffect(() => {
@@ -124,6 +127,7 @@ export default function RootLayout() {
               <RoleProvider>
               <FilterProvider>
               <AlertModalProvider>
+              <LanguageProvider>
               <BookmarkProvider>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
@@ -131,6 +135,7 @@ export default function RootLayout() {
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </BookmarkProvider>
+              </LanguageProvider>
               </AlertModalProvider>
               </FilterProvider>
               </RoleProvider>

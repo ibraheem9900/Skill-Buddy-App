@@ -189,7 +189,7 @@ export default function SearchScreen() {
         <View style={[styles.resultRow, { borderBottomColor: c.border }]}>
           <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
             {filtered.length} result{filtered.length !== 1 ? 's' : ''} for{' '}
-            <Text style={{ color: c.text, fontFamily: 'Inter_600SemiBold' }}>"{query}"</Text>
+            <Text style={{ color: c.text, fontFamily: 'Manrope_600SemiBold' }}>"{query}"</Text>
           </Text>
         </View>
       )}
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
+  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14 },
   clearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   suggestBox: {
     marginHorizontal: 16,
@@ -287,16 +287,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  suggestLabel: { fontFamily: 'Inter_500Medium', fontSize: 14 },
-  suggestSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 1 },
+  suggestLabel: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+  suggestSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 1 },
   resultRow: { paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1 },
-  resultCount: { fontFamily: 'Inter_400Regular', fontSize: 13 },
+  resultCount: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   emptyIconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, textAlign: 'center' },
-  emptySub: { fontFamily: 'Inter_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 18, textAlign: 'center' },
+  emptySub: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
   emptyBtn: { marginTop: 4, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 28 },
-  emptyBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
+  emptyBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
   emptyBtnOutline: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -306,5 +306,5 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderWidth: 1.5,
   },
-  emptyBtnOutlineText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+  emptyBtnOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
 });

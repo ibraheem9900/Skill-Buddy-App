@@ -104,7 +104,7 @@ export default function OnboardingScreen() {
                 onPress={() => setSelectedLang(lang.code)}
               >
                 <Text style={styles.langFlag}>{lang.flag}</Text>
-                <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Inter_600SemiBold' }]}>
+                <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Manrope_600SemiBold' }]}>
                   {lang.name}
                 </Text>
               </TouchableOpacity>
@@ -174,10 +174,10 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFF' },
   skipBtn: { position: 'absolute', top: 60, right: 24, zIndex: 10 },
-  skipText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: colors.light.primary },
+  skipText: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.light.primary },
   langContent: { flex: 1, paddingHorizontal: 24, paddingTop: 40 },
-  langTitle: { fontFamily: 'Inter_700Bold', fontSize: 28, color: '#1A1A1A', marginBottom: 6 },
-  langSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', marginBottom: 32 },
+  langTitle: { fontFamily: 'Manrope_700Bold', fontSize: 28, color: '#1A1A1A', marginBottom: 6 },
+  langSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', marginBottom: 32 },
   langList: { gap: 14 },
   langItem: {
     flexDirection: 'row',
@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAFAFA',
   },
   langFlag: { fontSize: 28 },
-  langName: { fontFamily: 'Inter_500Medium', fontSize: 16, color: '#1A1A1A' },
+  langName: { fontFamily: 'Manrope_500Medium', fontSize: 16, color: '#1A1A1A' },
   slide: { width, alignItems: 'center', paddingTop: 80, paddingHorizontal: 28 },
   slideIconWrap: {
     width: 200,
@@ -201,8 +201,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 36,
   },
-  slideTitle: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center', lineHeight: 36, marginBottom: 12 },
-  slideSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
+  slideTitle: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center', lineHeight: 36, marginBottom: 12 },
+  slideSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Manrope_700Bold',
     fontSize: 18,
     color: '#FFF',
     textAlign: 'center',
@@ -113,8 +113,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardBody: { flex: 1 },
-  cardTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, marginBottom: 3 },
-  cardDesc: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 18 },
+  cardTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, marginBottom: 3 },
+  cardDesc: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 18 },
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
+  emptyText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
 });

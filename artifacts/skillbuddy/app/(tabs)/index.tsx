@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import {
   CATEGORIES,
   CURRENT_USER,
@@ -81,6 +82,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [refreshing, setRefreshing] = useState(false);
   const [offerIdx, setOfferIdx] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -108,7 +110,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 10 }]}>
         {/* Logo + notification row */}
         <View style={styles.logoRow}>
-          <LogoImage variant="white" height={42} />
+          <LogoImage variant="white" height={54} />
           <TouchableOpacity
             style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
             onPress={() => router.push('/notifications')}
@@ -137,7 +139,7 @@ export default function HomeScreen() {
         <Pressable style={styles.searchWrap} onPress={() => router.push('/search')}>
           <View style={styles.searchBar}>
             <Feather name="search" size={15} color="#9E9E9E" />
-            <Text style={styles.searchPlaceholder}>Search for a service…</Text>
+            <Text style={styles.searchPlaceholder}>{t('search_placeholder')}</Text>
           </View>
           <TouchableOpacity style={styles.filterBtn} onPress={() => router.push('/filter')}>
             <Feather name="sliders" size={15} color={c.primary} />
@@ -159,13 +161,10 @@ export default function HomeScreen() {
           />
         }
       >
-        {/* Welcome Banner */}
+        {/* Section heading — no "Welcome back, Name" greeting, per request */}
         <Animated.View entering={FadeInDown.delay(20).duration(380)} style={styles.section}>
           <Text style={[styles.welcomeText, { color: c.text }]}>
-            Welcome back, <Text style={[styles.welcomeName, { color: c.primary }]}>{CURRENT_USER.name}</Text>
-          </Text>
-          <Text style={[styles.welcomeSub, { color: c.mutedForeground }]}>
-            What service do you need today?
+            {t('home_heading')}
           </Text>
         </Animated.View>
 
@@ -176,7 +175,7 @@ export default function HomeScreen() {
               <MaterialCommunityIcons name="star-circle-outline" size={22} color={c.primary} />
             </View>
             <View style={styles.creditBody}>
-              <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>Credit Points</Text>
+              <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
               <Text style={[styles.creditValue, { color: c.text }]}>
                 {CURRENT_USER.creditPoints.toLocaleString()} pts
               </Text>
@@ -211,7 +210,7 @@ export default function HomeScreen() {
         {/* Special Offers */}
         <Animated.View entering={FadeInDown.delay(80).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Special For You</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_special_for_you')}</Text>
             <TouchableOpacity>
               <Text style={[styles.seeAll, { color: c.primary }]}>See All</Text>
             </TouchableOpacity>
@@ -252,7 +251,7 @@ export default function HomeScreen() {
         {/* Categories */}
         <Animated.View entering={FadeInDown.delay(100).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Categories</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_categories')}</Text>
             <TouchableOpacity onPress={() => router.push('/categories')}>
               <Text style={[styles.seeAll, { color: c.primary }]}>See all</Text>
             </TouchableOpacity>
@@ -399,7 +398,7 @@ const styles = StyleSheet.create({
   },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 },
   locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
+  locationText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
   notifBtn: {
     backgroundColor: 'rgba(255,255,255,0.15)',
     width: 38,
@@ -422,7 +421,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
-  notifBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 10, color: '#FFF' },
+  notifBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 10, color: '#FFF' },
   searchWrap: { flexDirection: 'row', gap: 8 },
   searchBar: {
     flex: 1,
@@ -434,7 +433,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  searchPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#9E9E9E' },
+  searchPlaceholder: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#9E9E9E' },
   filterBtn: {
     backgroundColor: '#FFF',
     width: 42,
@@ -444,9 +443,7 @@ const styles = StyleSheet.create({
   },
 
   // ── Welcome ───────────────────────────────────────────────────────────────
-  welcomeText: { fontFamily: 'Inter_400Regular', fontSize: 16 },
-  welcomeName: { fontFamily: 'Inter_700Bold' },
-  welcomeSub: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 2 },
+  welcomeText: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
 
   // ── Credit Points ─────────────────────────────────────────────────────────
   creditCard: {
@@ -470,9 +467,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   creditBody: { flex: 1 },
-  creditLabel: { fontFamily: 'Inter_400Regular', fontSize: 11 },
-  creditValue: { fontFamily: 'Inter_700Bold', fontSize: 20, marginTop: 1 },
-  creditNote: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
+  creditLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+  creditValue: { fontFamily: 'Manrope_700Bold', fontSize: 20, marginTop: 1 },
+  creditNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
 
   // ── Quick tiles ───────────────────────────────────────────────────────────
   quickGrid: {
@@ -500,7 +497,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  quickLabel: { fontFamily: 'Inter_500Medium', fontSize: 11, textAlign: 'center' },
+  quickLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, textAlign: 'center' },
 
   // ── Sections ──────────────────────────────────────────────────────────────
   section: { marginTop: 20 },
@@ -511,8 +508,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
   },
-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
-  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 13 },
+  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+  seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
   dotsRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, marginTop: 10 },
   dot: { height: 5, borderRadius: 3 },
 
@@ -536,8 +533,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  specialtyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
-  specialtyDesc: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
+  specialtyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  specialtyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16 },
 
   // ── Badge card ────────────────────────────────────────────────────────────
   badgeCard: {
@@ -559,14 +556,14 @@ const styles = StyleSheet.create({
   },
   badgeCardLeft: { flex: 1, gap: 4, marginRight: 12 },
   badgeCardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  badgeCardTitle: { fontFamily: 'Inter_700Bold', fontSize: 13 },
-  badgeCardSub: { fontFamily: 'Inter_400Regular', fontSize: 11 },
+  badgeCardTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  badgeCardSub: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   badgeTiers: { flexDirection: 'row', gap: 12 },
   badgeTierItem: { alignItems: 'center', gap: 3 },
-  badgeTierLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
+  badgeTierLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
   badgeTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   badgeFill: { height: '100%', borderRadius: 3 },
-  badgeProgressLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 6 },
+  badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
 
   // ── Invite card ───────────────────────────────────────────────────────────
   inviteCard: {
@@ -579,12 +576,12 @@ const styles = StyleSheet.create({
   },
   inviteLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   inviteText: { flex: 1 },
-  inviteTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
-  inviteSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2, lineHeight: 16 },
+  inviteTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  inviteSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2, lineHeight: 16 },
   inviteBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
   },
-  inviteBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
+  inviteBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
 });

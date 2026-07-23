@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerTitle: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Manrope_700Bold',
     fontSize: 20,
     color: '#FFF',
   },
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Manrope_400Regular',
     fontSize: 13,
     color: '#1A1A1A',
     // Explicit height avoids web rendering quirks
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
-  filterBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 9, color: '#FFF' },
+  filterBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#FFF' },
 
   // ── Category chips ──────────────────────────────────────────────────────────
   catSection: { paddingTop: 20 },
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
   },
-  catChipText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
+  catChipText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
 
   // ── Results ─────────────────────────────────────────────────────────────────
   resultsHeader: {
@@ -351,9 +351,9 @@ const styles = StyleSheet.create({
     marginTop: 22,
     marginBottom: 12,
   },
-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
-  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 13 },
-  resultCount: { fontFamily: 'Inter_400Regular', fontSize: 13 },
+  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+  seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+  resultCount: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
   servicesList: { paddingHorizontal: 16 },
 
   // ── Empty state ─────────────────────────────────────────────────────────────
@@ -370,10 +370,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 17, textAlign: 'center' },
-  emptySub: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 17, textAlign: 'center' },
+  emptySub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   emptyBtn: { marginTop: 4, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 28 },
-  emptyBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
+  emptyBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
   emptyBtnOutline: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -383,5 +383,5 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderWidth: 1.5,
   },
-  emptyBtnOutlineText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+  emptyBtnOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
 });

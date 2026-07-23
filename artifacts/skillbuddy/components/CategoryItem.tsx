@@ -49,6 +49,6 @@ const styles = StyleSheet.create({
   container: { alignItems: 'center', gap: 8, width: 72 },
   containerSm: { width: 64 },
   circle: { alignItems: 'center', justifyContent: 'center' },
-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, textAlign: 'center' },
+  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, textAlign: 'center' },
   labelSm: { fontSize: 11 },
 });

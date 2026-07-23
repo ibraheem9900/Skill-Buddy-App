@@ -79,9 +79,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 20,
   },
-  badgeText: { fontFamily: 'Inter_500Medium', fontSize: 10, color: '#FFF' },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#FFF' },
-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.75)' },
+  badgeText: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: '#FFF' },
+  title: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
+  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.75)' },
   right: {
     alignItems: 'center',
     gap: 6,
@@ -91,8 +91,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 2,
   },
-  discountNum: { fontFamily: 'Inter_700Bold', fontSize: 32, color: '#FFF', lineHeight: 36 },
-  discountPct: { fontFamily: 'Inter_700Bold', fontSize: 11, color: 'rgba(255,255,255,0.85)', marginBottom: 4, lineHeight: 14 },
+  discountNum: { fontFamily: 'Manrope_700Bold', fontSize: 32, color: '#FFF', lineHeight: 36 },
+  discountPct: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: 'rgba(255,255,255,0.85)', marginBottom: 4, lineHeight: 14 },
   claimBtn: {
     backgroundColor: 'rgba(255,255,255,0.2)',
     width: 28,

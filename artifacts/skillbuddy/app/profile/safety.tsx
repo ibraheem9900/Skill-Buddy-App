@@ -67,13 +67,13 @@ export default function SafetyScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
   sosBtn: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginTop: 4 },
   sosIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  sosTitle: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
-  sosSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 8 },
+  sosTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+  sosSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 8 },
   card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  rowLabel: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14 },
+  rowLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
 });

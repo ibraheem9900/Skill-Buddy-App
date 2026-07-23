@@ -32,8 +32,8 @@ export default function EmptyState({ icon = 'inbox', title, subtitle, actionLabe
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   iconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { fontFamily: 'Inter_600SemiBold', fontSize: 18, textAlign: 'center' },
-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  title: { fontFamily: 'Manrope_600SemiBold', fontSize: 18, textAlign: 'center' },
+  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
   btn: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 25 },
-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#FFFFFF' },
+  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: '#FFFFFF' },
 });

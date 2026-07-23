@@ -75,13 +75,13 @@ export default function DocumentsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
-  hint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, marginBottom: 16 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+  hint: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 19, marginBottom: 16 },
   docCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 12 },
   docIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  docTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginBottom: 6 },
+  docTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 6 },
   statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  statusText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
+  statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
   docAction: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  docActionText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+  docActionText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
 });

@@ -85,10 +85,12 @@ function PaintRevealOverlay({
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<ThemeMode>('light');
-  const originRef = useRef({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
   const [overlayColor, setOverlayColor] = useState('#111614');
+  const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
   // Whether a toggle is currently in flight — prevents double-taps.
   const isAnimating = useRef(false);
+  const themeRef = useRef<ThemeMode>('light');
+  themeRef.current = theme;
 
   const scaleAnim = useSharedValue(0);
 
@@ -98,47 +100,46 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Runs on the JS thread once the overlay has fully expanded and covers the
+  // screen — safe to swap the actual theme here since nothing is visible
+  // underneath the overlay at this point.
+  const applyThemeSwap = useCallback(() => {
+    const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
+    setTheme(next);
+    AsyncStorage.setItem(THEME_KEY, next);
+    // Collapse the overlay now that the new theme is underneath it.
+    scaleAnim.value = withTiming(0, { duration: 260, easing: Easing.in(Easing.cubic) }, (finished) => {
+      if (finished) {
+        isAnimating.current = false;
+      }
+    });
+  }, [scaleAnim]);
+
   const toggleTheme = useCallback(
     (originX = SCREEN_W / 2, originY = SCREEN_H / 2) => {
       if (isAnimating.current) return;
       isAnimating.current = true;
 
-      setTheme((current) => {
-        const next: ThemeMode = current === 'light' ? 'dark' : 'light';
-        const nextBg = next === 'dark' ? colors.dark.background : colors.light.background;
-        originRef.current = { x: originX, y: originY };
-        setOverlayColor(nextBg);
+      const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
+      const nextBg = next === 'dark' ? colors.dark.background : colors.light.background;
 
-        // Kick off expand animation.
-        // After half the duration, apply the theme swap under the still-covering overlay.
-        // After the full expand, collapse the overlay instantly.
-        scaleAnim.value = 0;
-
-        // Phase 1: expand 0 → 1 over 480ms
-        scaleAnim.value = withTiming(
-          1,
-          { duration: 480, easing: Easing.out(Easing.cubic) },
-          (finished) => {
-            if (!finished) {
-              runOnJS(() => { isAnimating.current = false; })();
-              return;
-            }
-            // Phase 2: collapse instantly (sets opacity to 0 via the animated style)
-            scaleAnim.value = 0;
-            runOnJS(() => { isAnimating.current = false; })();
-          }
-        );
-
-        // Apply the theme after 240ms (mid-point) — overlay fully covers the screen by then.
-        setTimeout(() => {
-          setTheme(next);
-          AsyncStorage.setItem(THEME_KEY, next);
-        }, 240);
-
-        return current; // Return current for the outer setTheme — we handle it in setTimeout above
+      // Plain state updates — no nested setState-inside-updater here, which
+      // was the source of the crash (React may invoke updater functions more
+      // than once, causing the side effects inside it to fire unpredictably).
+      setOrigin({ x: originX, y: originY });
+      setOverlayColor(nextBg);
+      scaleAnim.value = 0;
+      scaleAnim.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }, (finished) => {
+        if (finished) {
+          runOnJS(applyThemeSwap)();
+        } else {
+          runOnJS(() => {
+            isAnimating.current = false;
+          })();
+        }
       });
     },
-    [scaleAnim]
+    [scaleAnim, applyThemeSwap]
   );
 
   const palette = theme === 'dark' ? colors.dark : colors.light;
@@ -149,8 +150,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       <PaintRevealOverlay
         scaleAnim={scaleAnim}
         overlayColor={overlayColor}
-        originX={originRef.current.x}
-        originY={originRef.current.y}
+        originX={origin.x}
+        originY={origin.y}
       />
     </ThemeContext.Provider>
   );

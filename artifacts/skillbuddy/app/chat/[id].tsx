@@ -17,11 +17,11 @@ import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 import { CHAT_THREADS } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 import type { ChatMessage } from '@/types';
 
-const c = colors.light;
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   { id: 'm1', text: 'Lorem Ipsum is simply dummy text of the printing and typesetting industry.', sender: 'other', timestamp: '08:04 pm', senderName: 'Jenny Wilson' },
@@ -31,6 +31,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 ];
 
 export default function ChatThreadScreen() {
+  const { colors: c } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -64,11 +65,11 @@ export default function ChatThreadScreen() {
         )}
         <View style={styles.msgContent}>
           {item.image ? (
-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther, { padding: 4 }]}>
+            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }, { padding: 4 }]}>
               <Image source={{ uri: item.image }} style={[styles.msgImage, { borderRadius: 12 }]} contentFit="cover" />
             </View>
           ) : item.voice ? (
-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther, styles.voiceBubble]}>
+            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }, styles.voiceBubble]}>
               <TouchableOpacity style={styles.playBtn}>
                 <Feather name="play" size={18} color="#FFF" />
               </TouchableOpacity>
@@ -80,8 +81,8 @@ export default function ChatThreadScreen() {
               <Text style={styles.voiceDuration}>0:{String(item.voiceDuration ?? 0).padStart(2, '0')}</Text>
             </View>
           ) : (
-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-              <Text style={[styles.msgText, isMe && styles.msgTextMe]}>{item.text}</Text>
+            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }]}>
+              <Text style={[styles.msgText, { color: c.text }, isMe && styles.msgTextMe]}>{item.text}</Text>
             </View>
           )}
           <View style={[styles.metaRow, isMe && { justifyContent: 'flex-end' }]}>
@@ -139,24 +140,24 @@ export default function ChatThreadScreen() {
         />
 
         {/* Input Bar */}
-        <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+        <View style={[styles.inputBar, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 8 }]}>
           <TouchableOpacity style={[styles.attachBtn, { backgroundColor: c.primaryLight }]}>
             <Feather name="plus" size={20} color={c.primary} />
           </TouchableOpacity>
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, { backgroundColor: c.muted, color: c.text }]}
             value={input}
             onChangeText={setInput}
             placeholder="Type a message here..."
-            placeholderTextColor="#9E9E9E"
+            placeholderTextColor={c.mutedForeground}
             multiline
             maxLength={500}
           />
           <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: input.trim() ? c.primary : '#E8E8E8' }]}
+            style={[styles.sendBtn, { backgroundColor: input.trim() ? c.primary : c.muted }]}
             onPress={sendMessage}
           >
-            <Feather name={input.trim() ? 'send' : 'mic'} size={18} color={input.trim() ? '#FFF' : '#9E9E9E'} />
+            <Feather name={input.trim() ? 'send' : 'mic'} size={18} color={input.trim() ? '#FFF' : c.mutedForeground} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -171,30 +172,30 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   backBtn: {},
   headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  headerAvatarText: { fontFamily: 'Inter_700Bold', fontSize: 16 },
-  headerName: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
-  headerStatus: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.8)' },
+  headerAvatarText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+  headerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+  headerStatus: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.8)' },
   dateSep: { alignItems: 'center', marginVertical: 8 },
-  dateText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: '#9E9E9E', backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  dateText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#9E9E9E', backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowMe: { flexDirection: 'row-reverse' },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  avatarText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+  avatarText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   msgContent: { maxWidth: '70%', gap: 4 },
   bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleOther: { backgroundColor: '#FFF', borderBottomLeftRadius: 4 },
   bubbleMe: { backgroundColor: colors.light.primary, borderBottomRightRadius: 4 },
-  msgText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
+  msgText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
   msgTextMe: { color: '#FFF' },
   msgImage: { width: 200, height: 150, borderRadius: 12 },
   voiceBubble: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
   playBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' },
   waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2 },
   bar: { width: 3, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 1.5 },
-  voiceDuration: { fontFamily: 'Inter_500Medium', fontSize: 12, color: '#FFF' },
+  voiceDuration: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#FFF' },
   metaRow: { flexDirection: 'row-reverse', gap: 6, alignItems: 'center' },
-  timestamp: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#9E9E9E' },
-  senderName: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#9E9E9E' },
+  timestamp: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#9E9E9E' },
+  senderName: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#9E9E9E' },
   inputBar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, paddingTop: 10,
@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
   },
   attachBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   textInput: {
-    flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A',
+    flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A',
     backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10,
     maxHeight: 100,
   },

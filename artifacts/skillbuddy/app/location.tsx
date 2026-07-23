@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   title: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Manrope_700Bold',
     fontSize: 18,
     flex: 1,
   },
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 13,
     paddingHorizontal: 8,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Manrope_400Regular',
     fontSize: 15,
   },
   clearBtn: { paddingHorizontal: 12 },
@@ -187,8 +187,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  currentLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
-  currentSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
+  currentLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+  currentSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
 
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16, marginBottom: 4 },
 
@@ -207,10 +207,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  resultName: { fontFamily: 'Inter_500Medium', fontSize: 14 },
-  resultSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
+  resultName: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+  resultSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
 
   sep: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
   empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
+  emptyText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
 });

@@ -57,6 +57,6 @@ export default function LegalScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
-  paragraph: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, marginBottom: 16 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+  paragraph: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 22, marginBottom: 16 },
 });

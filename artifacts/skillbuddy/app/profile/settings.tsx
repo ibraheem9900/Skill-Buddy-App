@@ -5,8 +5,10 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import BackButton from '@/components/BackButton';
+import { useLanguage } from '@/context/LanguageContext';
+import type { LanguageCode } from '@/context/LanguageContext';
 
-const LANGUAGES = [
+const LANGUAGES: { code: LanguageCode; name: string }[] = [
   { code: 'en', name: 'English' },
   { code: 'de', name: 'German' },
   { code: 'et', name: 'Estonian' },
@@ -21,7 +23,7 @@ export default function SettingsScreen() {
   const [notifBooking, setNotifBooking] = useState(true);
   const [notifOffers, setNotifOffers] = useState(true);
   const [notifChat, setNotifChat] = useState(true);
-  const [language, setLanguage] = useState('en');
+  const { language, setLanguage } = useLanguage();
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -86,9 +88,9 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 20, marginBottom: 8 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 20, marginBottom: 8 },
   card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
-  rowLabel: { fontFamily: 'Inter_500Medium', fontSize: 14 },
+  rowLabel: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
 });

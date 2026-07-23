@@ -8,6 +8,7 @@ import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import AnimatedTabIcon from '@/components/AnimatedTabIcon';
 import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
 
@@ -40,6 +41,7 @@ function NativeTabLayout() {
 
 function ClassicTabLayout() {
   const { colors: c, theme } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
@@ -51,7 +53,7 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarActiveTintColor: c.tabBarActive,
         tabBarInactiveTintColor: c.tabBarInactive,
-        tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 2 },
+        tabBarLabelStyle: { fontFamily: 'Manrope_500Medium', fontSize: 11, marginBottom: 2 },
         tabBarStyle: {
           position: 'absolute',
           backgroundColor: isIOS ? 'transparent' : c.tabBarBg,
@@ -77,7 +79,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: t('tab_home'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
               {(col) => <DoorTabIcon focused={focused} color={col} size={22} />}
@@ -88,7 +90,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="services"
         options={{
-          title: 'Services',
+          title: t('tab_services'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
               {(col) => <GridBlocksTabIcon focused={focused} color={col} size={22} />}
@@ -99,7 +101,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="jobs"
         options={{
-          title: 'Jobs',
+          title: t('tab_jobs'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
               {(col) => <BriefcaseTabIcon focused={focused} color={col} size={22} />}
@@ -110,7 +112,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="inbox"
         options={{
-          title: 'Inbox',
+          title: t('tab_inbox'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
               {(col) => <ChatPopTabIcon focused={focused} color={col} size={22} />}
@@ -121,7 +123,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: t('tab_profile'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
               {(col) => <EyesTabIcon focused={focused} color={col} size={22} />}

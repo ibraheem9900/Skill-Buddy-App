@@ -95,9 +95,9 @@ const styles = StyleSheet.create({
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   card: { width: '100%', borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },
   iconWrap: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 17, textAlign: 'center' },
-  message: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 10 },
+  title: { fontFamily: 'Manrope_700Bold', fontSize: 17, textAlign: 'center' },
+  message: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 10 },
   buttonRow: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 6 },
   btn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 12 },
-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
 });

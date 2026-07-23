@@ -67,12 +67,12 @@ const styles = StyleSheet.create({
   quoteInner: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   quoteIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   quoteText: { flex: 1 },
-  quoteTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
-  quoteSub: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 2 },
+  quoteTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+  quoteSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginTop: 2 },
   quoteBtn: {
     borderRadius: 28,
     paddingVertical: 13,
     alignItems: 'center',
   },
-  quoteBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
+  quoteBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
 });

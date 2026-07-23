@@ -55,9 +55,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+  label: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   sub: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Manrope_400Regular',
     fontSize: 13,
     textAlign: 'center',
     paddingHorizontal: 40,

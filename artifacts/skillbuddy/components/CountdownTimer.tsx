@@ -76,8 +76,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  label: { fontFamily: 'Inter_500Medium', fontSize: 12 },
-  time: { fontFamily: 'Inter_700Bold', fontSize: 24 },
+  label: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  time: { fontFamily: 'Manrope_700Bold', fontSize: 24 },
   compactWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -87,5 +87,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignSelf: 'flex-start',
   },
-  compactText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
+  compactText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
 });

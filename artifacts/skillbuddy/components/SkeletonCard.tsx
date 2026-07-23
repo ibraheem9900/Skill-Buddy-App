@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
-import colors from '@/constants/colors';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Props { height?: number; borderRadius?: number; style?: object }
 
 export function SkeletonBox({ height = 20, borderRadius = 8, style }: Props) {
+  const { colors: c } = useTheme();
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -18,15 +19,16 @@ export function SkeletonBox({ height = 20, borderRadius = 8, style }: Props) {
 
   const bg = anim.interpolate({
     inputRange: [0, 1],
-    outputRange: [colors.light.skeletonBase, colors.light.skeletonHighlight],
+    outputRange: [c.skeletonBase, c.skeletonHighlight],
   });
 
   return <Animated.View style={[{ height, borderRadius, backgroundColor: bg }, style]} />;
 }
 
 export default function SkeletonCard() {
+  const { colors: c } = useTheme();
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: c.card, shadowColor: c.shadow }]}>
       <SkeletonBox height={110} borderRadius={12} />
       <View style={styles.body}>
         <SkeletonBox height={10} style={{ width: '50%' }} />
@@ -40,11 +42,9 @@ export default function SkeletonCard() {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFF',
     borderRadius: 16,
     overflow: 'hidden',
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 6,
