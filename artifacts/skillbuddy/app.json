@@ -16,7 +16,9 @@
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.ibraheem1122.skillbuddy"
+    },
     "web": {
       "favicon": "./assets/images/favicon.png"
     },
@@ -33,6 +35,17 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "69424157-1237-431e-bedc-525512a0fbc6"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/69424157-1237-431e-bedc-525512a0fbc6"
     }
   }
 }

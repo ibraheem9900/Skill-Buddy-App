@@ -58,6 +58,7 @@
   "dependencies": {
     "axios": "^1.18.1",
     "expo-secure-store": "^57.0.0",
+    "expo-updates": "~29.0.19",
     "react-native-maps": "1.18.0"
   }
 }
