@@ -60,10 +60,10 @@ const SPECIALTIES = [
 
 // ─── Quick-access tiles ───────────────────────────────────────────────────────
 const QUICK_TILES = [
-  { icon: 'view-grid-outline',    label: 'Browse Services', route: '/categories' as const },
-  { icon: 'calendar-check-outline', label: 'My Bookings',  route: '/(tabs)/profile' as const },
-  { icon: 'message-text-outline', label: 'Chat',           route: '/(tabs)/inbox' as const },
-  { icon: 'account-outline',      label: 'Profile',        route: '/(tabs)/profile' as const },
+  { icon: 'view-grid-outline',    labelKey: 'home_browse_services', route: '/categories' as const },
+  { icon: 'calendar-check-outline', labelKey: 'home_my_bookings',  route: '/(tabs)/profile' as const },
+  { icon: 'message-text-outline', labelKey: 'home_chat',           route: '/(tabs)/inbox' as const },
+  { icon: 'account-outline',      labelKey: 'home_profile',        route: '/(tabs)/profile' as const },
 ] as const;
 
 // ─── Stars ────────────────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ export default function HomeScreen() {
         }
       >
         {/* Section heading — no "Welcome back, Name" greeting, per request */}
-        <Animated.View entering={FadeInDown.delay(20).duration(380)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(20).duration(380)} style={[styles.section, { paddingHorizontal: 16 }]}>
           <Text style={[styles.welcomeText, { color: c.text }]}>
             {t('home_heading')}
           </Text>
@@ -191,7 +191,7 @@ export default function HomeScreen() {
           <View style={styles.quickGrid}>
             {QUICK_TILES.map((tile) => (
               <TouchableOpacity
-                key={tile.label}
+                key={tile.labelKey}
                 style={[styles.quickTile, { backgroundColor: c.card, borderColor: c.border }]}
                 onPress={() => router.push(tile.route as any)}
                 activeOpacity={0.75}
@@ -200,7 +200,7 @@ export default function HomeScreen() {
                   <MaterialCommunityIcons name={tile.icon as any} size={22} color={c.primary} />
                 </View>
                 <Text style={[styles.quickLabel, { color: c.text }]} numberOfLines={1}>
-                  {tile.label}
+                  {t(tile.labelKey)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -212,7 +212,7 @@ export default function HomeScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_special_for_you')}</Text>
             <TouchableOpacity>
-              <Text style={[styles.seeAll, { color: c.primary }]}>See All</Text>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
           </View>
           <FlatList
@@ -253,7 +253,7 @@ export default function HomeScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_categories')}</Text>
             <TouchableOpacity onPress={() => router.push('/categories')}>
-              <Text style={[styles.seeAll, { color: c.primary }]}>See all</Text>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
           </View>
           <FlatList
@@ -270,10 +270,10 @@ export default function HomeScreen() {
         <Animated.View entering={FadeInDown.delay(120).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>
-              {IS_PERSONALIZED ? 'More Like Your Bookings' : 'Popular Services'}
+              {IS_PERSONALIZED ? t('home_recommended') : t('home_popular_services')}
             </Text>
             <TouchableOpacity onPress={() => router.push('/search')}>
-              <Text style={[styles.seeAll, { color: c.primary }]}>See all</Text>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
           </View>
           {loading ? (
@@ -300,7 +300,7 @@ export default function HomeScreen() {
         {/* SkillBuddy Specialties */}
         <Animated.View entering={FadeInDown.delay(140).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Why SkillBuddy?</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_why_skillbuddy')}</Text>
           </View>
           <FlatList
             data={SPECIALTIES}
@@ -323,7 +323,7 @@ export default function HomeScreen() {
         {/* Earn Badges */}
         <Animated.View entering={FadeInDown.delay(160).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Earn Badges</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_earn_badges')}</Text>
             <TouchableOpacity>
               <Text style={[styles.seeAll, { color: c.primary }]}>Learn more</Text>
             </TouchableOpacity>

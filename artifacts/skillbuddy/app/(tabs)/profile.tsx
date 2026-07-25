@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER } from '@/data/mockData';
@@ -25,6 +26,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { logout } = useAuth();
   const { colors: c, theme, toggleTheme } = useTheme();
+  const { t } = useLanguage();
   const { activeRole, isBothRoles, toggleRole } = useRole();
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
@@ -59,25 +61,25 @@ export default function ProfileScreen() {
     {
       title: 'General',
       items: [
-        { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
-        { icon: 'briefcase', label: 'Professional Info', route: '/profile/professional' },
-        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
-        { icon: 'star', label: 'Credit Points', route: '/profile/credit-points', badge: `${CURRENT_USER.creditPoints} pts` },
+        { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
+        { icon: 'briefcase', label: t('profile_professional_info'), route: '/profile/professional' },
+        { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
+        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: `${CURRENT_USER.creditPoints} pts` },
       ],
     },
     {
       title: 'Payments',
       items: [
-        { icon: 'credit-card', label: 'Wallet & Payments', route: '/profile/wallet' },
+        { icon: 'credit-card', label: t('profile_wallet'), route: '/profile/wallet' },
       ],
     },
     {
       title: 'Settings',
       items: [
-        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
+        { icon: 'sliders', label: t('profile_settings'), route: '/profile/settings' },
         {
           icon: theme === 'dark' ? 'sun' : 'moon',
-          label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+          label: theme === 'dark' ? t('profile_light_mode') : t('profile_dark_mode'),
           action: handleThemeToggle,
           isThemeToggle: true,
         },
@@ -86,18 +88,18 @@ export default function ProfileScreen() {
     {
       title: 'Support & Safety',
       items: [
-        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
-        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
-        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
-        { icon: 'info', label: 'About Us', route: '/profile/legal?type=about' },
-        { icon: 'file', label: 'Privacy & Cookie Policy', route: '/profile/legal?type=privacy' },
-        { icon: 'shield', label: 'Terms & Conditions', route: '/profile/legal?type=terms' },
+        { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
+        { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
+        { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
+        { icon: 'info', label: t('profile_about'), route: '/profile/legal?type=about' },
+        { icon: 'file', label: t('profile_privacy'), route: '/profile/legal?type=privacy' },
+        { icon: 'shield', label: t('profile_terms'), route: '/profile/legal?type=terms' },
       ],
     },
     {
       title: '',
       items: [
-        { icon: 'log-out', label: 'Log Out', action: handleLogout, color: c.destructive },
+        { icon: 'log-out', label: t('profile_logout'), action: handleLogout, color: c.destructive },
       ],
     },
   ];
@@ -106,24 +108,24 @@ export default function ProfileScreen() {
     {
       title: 'General',
       items: [
-        { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
-        { icon: 'award', label: 'Professional Info', route: '/profile/professional' },
-        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
+        { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
+        { icon: 'award', label: t('profile_professional_info'), route: '/profile/professional' },
+        { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
       ],
     },
     {
       title: 'Earnings',
       items: [
-        { icon: 'dollar-sign', label: 'Wallet & Earnings', route: '/profile/wallet' },
+        { icon: 'dollar-sign', label: t('profile_wallet'), route: '/profile/wallet' },
       ],
     },
     {
       title: 'Settings',
       items: [
-        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
+        { icon: 'sliders', label: t('profile_settings'), route: '/profile/settings' },
         {
           icon: theme === 'dark' ? 'sun' : 'moon',
-          label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+          label: theme === 'dark' ? t('profile_light_mode') : t('profile_dark_mode'),
           action: handleThemeToggle,
           isThemeToggle: true,
         },
@@ -132,15 +134,15 @@ export default function ProfileScreen() {
     {
       title: 'Support & Safety',
       items: [
-        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
-        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
-        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
+        { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
+        { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
+        { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
       ],
     },
     {
       title: '',
       items: [
-        { icon: 'log-out', label: 'Log Out', action: handleLogout, color: c.destructive },
+        { icon: 'log-out', label: t('profile_logout'), action: handleLogout, color: c.destructive },
       ],
     },
   ];

@@ -23,6 +23,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { CATEGORIES, SERVICES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
+import { useLanguage } from '@/context/LanguageContext';
 import ServiceCard from '@/components/ServiceCard';
 
 const ALL_ID = '__all__';
@@ -31,6 +32,7 @@ export default function ServicesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -82,7 +84,7 @@ export default function ServicesScreen() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 10 }]}>
-        <Text style={styles.headerTitle}>Services</Text>
+        <Text style={styles.headerTitle}>{t('services_title')}</Text>
 
         {/* Inline search bar — always editable, never redirects */}
         <View style={styles.searchRow}>
@@ -93,7 +95,7 @@ export default function ServicesScreen() {
               style={styles.searchInput}
               value={query}
               onChangeText={setQuery}
-              placeholder="Search services…"
+              placeholder={t('search_placeholder')}
               placeholderTextColor="#9E9E9E"
               returnKeyType="search"
               onSubmitEditing={Keyboard.dismiss}
@@ -224,7 +226,7 @@ export default function ServicesScreen() {
               onPress={() => router.push('/quote-request' as any)}
               activeOpacity={0.85}
             >
-              <Text style={styles.emptyBtnText}>Get a Custom Quote</Text>
+              <Text style={styles.emptyBtnText}>{t('services_get_custom_quote')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
@@ -233,7 +235,7 @@ export default function ServicesScreen() {
             >
               <Feather name="message-circle" size={16} color={c.primary} />
               <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
-                Start Live Chat
+                {t('services_start_live_chat')}
               </Text>
             </TouchableOpacity>
           </View>

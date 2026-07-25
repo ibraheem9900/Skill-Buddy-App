@@ -10,7 +10,6 @@ import { Dimensions, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
   SharedValue,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -87,59 +86,55 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<ThemeMode>('light');
   const [overlayColor, setOverlayColor] = useState('#111614');
   const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
-  // Whether a toggle is currently in flight — prevents double-taps.
-  const isAnimating = useRef(false);
   const themeRef = useRef<ThemeMode>('light');
   themeRef.current = theme;
 
   const scaleAnim = useSharedValue(0);
+  // Safety-net: if any animation callback misfires (interrupted, unmount,
+  // etc.), this guarantees the "in flight" guard clears itself and never
+  // permanently blocks future taps — this was the root cause of the
+  // "sometimes it just doesn't apply" bug.
+  const safetyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(THEME_KEY).then((saved) => {
       if (saved === 'dark' || saved === 'light') setTheme(saved as ThemeMode);
     });
+    return () => {
+      if (safetyTimeout.current) clearTimeout(safetyTimeout.current);
+    };
   }, []);
-
-  // Runs on the JS thread once the overlay has fully expanded and covers the
-  // screen — safe to swap the actual theme here since nothing is visible
-  // underneath the overlay at this point.
-  const applyThemeSwap = useCallback(() => {
-    const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
-    setTheme(next);
-    AsyncStorage.setItem(THEME_KEY, next);
-    // Collapse the overlay now that the new theme is underneath it.
-    scaleAnim.value = withTiming(0, { duration: 260, easing: Easing.in(Easing.cubic) }, (finished) => {
-      if (finished) {
-        isAnimating.current = false;
-      }
-    });
-  }, [scaleAnim]);
 
   const toggleTheme = useCallback(
     (originX = SCREEN_W / 2, originY = SCREEN_H / 2) => {
-      if (isAnimating.current) return;
-      isAnimating.current = true;
-
       const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
       const nextBg = next === 'dark' ? colors.dark.background : colors.light.background;
 
-      // Plain state updates — no nested setState-inside-updater here, which
-      // was the source of the crash (React may invoke updater functions more
-      // than once, causing the side effects inside it to fire unpredictably).
+      // The theme itself always applies immediately and synchronously —
+      // this is the correctness-critical part, and it can never be blocked
+      // or delayed by the animation below misbehaving.
+      setTheme(next);
+      AsyncStorage.setItem(THEME_KEY, next);
+
+      // Cosmetic paint-reveal overlay, entirely decoupled from the above —
+      // if this animation glitches or gets interrupted, dark/light mode has
+      // already applied correctly regardless.
+      if (safetyTimeout.current) clearTimeout(safetyTimeout.current);
       setOrigin({ x: originX, y: originY });
       setOverlayColor(nextBg);
       scaleAnim.value = 0;
-      scaleAnim.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }, (finished) => {
+      scaleAnim.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }, (finished) => {
         if (finished) {
-          runOnJS(applyThemeSwap)();
-        } else {
-          runOnJS(() => {
-            isAnimating.current = false;
-          })();
+          scaleAnim.value = withTiming(0, { duration: 240, easing: Easing.in(Easing.cubic) });
         }
       });
+      // Belt-and-braces: force the overlay to fully reset shortly after,
+      // even if a callback above never fires for any reason.
+      safetyTimeout.current = setTimeout(() => {
+        scaleAnim.value = 0;
+      }, 900);
     },
-    [scaleAnim, applyThemeSwap]
+    [scaleAnim]
   );
 
   const palette = theme === 'dark' ? colors.dark : colors.light;

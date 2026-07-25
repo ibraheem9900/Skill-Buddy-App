@@ -23,42 +23,42 @@ export default function SettingsScreen() {
   const [notifBooking, setNotifBooking] = useState(true);
   const [notifOffers, setNotifOffers] = useState(true);
   const [notifChat, setNotifChat] = useState(true);
-  const { language, setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('settings_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Appearance</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('settings_appearance')}</Text>
         <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: c.text }]}>Dark Mode</Text>
+            <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_dark_mode')}</Text>
             <Switch value={theme === 'dark'} onValueChange={() => toggleTheme()} trackColor={{ true: c.primary }} />
           </View>
         </View>
 
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Notifications</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('settings_notifications')}</Text>
         <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={[styles.row, { borderBottomWidth: 1, borderBottomColor: c.border }]}>
-            <Text style={[styles.rowLabel, { color: c.text }]}>Booking Updates</Text>
+            <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_booking_updates')}</Text>
             <Switch value={notifBooking} onValueChange={setNotifBooking} trackColor={{ true: c.primary }} />
           </View>
           <View style={[styles.row, { borderBottomWidth: 1, borderBottomColor: c.border }]}>
-            <Text style={[styles.rowLabel, { color: c.text }]}>Offers & Promotions</Text>
+            <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_offers')}</Text>
             <Switch value={notifOffers} onValueChange={setNotifOffers} trackColor={{ true: c.primary }} />
           </View>
           <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: c.text }]}>Chat Messages</Text>
+            <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_chat_messages')}</Text>
             <Switch value={notifChat} onValueChange={setNotifChat} trackColor={{ true: c.primary }} />
           </View>
         </View>
 
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Language</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('settings_language')}</Text>
         <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
           {LANGUAGES.map((lang, i) => (
             <TouchableOpacity
@@ -72,12 +72,12 @@ export default function SettingsScreen() {
           ))}
         </View>
 
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Account</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('settings_account')}</Text>
         <TouchableOpacity
           style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border }]}
           onPress={() => router.push('/profile/edit' as any)}
         >
-          <Text style={[styles.rowLabel, { color: c.text }]}>Change Password</Text>
+          <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_change_password')}</Text>
           <Feather name="chevron-right" size={18} color={c.border} />
         </TouchableOpacity>
       </ScrollView>

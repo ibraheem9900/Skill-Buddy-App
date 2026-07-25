@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER, MOCK_JOBS, MOCK_BIDS } from '@/data/mockData';
 import JobCard from '@/components/JobCard';
@@ -17,6 +18,7 @@ export default function JobsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const { activeRole, toggleRole } = useRole();
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>('available');
@@ -48,9 +50,9 @@ export default function JobsScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <View>
-          <Text style={[styles.title, { color: c.text }]}>Jobs</Text>
+          <Text style={[styles.title, { color: c.text }]}>{t('jobs_title')}</Text>
           <Text style={[styles.roleSub, { color: c.mutedForeground }]}>
-            {activeRole === 'CLIENT' ? 'Client view' : 'SkillBuddy Pilot view'}
+            {activeRole === 'CLIENT' ? t('jobs_client_view') : t('jobs_pilot_view')}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -60,7 +62,7 @@ export default function JobsScreen() {
           >
             <Feather name="repeat" size={14} color={c.text} />
             <Text style={[styles.roleToggleText, { color: c.text }]}>
-              {activeRole === 'CLIENT' ? 'Switch to Pilot' : 'Switch to Client'}
+              {activeRole === 'CLIENT' ? t('jobs_switch_to_pilot') : t('jobs_switch_to_client')}
             </Text>
           </TouchableOpacity>
           {activeRole === 'CLIENT' && (
@@ -69,7 +71,7 @@ export default function JobsScreen() {
               onPress={() => router.push('/job/post' as any)}
             >
               <Feather name="plus" size={16} color="#FFF" />
-              <Text style={styles.postBtnText}>Post a Job</Text>
+              <Text style={styles.postBtnText}>{t('post_a_job')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -87,7 +89,7 @@ export default function JobsScreen() {
               onPress={() => setProviderFilter(f)}
             >
               <Text style={[styles.filterText, { color: providerFilter === f ? '#FFF' : c.mutedForeground }]}>
-                {f === 'available' ? 'Available' : f === 'myBids' ? 'My Bids' : 'Active Jobs'}
+                {f === 'available' ? t('jobs_available') : f === 'myBids' ? t('jobs_my_bids') : t('jobs_active')}
               </Text>
             </TouchableOpacity>
           ))}
@@ -102,13 +104,13 @@ export default function JobsScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="briefcase"
-            title={activeRole === 'CLIENT' ? 'No Jobs Posted Yet' : 'No Jobs Here Yet'}
+            title={activeRole === 'CLIENT' ? t('jobs_no_jobs_client') : t('jobs_no_jobs_provider')}
             subtitle={
               activeRole === 'CLIENT'
                 ? 'Post a job and get bids from verified SkillBuddy Pilots near you.'
                 : 'Check back soon — new jobs matching your skills will appear here.'
             }
-            actionLabel={activeRole === 'CLIENT' ? 'Post a Job' : undefined}
+            actionLabel={activeRole === 'CLIENT' ? t('post_a_job') : undefined}
             onAction={activeRole === 'CLIENT' ? () => router.push('/job/post' as any) : undefined}
           />
         }
