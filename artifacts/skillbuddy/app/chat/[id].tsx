@@ -113,9 +113,17 @@ export default function ChatThreadScreen() {
             <Text style={styles.headerStatus}>{thread.participant.isOnline ? 'Online' : 'Offline'}</Text>
           </View>
         </View>
-        <TouchableOpacity>
-          <Feather name="more-vertical" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={{ marginRight: 16 }}
+            onPress={() => router.push(`/call/${thread.participant.id}` as any)}
+          >
+            <Feather name="phone" size={20} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity>
+            <Feather name="more-vertical" size={22} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -170,6 +178,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 14 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
   backBtn: {},
   headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   headerAvatarText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },

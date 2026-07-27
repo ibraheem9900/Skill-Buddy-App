@@ -1,0 +1,198 @@
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
+import { useTheme } from '@/context/ThemeContext';
+import { useAppAlert } from '@/context/AlertModalContext';
+import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
+import BackButton from '@/components/BackButton';
+
+type Path = 'choose' | 'approve' | 'deny' | 'dispute';
+
+const DISPUTE_REASONS = ['Incomplete work', 'Different from description', 'Damage caused', 'No-show', 'Other'];
+
+export default function ReviewScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { colors: c } = useTheme();
+  const showAlert = useAppAlert();
+
+  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
+  const [path, setPath] = useState<Path>('choose');
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState('');
+  const [disputeReason, setDisputeReason] = useState<string | null>(null);
+
+  if (!job) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
+      </View>
+    );
+  }
+
+  const denialCount = job.denialCount ?? 0;
+  const canDenyAgain = denialCount < 2;
+
+  const approve = () => {
+    job.status = 'approved';
+    job.clientReview = { rating, comment };
+    router.replace(`/(tabs)/jobs` as any);
+    showAlert({ title: 'Review submitted', message: 'Thanks! Payment has been finalized with your Pilot.', icon: 'check-circle' });
+  };
+
+  const deny = () => {
+    if (!comment.trim()) {
+      showAlert({ title: 'Feedback required', message: 'Please describe what needs to be fixed.', icon: 'alert-circle' });
+      return;
+    }
+    job.denialCount = denialCount + 1;
+    job.status = 'in_progress';
+    router.replace(`/job/${job.id}/track` as any);
+    showAlert({ title: 'Sent back to provider', message: 'Your feedback has been sent to the Pilot for revision.', icon: 'info' });
+  };
+
+  const dispute = () => {
+    if (!disputeReason || !comment.trim()) {
+      showAlert({ title: 'More info needed', message: 'Select a reason and describe the issue.', icon: 'alert-circle' });
+      return;
+    }
+    job.status = 'disputed';
+    job.disputeReason = `${disputeReason}: ${comment}`;
+    router.replace('/(tabs)/jobs' as any);
+    showAlert({ title: 'Support ticket created', message: 'Our support team will review this dispute and get back to you.', icon: 'shield' });
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+        <BackButton />
+        <Text style={[styles.headerTitle, { color: c.text }]}>Review Job</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+        <Text style={[styles.jobTitle, { color: c.text }]}>{job.title}</Text>
+        <Text style={[styles.jobSub, { color: c.mutedForeground }]}>Your Pilot marked this job as done.</Text>
+
+        {path === 'choose' && (
+          <View style={{ marginTop: 24, gap: 12 }}>
+            <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.success }]} onPress={() => setPath('approve')}>
+              <Feather name="thumbs-up" size={18} color="#FFF" />
+              <Text style={styles.choiceText}>Approve</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.choiceBtn, { backgroundColor: canDenyAgain ? c.warning : c.muted }]}
+              onPress={() => canDenyAgain && setPath('deny')}
+              disabled={!canDenyAgain}
+            >
+              <Feather name="thumbs-down" size={18} color={canDenyAgain ? '#FFF' : c.mutedForeground} />
+              <Text style={[styles.choiceText, { color: canDenyAgain ? '#FFF' : c.mutedForeground }]}>
+                {canDenyAgain ? `Deny (${2 - denialCount} left)` : 'Deny — limit reached'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.destructive }]} onPress={() => setPath('dispute')}>
+              <Feather name="flag" size={18} color="#FFF" />
+              <Text style={styles.choiceText}>Dispute</Text>
+            </TouchableOpacity>
+            {!canDenyAgain && (
+              <Text style={[styles.limitNote, { color: c.mutedForeground }]}>
+                You've reached the maximum of 2 denials for this job — only Approve or Dispute are available now.
+              </Text>
+            )}
+          </View>
+        )}
+
+        {path === 'approve' && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>Rate your Pilot</Text>
+            <View style={styles.starsRow}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <TouchableOpacity key={n} onPress={() => setRating(n)}>
+                  <Feather name="star" size={32} color={n <= rating ? c.rating : c.border} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>Feedback (optional)</Text>
+            <TextInput
+              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
+              value={comment}
+              onChangeText={setComment}
+              placeholder="How did it go?"
+              placeholderTextColor={c.mutedForeground}
+              multiline
+            />
+            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.success }]} onPress={approve}>
+              <Text style={styles.submitText}>Submit & Approve</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {path === 'deny' && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>What needs to be fixed?</Text>
+            <TextInput
+              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Describe what's missing or wrong (required)"
+              placeholderTextColor={c.mutedForeground}
+              multiline
+            />
+            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.warning }]} onPress={deny}>
+              <Text style={styles.submitText}>Send Back to Pilot</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {path === 'dispute' && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>Reason</Text>
+            {DISPUTE_REASONS.map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.reasonRow, { borderColor: disputeReason === r ? c.destructive : c.border }]}
+                onPress={() => setDisputeReason(r)}
+              >
+                <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
+                {disputeReason === r && <Feather name="check-circle" size={16} color={c.destructive} />}
+              </TouchableOpacity>
+            ))}
+            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 14 }]}>Describe the issue</Text>
+            <TextInput
+              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Required"
+              placeholderTextColor={c.mutedForeground}
+              multiline
+            />
+            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.destructive }]} onPress={dispute}>
+              <Text style={styles.submitText}>Submit Dispute</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+  jobTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18, marginTop: 4 },
+  jobSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginTop: 4 },
+  choiceBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, paddingVertical: 15 },
+  choiceText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
+  limitNote: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center', marginTop: 4 },
+  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 10 },
+  starsRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  textArea: { borderRadius: 12, padding: 14, minHeight: 100, fontFamily: 'Manrope_400Regular', fontSize: 13 },
+  reasonRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderRadius: 12, padding: 14, marginBottom: 8 },
+  reasonText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+  submitBtn: { marginTop: 20, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+});

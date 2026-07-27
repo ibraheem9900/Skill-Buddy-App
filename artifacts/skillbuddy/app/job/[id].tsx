@@ -127,16 +127,18 @@ export default function BiddingDashboardScreen() {
   const acceptBid = (bid: Bid) => {
     showAlert({
       title: 'Accept this bid?',
-      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`,
+      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}\n${job.date}, ${job.time}\n${job.title}`,
       icon: 'check-circle',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Accept',
+          text: 'Accept & Pay',
           onPress: () => {
-            job.status = 'assigned';
+            job.status = 'pending_payment';
             job.assignedProviderId = bid.provider.id;
-            router.back();
+            job.assignedPrice = bid.price;
+            job.paymentDeadline = Date.now() + 10 * 60 * 1000;
+            router.push(`/job/${job.id}/payment` as any);
           },
         },
       ],
@@ -253,7 +255,7 @@ export default function BiddingDashboardScreen() {
           <View style={[styles.statusCard, { backgroundColor: c.primaryLight }]}>
             <Feather name="check-circle" size={28} color={c.primary} />
             <Text style={[styles.statusText, { color: c.primary }]}>
-              {job.status === 'assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
+              {job.status === 'task_assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
             </Text>
           </View>
         )}

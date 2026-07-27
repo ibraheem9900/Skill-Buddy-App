@@ -33,12 +33,17 @@ export default function JobsScreen() {
   const providerJobs = useMemo(() => {
     if (providerFilter === 'available') return MOCK_JOBS.filter((j) => j.status === 'bidding');
     if (providerFilter === 'myBids') return MOCK_JOBS.filter((j) => myBidJobIds.has(j.id));
-    return MOCK_JOBS.filter((j) => j.status === 'assigned' || j.status === 'in_progress');
+    return MOCK_JOBS.filter((j) => j.status === 'task_assigned' || j.status === 'in_progress');
   }, [providerFilter, myBidJobIds]);
 
   const data: Job[] = activeRole === 'CLIENT' ? myJobs : providerJobs;
 
   const openJob = (job: Job) => {
+    const isTracked = !['bidding', 'expired'].includes(job.status);
+    if (isTracked) {
+      router.push(`/job/${job.id}/track` as any);
+      return;
+    }
     if (activeRole === 'CLIENT') {
       router.push(`/job/${job.id}` as any);
     } else {

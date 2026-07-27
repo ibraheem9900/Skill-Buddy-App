@@ -11,12 +11,21 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<Job['status'], string> = {
+  draft: 'Draft',
   bidding: 'Bidding Open',
-  assigned: 'Assigned',
+  short_listed: 'Short Listed',
+  task_assigned: 'Assigned',
+  pending_payment: 'Payment Pending',
+  arrived: 'Provider Arrived',
   in_progress: 'In Progress',
+  revision_requested: 'Revision Requested',
   completed: 'Completed',
+  approved: 'Approved',
+  closed: 'Closed',
   cancelled: 'Cancelled',
   expired: 'Expired',
+  disputed: 'Disputed',
+  paused: 'Paused',
 };
 
 export default function JobCard({ job, onPress }: Props) {

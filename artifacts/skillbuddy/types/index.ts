@@ -155,7 +155,22 @@ export interface Review {
 
 // ─── Jobs & Bidding (Phase 2) ──────────────────────────────────────────────────
 export type JobUrgency = 'urgent' | 'regular';
-export type JobStatus = 'bidding' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'expired';
+export type JobStatus =
+  | 'draft'
+  | 'bidding'
+  | 'short_listed'
+  | 'task_assigned'
+  | 'pending_payment'
+  | 'arrived'
+  | 'in_progress'
+  | 'revision_requested'
+  | 'completed'
+  | 'approved'
+  | 'closed'
+  | 'cancelled'
+  | 'expired'
+  | 'disputed'
+  | 'paused';
 
 export interface Job {
   id: string;
@@ -177,6 +192,53 @@ export interface Job {
   biddingDurationMs: number;
   location: string;
   assignedProviderId?: string;
+  assignedPrice?: number; // final agreed price once a bid is accepted
+  paymentDeadline?: number; // epoch ms — 10-minute payment window
+  paymentMethod?: PaymentMethod;
+  arrivedAt?: number;
+  denialCount?: number; // client can deny up to 2 times
+  revisionRequest?: RevisionRequest;
+  cancellation?: CancellationInfo;
+  disputeReason?: string;
+  clientReview?: JobReview;
+  providerReview?: JobReview;
+}
+
+export type PaymentMethod = 'card' | 'apple_pay' | 'google_pay' | 'bank_transfer' | 'credit_points';
+
+export interface RevisionRequest {
+  proposedBy: 'client' | 'provider';
+  extraHours: number;
+  newPrice: number;
+  status: 'pending' | 'approved' | 'denied';
+}
+
+export interface CancellationInfo {
+  by: 'client' | 'provider';
+  reason: string;
+  feeCharged?: number;
+}
+
+export interface JobReview {
+  rating: number;
+  comment?: string;
+}
+
+export interface OrderBreakdown {
+  bidPrice: number;
+  beforeVat: number;
+  vat: number;
+  platformFee: number;
+  total: number;
+}
+
+export interface PayoutBreakdown {
+  bidPrice: number;
+  beforeVat: number;
+  vat: number;
+  platformFee: number;
+  commission: number;
+  payout: number;
 }
 
 export interface BidProvider extends Provider {
