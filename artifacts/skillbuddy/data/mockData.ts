@@ -23,6 +23,8 @@ export interface MockUser {
   secondarySkill: string;
   maskedCard: string;
   iban: string;
+  providerRating: number; // single source of truth for the user's own Pilot rating (affects scoring + suspension)
+  providerSuspendedUntil?: number; // epoch ms — set when rating drops below 4.0 after a cancellation
 }
 
 export const CURRENT_USER: MockUser = {
@@ -46,6 +48,7 @@ export const CURRENT_USER: MockUser = {
   secondarySkill: 'Laundry & Ironing',
   maskedCard: '•••• •••• •••• 4242',
   iban: 'LV•• XXXX •••• •••• 7821',
+  providerRating: 4.7,
 };
 
 export interface CreditTransaction {

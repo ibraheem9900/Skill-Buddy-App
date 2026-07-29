@@ -89,8 +89,10 @@ export default function ProfileScreen() {
       title: 'Support & Safety',
       items: [
         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
+        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
+        { icon: 'edit-3', label: 'Blog', route: '/blog' },
         { icon: 'info', label: t('profile_about'), route: '/profile/legal?type=about' },
         { icon: 'file', label: t('profile_privacy'), route: '/profile/legal?type=privacy' },
         { icon: 'shield', label: t('profile_terms'), route: '/profile/legal?type=terms' },
@@ -135,8 +137,10 @@ export default function ProfileScreen() {
       title: 'Support & Safety',
       items: [
         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
+        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
+        { icon: 'edit-3', label: 'Blog', route: '/blog' },
       ],
     },
     {

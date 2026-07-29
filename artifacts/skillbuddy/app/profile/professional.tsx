@@ -9,22 +9,25 @@ import { calculateProviderScore } from '@/lib/scoring';
 import BackButton from '@/components/BackButton';
 import type { BidProvider } from '@/types';
 
-const ME_AS_PROVIDER: BidProvider = {
-  id: 'me-provider',
-  name: CURRENT_USER.name,
-  rating: 4.7,
-  reviewCount: 58,
-  jobsDone: 41,
-  badge: 2,
-  credibility: 90,
-  specialty: CURRENT_USER.primarySkill,
-  location: CURRENT_USER.address,
-  isOnline: true,
-  distanceKm: 3.1,
-  responseTimeMin: 9,
-};
+function getMeAsProvider(): BidProvider {
+  return {
+    id: 'me-provider',
+    name: CURRENT_USER.name,
+    rating: CURRENT_USER.providerRating,
+    reviewCount: 58,
+    jobsDone: 41,
+    badge: 2,
+    credibility: 90,
+    specialty: CURRENT_USER.primarySkill,
+    location: CURRENT_USER.address,
+    isOnline: true,
+    distanceKm: 3.1,
+    responseTimeMin: 9,
+  };
+}
 
 export default function ProfessionalInfoScreen() {
+  const ME_AS_PROVIDER = getMeAsProvider();
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
   const { activeRole } = useRole();

@@ -6,12 +6,16 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useRole } from '@/context/RoleContext';
 import { useAppAlert } from '@/context/AlertModalContext';
-import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
+import { BID_PROVIDERS, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
 import { calculatePayoutBreakdown, CANCELLATION_FEE } from '@/lib/payment';
 import BackButton from '@/components/BackButton';
 import type { JobStatus } from '@/types';
 
 const CANCEL_REASONS = ['Schedule conflict', 'Found another provider', 'No longer needed', 'Price disagreement', 'Other'];
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
 
 const STEPS: { status: JobStatus; label: string }[] = [
   { status: 'task_assigned', label: 'Assigned' },
@@ -115,22 +119,16 @@ export default function JobTrackingScreen() {
   const cancelJob = (reason: string) => {
     setShowCancelReasons(false);
     if (isProvider) {
-      // Provider cancels before job starts: credibility/rating penalty, mock suspension check.
-      const p = BID_PROVIDERS.find((pv) => pv.id === job.assignedProviderId);
-      if (p) {
-        p.credibility = Math.max(0, (p.credibility ?? 0) - 10);
-        p.rating = Math.max(0, (p.rating ?? 0) - 0.5);
-      }
+      // Provider cancels before job starts: penalty applies to the current
+      // user's own Pilot stats (CURRENT_USER), not the abstract BID_PROVIDERS
+      // pool — those represent other simulated Pilots, not "me".
+      CURRENT_USER.providerRating = Math.max(0, round1(CURRENT_USER.providerRating - 0.5));
       job.cancellation = { by: 'provider', reason };
       job.status = 'bidding';
       job.assignedProviderId = undefined;
-      if (p && p.rating! < 4.0) {
-        showAlert({
-          title: 'Account Suspended',
-          message: 'Your rating dropped below 4.0 after this cancellation. Your Pilot account is suspended for 28 days.',
-          icon: 'alert-triangle',
-          buttons: [{ text: 'OK', onPress: () => router.replace('/(tabs)/jobs' as any) }],
-        });
+      if (CURRENT_USER.providerRating < 4.0) {
+        CURRENT_USER.providerSuspendedUntil = Date.now() + 28 * 24 * 60 * 60 * 1000;
+        router.replace('/(tabs)/jobs' as any);
         return;
       }
       showAlert({ title: 'Job cancelled', message: 'The client has been notified and the job has reopened for bidding.', icon: 'info' });
@@ -278,6 +276,15 @@ export default function JobTrackingScreen() {
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={goToReview}>
               <Feather name="star" size={16} color="#FFF" />
               <Text style={styles.actionText}>Leave a Review</Text>
+            </TouchableOpacity>
+          )}
+          {['completed', 'approved', 'closed'].includes(job.status) && (
+            <TouchableOpacity
+              style={[styles.actionBtnOutline, { borderColor: c.border }]}
+              onPress={() => router.push({ pathname: '/profile/raise-ticket', params: { jobId: job.id } } as any)}
+            >
+              <Feather name="help-circle" size={16} color={c.text} />
+              <Text style={[styles.actionOutlineText, { color: c.text }]}>Get Help</Text>
             </TouchableOpacity>
           )}
           {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (

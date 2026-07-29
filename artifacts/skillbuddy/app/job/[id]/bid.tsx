@@ -14,22 +14,27 @@ import { useAppAlert } from '@/context/AlertModalContext';
 import type { Bid, BidProvider } from '@/types';
 
 // The mock-logged-in provider identity (used when submitting a bid as a Pilot).
-const ME_AS_PROVIDER: BidProvider = {
-  id: 'me-provider',
-  name: CURRENT_USER.name,
-  rating: 4.7,
-  reviewCount: 58,
-  jobsDone: 41,
-  badge: 2,
-  credibility: 90,
-  specialty: 'General Services',
-  location: 'Riga, Latvia',
-  isOnline: true,
-  distanceKm: 3.1,
-  responseTimeMin: 9,
-};
+// A function, not a static const, so it always reflects the live
+// CURRENT_USER.providerRating (which cancellations/reviews can change).
+function getMeAsProvider(): BidProvider {
+  return {
+    id: 'me-provider',
+    name: CURRENT_USER.name,
+    rating: CURRENT_USER.providerRating,
+    reviewCount: 58,
+    jobsDone: 41,
+    badge: 2,
+    credibility: 90,
+    specialty: 'General Services',
+    location: 'Riga, Latvia',
+    isOnline: true,
+    distanceKm: 3.1,
+    responseTimeMin: 9,
+  };
+}
 
 export default function ProviderJobBidScreen() {
+  const ME_AS_PROVIDER = getMeAsProvider();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -38,7 +43,7 @@ export default function ProviderJobBidScreen() {
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
   const existingBid = useMemo(
-    () => MOCK_BIDS.find((b) => b.jobId === id && b.provider.id === ME_AS_PROVIDER.id),
+    () => MOCK_BIDS.find((b) => b.jobId === id && b.provider.id === 'me-provider'),
     [id]
   );
 

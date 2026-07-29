@@ -14,6 +14,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/context/ThemeContext';
 import BackButton from '@/components/BackButton';
+import { useAppAlert } from '@/context/AlertModalContext';
 import InlineLoader from '@/components/InlineLoader';
 import { CATEGORIES, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
 import type { Job, JobUrgency } from '@/types';
@@ -25,6 +26,7 @@ export default function PostJobScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const showAlert = useAppAlert();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -73,6 +75,19 @@ export default function PostJobScreen() {
 
   const handleSubmit = async () => {
     if (!validate()) return;
+
+    const activeClientJobs = MOCK_JOBS.filter(
+      (j) => j.clientId === CURRENT_USER.id && !['closed', 'cancelled', 'expired', 'approved'].includes(j.status)
+    );
+    if (activeClientJobs.length >= 5) {
+      showAlert({
+        title: 'Job limit reached',
+        message: 'You can have up to 5 active jobs at once. Close or cancel an existing job before posting a new one.',
+        icon: 'alert-circle',
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     const durationMs = urgency === 'urgent' ? 30 * 60 * 1000 : 3 * 60 * 60 * 1000;

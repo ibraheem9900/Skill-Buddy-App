@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { Image } from 'expo-image';
+import { BLOG_POSTS } from '@/data/blogData';
 import { useLanguage } from '@/context/LanguageContext';
 import {
   CATEGORIES,
@@ -357,6 +359,28 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
+        {/* From the Blog — compact teaser, links to full Blog listing */}
+        <Animated.View entering={FadeInDown.delay(170).duration(380)} style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>From the Blog</Text>
+            <TouchableOpacity onPress={() => router.push('/blog' as any)}>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+            {BLOG_POSTS.slice(0, 3).map((post) => (
+              <TouchableOpacity
+                key={post.id}
+                style={[styles.blogTeaserCard, { backgroundColor: c.card, borderColor: c.border }]}
+                onPress={() => router.push(`/blog/${post.id}` as any)}
+              >
+                <Image source={{ uri: post.image }} style={styles.blogTeaserImage} contentFit="cover" />
+                <Text style={[styles.blogTeaserTitle, { color: c.text }]} numberOfLines={2}>{post.title}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </Animated.View>
+
         {/* Invite Friends */}
         <Animated.View entering={FadeInDown.delay(180).duration(380)} style={{ paddingHorizontal: 16, marginTop: 16 }}>
           <View style={[styles.inviteCard, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
@@ -564,6 +588,11 @@ const styles = StyleSheet.create({
   badgeTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   badgeFill: { height: '100%', borderRadius: 3 },
   badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
+
+  // ── Blog teaser ──────────────────────────────────────────────────────────
+  blogTeaserCard: { width: 160, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  blogTeaserImage: { width: '100%', height: 90 },
+  blogTeaserTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, lineHeight: 16, padding: 10 },
 
   // ── Invite card ───────────────────────────────────────────────────────────
   inviteCard: {
