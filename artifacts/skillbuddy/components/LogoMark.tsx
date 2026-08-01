@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
+import colors from '@/constants/colors';
 
 interface LogoMarkProps {
   color?: string;
@@ -13,9 +14,9 @@ interface LogoMarkProps {
  *
  * Usage:
  *   <LogoMark color="#FFFFFF" size={34} />   ← header
- *   <LogoMark color="#2D7A6E" size={34} />   ← light bg
+ *   <LogoMark color="#20735A" size={34} />   ← light bg
  */
-export default function LogoMark({ color = '#2D6B55', size = 34 }: LogoMarkProps) {
+export default function LogoMark({ color = colors.light.primaryDark, size = 34 }: LogoMarkProps) {
   // Aspect ratio ≈ 2.4 : 1  (matches the real brand mark width:height)
   const W = size * 2.4;
   const H = size;

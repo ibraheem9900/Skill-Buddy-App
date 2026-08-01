@@ -1,5 +1,6 @@
 import type { Category, Service, Offer, Notification, ChatThread, Booking, Review, Job, Bid, BidProvider } from '@/types';
 import { calculateProviderScore } from '@/lib/scoring';
+import colors from '@/constants/colors';
 
 // ─── Current User (mock) ──────────────────────────────────────────────────────
 export interface MockUser {
@@ -83,24 +84,24 @@ export const PROVIDER_JOB_HISTORY: JobHistoryEntry[] = [
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 export const CATEGORIES: Category[] = [
-  { id: '1',  name: 'Cleaning',        iconLib: 'MaterialCommunityIcons', iconName: 'broom',                   color: '#3A9E8F' },
-  { id: '2',  name: 'Repairing',       iconLib: 'MaterialCommunityIcons', iconName: 'tools',                   color: '#3A9E8F' },
-  { id: '3',  name: 'Plumbing',        iconLib: 'MaterialCommunityIcons', iconName: 'pipe',                    color: '#3A9E8F' },
-  { id: '4',  name: 'Shifting',        iconLib: 'MaterialCommunityIcons', iconName: 'truck-delivery',          color: '#3A9E8F' },
-  { id: '5',  name: 'Painting',        iconLib: 'MaterialCommunityIcons', iconName: 'format-paint',            color: '#3A9E8F' },
-  { id: '6',  name: 'Laundry',         iconLib: 'MaterialCommunityIcons', iconName: 'washing-machine',         color: '#3A9E8F' },
-  { id: '7',  name: 'AC Repair',       iconLib: 'MaterialCommunityIcons', iconName: 'air-conditioner',         color: '#3A9E8F' },
-  { id: '8',  name: 'Car Repair',      iconLib: 'MaterialCommunityIcons', iconName: 'car-wrench',              color: '#3A9E8F' },
-  { id: '9',  name: 'Beauty',          iconLib: 'MaterialCommunityIcons', iconName: 'face-woman',              color: '#3A9E8F' },
-  { id: '10', name: 'Pets',            iconLib: 'MaterialCommunityIcons', iconName: 'paw',                     color: '#3A9E8F' },
-  { id: '11', name: 'Photography',     iconLib: 'MaterialCommunityIcons', iconName: 'camera',                  color: '#3A9E8F' },
-  { id: '12', name: 'Babysitting',     iconLib: 'MaterialCommunityIcons', iconName: 'baby-face-outline',       color: '#3A9E8F' },
-  { id: '13', name: 'Barbering',       iconLib: 'MaterialCommunityIcons', iconName: 'content-cut',             color: '#3A9E8F' },
-  { id: '14', name: 'Dog Training',    iconLib: 'MaterialCommunityIcons', iconName: 'dog',                     color: '#3A9E8F' },
-  { id: '15', name: 'Party',           iconLib: 'MaterialCommunityIcons', iconName: 'party-popper',            color: '#3A9E8F' },
-  { id: '16', name: 'Gardening',       iconLib: 'MaterialCommunityIcons', iconName: 'flower',                  color: '#3A9E8F' },
-  { id: '17', name: 'Pest Control',    iconLib: 'MaterialCommunityIcons', iconName: 'bug',                     color: '#3A9E8F' },
-  { id: '18', name: 'Electrical',      iconLib: 'MaterialCommunityIcons', iconName: 'lightning-bolt',          color: '#3A9E8F' },
+  { id: '1',  name: 'Cleaning',        iconLib: 'MaterialCommunityIcons', iconName: 'broom',                   color: colors.light.primary },
+  { id: '2',  name: 'Repairing',       iconLib: 'MaterialCommunityIcons', iconName: 'tools',                   color: colors.light.primary },
+  { id: '3',  name: 'Plumbing',        iconLib: 'MaterialCommunityIcons', iconName: 'pipe',                    color: colors.light.primary },
+  { id: '4',  name: 'Shifting',        iconLib: 'MaterialCommunityIcons', iconName: 'truck-delivery',          color: colors.light.primary },
+  { id: '5',  name: 'Painting',        iconLib: 'MaterialCommunityIcons', iconName: 'format-paint',            color: colors.light.primary },
+  { id: '6',  name: 'Laundry',         iconLib: 'MaterialCommunityIcons', iconName: 'washing-machine',         color: colors.light.primary },
+  { id: '7',  name: 'AC Repair',       iconLib: 'MaterialCommunityIcons', iconName: 'air-conditioner',         color: colors.light.primary },
+  { id: '8',  name: 'Car Repair',      iconLib: 'MaterialCommunityIcons', iconName: 'car-wrench',              color: colors.light.primary },
+  { id: '9',  name: 'Beauty',          iconLib: 'MaterialCommunityIcons', iconName: 'face-woman',              color: colors.light.primary },
+  { id: '10', name: 'Pets',            iconLib: 'MaterialCommunityIcons', iconName: 'paw',                     color: colors.light.primary },
+  { id: '11', name: 'Photography',     iconLib: 'MaterialCommunityIcons', iconName: 'camera',                  color: colors.light.primary },
+  { id: '12', name: 'Babysitting',     iconLib: 'MaterialCommunityIcons', iconName: 'baby-face-outline',       color: colors.light.primary },
+  { id: '13', name: 'Barbering',       iconLib: 'MaterialCommunityIcons', iconName: 'content-cut',             color: colors.light.primary },
+  { id: '14', name: 'Dog Training',    iconLib: 'MaterialCommunityIcons', iconName: 'dog',                     color: colors.light.primary },
+  { id: '15', name: 'Party',           iconLib: 'MaterialCommunityIcons', iconName: 'party-popper',            color: colors.light.primary },
+  { id: '16', name: 'Gardening',       iconLib: 'MaterialCommunityIcons', iconName: 'flower',                  color: colors.light.primary },
+  { id: '17', name: 'Pest Control',    iconLib: 'MaterialCommunityIcons', iconName: 'bug',                     color: colors.light.primary },
+  { id: '18', name: 'Electrical',      iconLib: 'MaterialCommunityIcons', iconName: 'lightning-bolt',          color: colors.light.primary },
 ];
 
 // ─── Subservices (for Task 6 follow-up) ───────────────────────────────────────

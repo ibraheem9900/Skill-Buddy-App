@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { CURRENT_USER } from '@/data/mockData';
 import { useRole } from '@/context/RoleContext';
+import colors from '@/constants/colors';
 
 function formatDaysLeft(until: number): number {
   return Math.max(1, Math.ceil((until - Date.now()) / (24 * 60 * 60 * 1000)));
@@ -28,7 +29,7 @@ export default function SuspensionGate({ children }: { children: React.ReactNode
   const daysLeft = formatDaysLeft(suspendedUntil!);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 40 }]}>
+    <View style={[styles.root, { backgroundColor: colors.dark.background, paddingTop: insets.top + 40 }]}>
       <View style={styles.iconWrap}>
         <Feather name="alert-triangle" size={40} color="#E85D5D" />
       </View>
@@ -52,7 +53,7 @@ export default function SuspensionGate({ children }: { children: React.ReactNode
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', paddingHorizontal: 28, backgroundColor: '#161B19' },
+  root: { flex: 1, alignItems: 'center', paddingHorizontal: 28 },
   iconWrap: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(232,93,93,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   title: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#FFF', textAlign: 'center', marginBottom: 12 },
   message: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 21, marginBottom: 24 },
@@ -61,5 +62,5 @@ const styles = StyleSheet.create({
   daysLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   hint: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.55)', textAlign: 'center', marginBottom: 20 },
   switchBtn: { backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
-  switchText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#161B19' },
+  switchText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.dark.background },
 });

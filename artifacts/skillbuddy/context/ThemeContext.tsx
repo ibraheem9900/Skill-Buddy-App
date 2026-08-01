@@ -84,7 +84,7 @@ function PaintRevealOverlay({
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<ThemeMode>('light');
-  const [overlayColor, setOverlayColor] = useState('#111614');
+  const [overlayColor, setOverlayColor] = useState('#12332E');
   const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
   const themeRef = useRef<ThemeMode>('light');
   themeRef.current = theme;

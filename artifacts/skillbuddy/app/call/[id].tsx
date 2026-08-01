@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { useTheme } from '@/context/ThemeContext';
+import colors from '@/constants/colors';
 import { BID_PROVIDERS, CHAT_THREADS } from '@/data/mockData';
 
 const MAX_CALL_SECONDS = 5 * 60;
@@ -19,7 +19,6 @@ export default function ActiveCallScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors: c } = useTheme();
 
   const provider = BID_PROVIDERS.find((p) => p.id === id);
   const thread = CHAT_THREADS.find((t) => t.participant.id === id);
@@ -51,7 +50,7 @@ export default function ActiveCallScreen() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: '#111614', paddingTop: insets.top }]}>
+    <View style={[styles.root, { backgroundColor: colors.dark.background, paddingTop: insets.top }]}>
       <Animated.View entering={FadeIn.duration(300)} style={styles.center}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{name.charAt(0)}</Text>
