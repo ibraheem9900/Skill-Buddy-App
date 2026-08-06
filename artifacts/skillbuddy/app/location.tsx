@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const SUGGESTIONS = [
   { id: '1', name: 'Tallinn City Center', sub: 'Tallinn, Estonia' },
@@ -26,6 +27,7 @@ export default function LocationScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
 
   const filtered = query.trim()
@@ -54,7 +56,7 @@ export default function LocationScreen() {
           <Feather name="arrow-left" size={20} color={c.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
-          Enter Your Location
+          {t('location_title')}
         </Text>
       </View>
 
@@ -63,7 +65,7 @@ export default function LocationScreen() {
         <Feather name="search" size={18} color={c.mutedForeground} style={styles.searchIcon} />
         <TextInput
           style={[styles.input, { color: c.text }]}
-          placeholder="Search city or address…"
+          placeholder={t('location_search')}
           placeholderTextColor={c.mutedForeground}
           value={query}
           onChangeText={setQuery}
@@ -84,8 +86,8 @@ export default function LocationScreen() {
           <MaterialIcons name="my-location" size={18} color={c.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.currentLabel, { color: c.text }]}>Use current location</Text>
-          <Text style={[styles.currentSub, { color: c.mutedForeground }]}>Detect via GPS</Text>
+          <Text style={[styles.currentLabel, { color: c.text }]}>{t('location_current')}</Text>
+          <Text style={[styles.currentSub, { color: c.mutedForeground }]}>{t('location_detect')}</Text>
         </View>
         <Feather name="chevron-right" size={18} color={c.mutedForeground} />
       </TouchableOpacity>
@@ -102,7 +104,7 @@ export default function LocationScreen() {
           <View style={styles.empty}>
             <Feather name="map-pin" size={32} color={c.border} />
             <Text style={[styles.emptyText, { color: c.mutedForeground }]}>
-              No results for &ldquo;{query}&rdquo;
+              {t('location_no_results', { query })}
             </Text>
           </View>
         }

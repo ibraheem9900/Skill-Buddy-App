@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 
 interface FAQ {
@@ -22,19 +23,26 @@ const FAQS: FAQ[] = [
   { id: 'f6', category: 'Account', question: 'How is my match score calculated?', answer: 'Providers are scored out of 100 based on distance, star rating, badge tier, credibility %, and average response time.' },
 ];
 
-const CATEGORIES = ['All', 'Booking', 'Payments', 'Account'];
+const CATEGORY_KEYS = ['faqs_all', 'faqs_booking', 'faqs_payments', 'faqs_account'];
+// Maps translation keys to the English FAQ data categories.
+const CATEGORY_TO_DATA: Record<string, string> = {
+  faqs_booking: 'Booking',
+  faqs_payments: 'Payments',
+  faqs_account: 'Account',
+};
 
 export default function FaqsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('All');
+  const [category, setCategory] = useState('faqs_all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return FAQS.filter((f) => {
-      const matchesCategory = category === 'All' || f.category === category;
+      const matchesCategory = category === 'faqs_all' || f.category === CATEGORY_TO_DATA[category];
       const matchesQuery = !query.trim() || f.question.toLowerCase().includes(query.trim().toLowerCase());
       return matchesCategory && matchesQuery;
     });
@@ -44,7 +52,7 @@ export default function FaqsScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>FAQs</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('faqs_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -53,7 +61,7 @@ export default function FaqsScreen() {
           <Feather name="search" size={16} color={c.mutedForeground} />
           <TextInput
             style={[styles.searchInput, { color: c.text }]}
-            placeholder="Search FAQs..."
+            placeholder={t('faqs_search')}
             placeholderTextColor={c.mutedForeground}
             value={query}
             onChangeText={setQuery}
@@ -62,13 +70,13 @@ export default function FaqsScreen() {
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsRow} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
-        {CATEGORIES.map((cat) => (
+        {CATEGORY_KEYS.map((cat) => (
           <TouchableOpacity
             key={cat}
             style={[styles.tab, { backgroundColor: category === cat ? c.primary : c.muted }]}
             onPress={() => setCategory(cat)}
           >
-            <Text style={[styles.tabText, { color: category === cat ? '#FFF' : c.text }]}>{cat}</Text>
+            <Text style={[styles.tabText, { color: category === cat ? '#FFF' : c.text }]}>{t(cat as any)}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -97,7 +105,7 @@ export default function FaqsScreen() {
           onPress={() => router.push('/chat/support' as any)}
         >
           <Feather name="message-circle" size={16} color="#FFF" />
-          <Text style={styles.contactText}>Still need help? Chat with Support</Text>
+          <Text style={styles.contactText}>{t('faqs_contact')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

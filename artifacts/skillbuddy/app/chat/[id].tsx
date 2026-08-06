@@ -16,8 +16,8 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import colors from '@/constants/colors';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CHAT_THREADS } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 import type { ChatMessage } from '@/types';
@@ -32,6 +32,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 
 export default function ChatThreadScreen() {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -110,7 +111,7 @@ export default function ChatThreadScreen() {
           </View>
           <View>
             <Text style={styles.headerName}>{thread.participant.name}</Text>
-            <Text style={styles.headerStatus}>{thread.participant.isOnline ? 'Online' : 'Offline'}</Text>
+            <Text style={styles.headerStatus}>{thread.participant.isOnline ? t('chat_online') : t('chat_offline')}</Text>
           </View>
         </View>
         <View style={styles.headerRight}>
@@ -133,7 +134,7 @@ export default function ChatThreadScreen() {
       >
         {/* Date separator */}
         <View style={styles.dateSep}>
-          <Text style={styles.dateText}>TODAY</Text>
+          <Text style={styles.dateText}>{t('chat_today')}</Text>
         </View>
 
         <FlatList
@@ -156,7 +157,7 @@ export default function ChatThreadScreen() {
             style={[styles.textInput, { backgroundColor: c.muted, color: c.text }]}
             value={input}
             onChangeText={setInput}
-            placeholder="Type a message here..."
+            placeholder={t('chat_input')}
             placeholderTextColor={c.mutedForeground}
             multiline
             maxLength={500}
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
   msgContent: { maxWidth: '70%', gap: 4 },
   bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleOther: { backgroundColor: '#FFF', borderBottomLeftRadius: 4 },
-  bubbleMe: { backgroundColor: colors.light.primary, borderBottomRightRadius: 4 },
+  bubbleMe: { backgroundColor: '#20735A', borderBottomRightRadius: 4 },
   msgText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
   msgTextMe: { color: '#FFF' },
   msgImage: { width: 200, height: 150, borderRadius: 12 },

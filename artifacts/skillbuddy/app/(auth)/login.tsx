@@ -18,6 +18,7 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const c = colors.light;
 
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -32,7 +34,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+      Alert.alert(t('login_err_title'), t('login_err_enter'));
       return;
     }
     setLoading(true);
@@ -40,8 +42,8 @@ export default function LoginScreen() {
       await login(email.trim(), password);
       // AuthGate will redirect to (tabs) automatically
     } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? 'Login failed. Please check your credentials.';
-      Alert.alert('Login Failed', typeof msg === 'string' ? msg : 'Invalid credentials.');
+      const msg = err?.response?.data?.detail ?? t('login_failed');
+      Alert.alert(t('login_failed'), typeof msg === 'string' ? msg : t('login_failed_invalid'));
     } finally {
       setLoading(false);
     }
@@ -60,15 +62,15 @@ export default function LoginScreen() {
             <Feather name="zap" size={36} color="#FFF" />
           </View>
           <Text style={styles.appName}>SkillBuddy</Text>
-          <Text style={styles.tagline}>Find the skills you need</Text>
+          <Text style={styles.tagline}>{t('login_tagline')}</Text>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.form}>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to your account</Text>
+          <Text style={styles.title}>{t('login_welcome')}</Text>
+          <Text style={styles.subtitle}>{t('login_subtitle')}</Text>
 
           <View style={styles.fieldWrap}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>{t('login_email')}</Text>
             <View style={styles.inputRow}>
               <Feather name="mail" size={18} color={c.mutedForeground} style={styles.inputIcon} />
               <TextInput
@@ -85,7 +87,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.fieldWrap}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>{t('login_password')}</Text>
             <View style={styles.inputRow}>
               <Feather name="lock" size={18} color={c.mutedForeground} style={styles.inputIcon} />
               <TextInput
@@ -103,7 +105,7 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity style={styles.forgotWrap} onPress={() => router.push('/(auth)/forgot-password')}>
-            <Text style={[styles.forgotText, { color: c.primary }]}>Forgot Password?</Text>
+            <Text style={[styles.forgotText, { color: c.primary }]}>{t('login_forgot')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -114,13 +116,13 @@ export default function LoginScreen() {
             {loading ? (
               <ActivityIndicator color="#FFF" />
             ) : (
-              <Text style={styles.btnText}>Sign In</Text>
+              <Text style={styles.btnText}>{t('login_signin')}</Text>
             )}
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.divLine} />
-            <Text style={styles.divText}>Or sign in with</Text>
+            <Text style={styles.divText}>{t('login_or')}</Text>
             <View style={styles.divLine} />
           </View>
 
@@ -137,10 +139,10 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.signupRow}>
-            <Text style={styles.signupText}>Don't have an account? </Text>
+            <Text style={styles.signupText}>{t('login_no_account')}</Text>
             <Link href="/(auth)/signup" asChild>
               <TouchableOpacity>
-                <Text style={[styles.signupLink, { color: c.primary }]}>Sign Up</Text>
+                <Text style={[styles.signupLink, { color: c.primary }]}>{t('login_signup_link')}</Text>
               </TouchableOpacity>
             </Link>
           </View>

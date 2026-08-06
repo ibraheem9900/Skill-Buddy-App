@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 
@@ -13,6 +14,7 @@ export default function BookingSummaryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
   const provider = useMemo(
@@ -23,7 +25,7 @@ export default function BookingSummaryScreen() {
   if (!job) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
+        <Text style={{ color: c.text, padding: 20 }}>{t('summary_not_found')}</Text>
       </View>
     );
   }
@@ -32,15 +34,15 @@ export default function BookingSummaryScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Booking Confirmed</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('summary_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <Animated.View entering={ZoomIn.duration(300).springify()} style={[styles.successCard, { backgroundColor: c.successLight }]}>
           <Feather name="check-circle" size={40} color={c.success} />
-          <Text style={[styles.successTitle, { color: c.success }]}>Payment Successful</Text>
-          <Text style={[styles.successSub, { color: c.text }]}>Your SkillBuddy Pilot is confirmed for this job.</Text>
+          <Text style={[styles.successTitle, { color: c.success }]}>{t('summary_payment')}</Text>
+          <Text style={[styles.successSub, { color: c.text }]}>{t('summary_pilot')}</Text>
         </Animated.View>
 
         {provider && (
@@ -82,7 +84,7 @@ export default function BookingSummaryScreen() {
           </View>
           <View style={styles.detailRow}>
             <Feather name="dollar-sign" size={14} color={c.mutedForeground} />
-            <Text style={[styles.detailText, { color: c.mutedForeground }]}>€{job.assignedPrice?.toFixed(2)} paid</Text>
+            <Text style={[styles.detailText, { color: c.mutedForeground }]}>€{job.assignedPrice?.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -90,7 +92,7 @@ export default function BookingSummaryScreen() {
           style={[styles.doneBtn, { backgroundColor: c.primary }]}
           onPress={() => router.replace('/(tabs)/jobs' as any)}
         >
-          <Text style={styles.doneText}>Go to My Jobs</Text>
+          <Text style={styles.doneText}>{t('summary_go_jobs')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

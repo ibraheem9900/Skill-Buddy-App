@@ -7,6 +7,7 @@ import React, { forwardRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 export interface ServicePin {
   id: string;
@@ -25,14 +26,15 @@ export interface ExploreMapProps {
 // forwardRef so the parent can pass mapRef without TS errors on web
 const ExploreMap = forwardRef<unknown, ExploreMapProps>((_props, _ref) => {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   return (
     <View style={[styles.root, { backgroundColor: c.primaryLight }]}>
       <View style={[styles.iconWrap, { backgroundColor: c.accent }]}>
         <Feather name="map" size={40} color={c.primary} />
       </View>
-      <Text style={[styles.label, { color: c.text }]}>Map available on device</Text>
+      <Text style={[styles.label, { color: c.text }]}>{t('map_available')}</Text>
       <Text style={[styles.sub, { color: c.mutedForeground }]}>
-        Open in Expo Go on iOS/Android to see the live map
+        {t('map_open_expo')}
       </Text>
     </View>
   );

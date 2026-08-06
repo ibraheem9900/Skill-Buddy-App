@@ -20,7 +20,7 @@ import { RoleProvider } from '@/context/RoleContext';
 import { FilterProvider } from '@/context/FilterContext';
 import { AlertModalProvider } from '@/context/AlertModalContext';
 import NavigationLoaderOverlay from '@/components/NavigationLoaderOverlay';
-import { LanguageProvider } from '@/context/LanguageContext';
+import { LanguageProvider, useLanguage } from '@/context/LanguageContext';
 
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
@@ -41,6 +41,7 @@ function AuthGate() {
 
 function RootLayoutNav() {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   return (
     <>
       <AuthGate />
@@ -63,7 +64,7 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="categories"
-          options={{ headerShown: true, title: 'Category', headerBackTitle: 'Back' }}
+          options={{ headerShown: true, title: t('search_category_label'), headerBackTitle: t('action_back') }}
         />
         <Stack.Screen
           name="category/[id]"

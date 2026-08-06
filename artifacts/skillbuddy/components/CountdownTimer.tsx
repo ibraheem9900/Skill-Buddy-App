@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface Props {
   endsAt: number; // epoch ms
@@ -24,6 +25,7 @@ function formatRemaining(ms: number): string {
 
 export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: Props) {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [remaining, setRemaining] = useState(endsAt - Date.now());
   const expiredFired = React.useRef(false);
 
@@ -48,7 +50,7 @@ export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: P
       <View style={[styles.compactWrap, { backgroundColor: accentLight }]}>
         <Feather name="clock" size={12} color={accent} />
         <Text style={[styles.compactText, { color: accent }]}>
-          {expired ? 'Expired' : formatRemaining(remaining)}
+          {expired ? t('countdown_expired') : formatRemaining(remaining)}
         </Text>
       </View>
     );
@@ -58,10 +60,10 @@ export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: P
     <View style={[styles.wrap, { backgroundColor: accentLight, borderColor: accent }]}>
       <Feather name={urgency === 'urgent' ? 'zap' : 'clock'} size={16} color={accent} />
       <Text style={[styles.label, { color: accent }]}>
-        {urgency === 'urgent' ? 'Urgent — bidding closes in' : 'Bidding window closes in'}
+        {urgency === 'urgent' ? t('countdown_urgent') : t('countdown_closes')}
       </Text>
       <Text style={[styles.time, { color: accent }]}>
-        {expired ? 'Expired' : formatRemaining(remaining)}
+        {expired ? t('countdown_expired') : formatRemaining(remaining)}
       </Text>
     </View>
   );

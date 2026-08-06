@@ -5,6 +5,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CATEGORIES } from '@/data/mockData';
 import CategoryItem from '@/components/CategoryItem';
 
@@ -12,6 +13,7 @@ export default function CategoriesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   const footer = (
     <Animated.View entering={FadeInDown.delay(600).duration(400)} style={[styles.quoteBanner, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
@@ -20,8 +22,8 @@ export default function CategoriesScreen() {
           <Feather name="help-circle" size={22} color="#FFF" />
         </View>
         <View style={styles.quoteText}>
-          <Text style={[styles.quoteTitle, { color: c.text }]}>Can't find what you need?</Text>
-          <Text style={[styles.quoteSub, { color: c.mutedForeground }]}>Get a custom quote from our experts</Text>
+          <Text style={[styles.quoteTitle, { color: c.text }]}>{t('categories_quote_title')}</Text>
+          <Text style={[styles.quoteSub, { color: c.mutedForeground }]}>{t('categories_quote_sub')}</Text>
         </View>
       </View>
       <TouchableOpacity
@@ -29,7 +31,7 @@ export default function CategoriesScreen() {
         onPress={() => router.push('/quote-request' as any)}
         activeOpacity={0.85}
       >
-        <Text style={styles.quoteBtnText}>Get a Custom Quote</Text>
+        <Text style={styles.quoteBtnText}>{t('services_get_custom_quote')}</Text>
       </TouchableOpacity>
     </Animated.View>
   );

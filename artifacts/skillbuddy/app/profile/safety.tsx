@@ -4,32 +4,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 
 export default function SafetyScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   const handleSOS = () => {
     Alert.alert(
-      'Emergency Contact',
-      'In an emergency, call your local emergency number immediately.\n\nLatvia Emergency: 112',
-      [{ text: 'OK' }]
+      t('safety_emergency_title'),
+      t('safety_emergency_msg'),
+      [{ text: t('pay_ok') }]
     );
   };
 
   const LINKS = [
-    { icon: 'shield' as const, label: 'Privacy & Cookie Policy', route: '/profile/legal?type=privacy' },
-    { icon: 'file' as const, label: 'Terms & Conditions', route: '/profile/legal?type=terms' },
-    { icon: 'message-circle' as const, label: 'Contact Us', route: '/chat/support' },
+    { icon: 'shield' as const, labelKey: 'profile_privacy', route: '/profile/legal?type=privacy' },
+    { icon: 'file' as const, labelKey: 'profile_terms', route: '/profile/legal?type=terms' },
+    { icon: 'message-circle' as const, labelKey: 'safety_contact_us', route: '/chat/support' },
   ];
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Safety & Help</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('safety_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -39,22 +41,22 @@ export default function SafetyScreen() {
             <Feather name="alert-triangle" size={22} color="#FFF" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.sosTitle}>Emergency SOS</Text>
-            <Text style={styles.sosSub}>Tap for emergency contact information</Text>
+            <Text style={styles.sosTitle}>{t('safety_sos')}</Text>
+            <Text style={styles.sosSub}>{t('safety_sos_sub')}</Text>
           </View>
           <Feather name="chevron-right" size={20} color="#FFF" />
         </TouchableOpacity>
 
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Legal & Support</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('safety_legal')}</Text>
         <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
           {LINKS.map((l, i) => (
             <TouchableOpacity
-              key={l.label}
+              key={l.labelKey}
               style={[styles.row, i < LINKS.length - 1 && { borderBottomWidth: 1, borderBottomColor: c.border }]}
               onPress={() => router.push(l.route as any)}
             >
               <Feather name={l.icon} size={18} color={c.primary} />
-              <Text style={[styles.rowLabel, { color: c.text }]}>{l.label}</Text>
+              <Text style={[styles.rowLabel, { color: c.text }]}>{t(l.labelKey as any)}</Text>
               <Feather name="chevron-right" size={18} color={c.border} />
             </TouchableOpacity>
           ))}

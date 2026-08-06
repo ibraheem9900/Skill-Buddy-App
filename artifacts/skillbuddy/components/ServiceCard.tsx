@@ -7,6 +7,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useBookmarks } from '@/context/BookmarkContext';
+import { useLanguage } from '@/context/LanguageContext';
 import type { Service } from '@/types';
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
@@ -24,6 +25,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
   const router = useRouter();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const { colors: c } = useTheme();
+  const { tCat } = useLanguage();
   const scale = useSharedValue(1);
   const bookmarked = isBookmarked(service.id);
 
@@ -55,7 +57,7 @@ export default function ServiceCard({ service, variant = 'vertical' }: Props) {
         <Image source={{ uri: service.image }} style={styles.listImage} contentFit="cover" />
         <View style={styles.listBody}>
           <View style={[styles.chip, { backgroundColor: c.primaryLight }]}>
-            <Text style={[styles.chipText, { color: c.primary }]}>{service.category}</Text>
+            <Text style={[styles.chipText, { color: c.primary }]}>{tCat(service.categoryId)}</Text>
           </View>
           <Text style={[styles.listTitle, { color: c.text }]} numberOfLines={2}>{service.title}</Text>
           <View style={styles.providerRow}>

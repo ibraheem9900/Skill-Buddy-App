@@ -39,9 +39,9 @@ export default function ProfileScreen() {
   const email = CURRENT_USER.email;
 
   const handleLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: logout },
+    Alert.alert(t('profile_logout_title'), t('profile_logout_msg'), [
+      { text: t('action_cancel'), style: 'cancel' },
+      { text: t('profile_logout_title'), style: 'destructive', onPress: logout },
     ]);
   };
 
@@ -59,22 +59,22 @@ export default function ProfileScreen() {
 
   const clientSections: { title: string; items: MenuItem[] }[] = [
     {
-      title: 'General',
+      title: t('profile_section_general'),
       items: [
         { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
         { icon: 'briefcase', label: t('profile_professional_info'), route: '/profile/professional' },
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
-        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: `${CURRENT_USER.creditPoints} pts` },
+        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: t('profile_pts', { n: CURRENT_USER.creditPoints }) },
       ],
     },
     {
-      title: 'Payments',
+      title: t('profile_section_payments'),
       items: [
         { icon: 'credit-card', label: t('profile_wallet'), route: '/profile/wallet' },
       ],
     },
     {
-      title: 'Settings',
+      title: t('profile_section_settings'),
       items: [
         { icon: 'sliders', label: t('profile_settings'), route: '/profile/settings' },
         {
@@ -86,13 +86,13 @@ export default function ProfileScreen() {
       ],
     },
     {
-      title: 'Support & Safety',
+      title: t('profile_section_support'),
       items: [
         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
-        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
+        { icon: 'file-text', label: t('profile_my_tickets'), route: '/profile/tickets' },
         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
-        { icon: 'edit-3', label: 'Blog', route: '/blog' },
+        { icon: 'edit-3', label: t('profile_blog'), route: '/blog' },
         { icon: 'info', label: t('profile_about'), route: '/profile/legal?type=about' },
         { icon: 'file', label: t('profile_privacy'), route: '/profile/legal?type=privacy' },
         { icon: 'shield', label: t('profile_terms'), route: '/profile/legal?type=terms' },
@@ -108,7 +108,7 @@ export default function ProfileScreen() {
 
   const providerSections: { title: string; items: MenuItem[] }[] = [
     {
-      title: 'General',
+      title: t('profile_section_general'),
       items: [
         { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
         { icon: 'award', label: t('profile_professional_info'), route: '/profile/professional' },
@@ -116,13 +116,13 @@ export default function ProfileScreen() {
       ],
     },
     {
-      title: 'Earnings',
+      title: t('profile_section_earnings'),
       items: [
         { icon: 'dollar-sign', label: t('profile_wallet'), route: '/profile/wallet' },
       ],
     },
     {
-      title: 'Settings',
+      title: t('profile_section_settings'),
       items: [
         { icon: 'sliders', label: t('profile_settings'), route: '/profile/settings' },
         {
@@ -134,13 +134,13 @@ export default function ProfileScreen() {
       ],
     },
     {
-      title: 'Support & Safety',
+      title: t('profile_section_support'),
       items: [
         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
-        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
+        { icon: 'file-text', label: t('profile_my_tickets'), route: '/profile/tickets' },
         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
-        { icon: 'edit-3', label: 'Blog', route: '/blog' },
+        { icon: 'edit-3', label: t('profile_blog'), route: '/blog' },
       ],
     },
     {
@@ -181,13 +181,13 @@ export default function ProfileScreen() {
               style={[styles.roleSwitchOption, activeRole === 'CLIENT' && styles.roleSwitchActive]}
               onPress={() => activeRole !== 'CLIENT' && toggleRole()}
             >
-              <Text style={[styles.roleSwitchText, activeRole === 'CLIENT' && { color: c.primary }]}>Client</Text>
+              <Text style={[styles.roleSwitchText, activeRole === 'CLIENT' && { color: c.primary }]}>{t('profile_client')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.roleSwitchOption, activeRole === 'PROVIDER' && styles.roleSwitchActive]}
               onPress={() => activeRole !== 'PROVIDER' && toggleRole()}
             >
-              <Text style={[styles.roleSwitchText, activeRole === 'PROVIDER' && { color: c.primary }]}>SkillBuddy Pilot</Text>
+              <Text style={[styles.roleSwitchText, activeRole === 'PROVIDER' && { color: c.primary }]}>{t('profile_pilot')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -203,7 +203,7 @@ export default function ProfileScreen() {
         <Text style={styles.name}>{name}</Text>
         <Text style={styles.email}>{email}</Text>
         <View style={styles.roleBadge}>
-          <Text style={styles.roleText}>{activeRole === 'CLIENT' ? 'Client' : 'SkillBuddy Pilot'}</Text>
+          <Text style={styles.roleText}>{activeRole === 'CLIENT' ? t('profile_client') : t('profile_pilot')}</Text>
         </View>
       </View>
 
@@ -211,9 +211,9 @@ export default function ProfileScreen() {
       <Animated.View entering={FadeInDown.delay(80).duration(400)}>
         <View style={[styles.statsRow, { backgroundColor: c.card, shadowColor: '#000' }]}>
           {[
-            { label: 'Jobs Done', value: CURRENT_USER.jobsDone },
-            { label: 'Active Jobs', value: CURRENT_USER.activeJobs },
-            { label: 'Credit Pts', value: CURRENT_USER.creditPoints },
+            { label: t('profile_stat_jobs_done'), value: CURRENT_USER.jobsDone },
+            { label: t('profile_stat_active_jobs'), value: CURRENT_USER.activeJobs },
+            { label: t('profile_stat_credit_pts'), value: CURRENT_USER.creditPoints },
           ].map((stat, i) => (
             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
               <Text style={[styles.statValue, { color: c.primary }]}>{stat.value}</Text>

@@ -112,8 +112,8 @@ export default function JobsScreen() {
             title={activeRole === 'CLIENT' ? t('jobs_no_jobs_client') : t('jobs_no_jobs_provider')}
             subtitle={
               activeRole === 'CLIENT'
-                ? 'Post a job and get bids from verified SkillBuddy Pilots near you.'
-                : 'Check back soon — new jobs matching your skills will appear here.'
+                ? t('jobs_empty_client_sub')
+                : t('jobs_empty_provider_sub')
             }
             actionLabel={activeRole === 'CLIENT' ? t('post_a_job') : undefined}
             onAction={activeRole === 'CLIENT' ? () => router.push('/job/post' as any) : undefined}

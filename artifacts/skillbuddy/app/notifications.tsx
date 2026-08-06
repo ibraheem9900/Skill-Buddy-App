@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { NOTIFICATIONS } from '@/data/mockData';
 import type { Notification } from '@/types';
 
@@ -47,11 +48,12 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const unread = NOTIFICATIONS.filter((n) => !n.isRead).length;
 
   const sections = [
-    { title: 'TODAY',     data: NOTIFICATIONS.filter((_, i) => i < 3) },
-    { title: 'YESTERDAY', data: NOTIFICATIONS.filter((_, i) => i >= 3) },
+    { title: t('notifications_today'),     data: NOTIFICATIONS.filter((_, i) => i < 3) },
+    { title: t('notifications_yesterday'), data: NOTIFICATIONS.filter((_, i) => i >= 3) },
   ];
 
   let globalIdx = 0;
@@ -72,10 +74,10 @@ export default function NotificationsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Feather name="arrow-left" size={22} color={c.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: c.text }]}>Notification</Text>
+        <Text style={[styles.title, { color: c.text }]}>{t('notifications_title')}</Text>
         {unread > 0 && (
           <View style={[styles.badge, { backgroundColor: c.primary }]}>
-            <Text style={styles.badgeText}>{unread} NEW</Text>
+            <Text style={styles.badgeText}>{unread} {t('notifications_new')}</Text>
           </View>
         )}
       </View>
@@ -89,7 +91,7 @@ export default function NotificationsScreen() {
           <View style={[styles.sectionHdr, { backgroundColor: c.background }]}>
             <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>{section.title}</Text>
             <TouchableOpacity>
-              <Text style={[styles.markAll, { color: c.primary }]}>Mark all as read</Text>
+              <Text style={[styles.markAll, { color: c.primary }]}>{t('notifications_mark_all')}</Text>
             </TouchableOpacity>
           </View>
         )}

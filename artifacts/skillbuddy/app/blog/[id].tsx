@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { BLOG_POSTS } from '@/data/blogData';
 import BackButton from '@/components/BackButton';
 
@@ -13,6 +14,7 @@ export default function BlogDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   const post = BLOG_POSTS.find((p) => p.id === id);
   const related = useMemo(
@@ -23,7 +25,7 @@ export default function BlogDetailScreen() {
   if (!post) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <Text style={{ color: c.text, padding: 20 }}>Article not found.</Text>
+        <Text style={{ color: c.text, padding: 20 }}>{t('blog_not_found')}</Text>
       </View>
     );
   }
@@ -57,7 +59,7 @@ export default function BlogDetailScreen() {
 
           {related.length > 0 && (
             <>
-              <Text style={[styles.relatedTitle, { color: c.text }]}>Related Articles</Text>
+              <Text style={[styles.relatedTitle, { color: c.text }]}>{t('blog_related')}</Text>
               {related.map((r) => (
                 <TouchableOpacity
                   key={r.id}

@@ -18,6 +18,7 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const c = colors.light;
 
@@ -25,6 +26,7 @@ export default function SignupScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signup } = useAuth();
+  const { t } = useLanguage();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -35,15 +37,15 @@ export default function SignupScreen() {
 
   const handleSignup = async () => {
     if (!firstName || !email || !password) {
-      Alert.alert('Error', 'Please fill in all required fields.');
+      Alert.alert(t('login_err_title'), t('signup_err_required'));
       return;
     }
     if (!agreed) {
-      Alert.alert('Error', 'Please agree to the Terms & Conditions.');
+      Alert.alert(t('login_err_title'), t('signup_err_terms'));
       return;
     }
     if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters.');
+      Alert.alert(t('login_err_title'), t('signup_err_password'));
       return;
     }
     setLoading(true);
@@ -57,8 +59,8 @@ export default function SignupScreen() {
       });
       router.push('/(auth)/verify-email');
     } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? 'Signup failed. Please try again.';
-      Alert.alert('Sign Up Failed', typeof msg === 'string' ? msg : 'Something went wrong.');
+      const msg = err?.response?.data?.detail ?? t('signup_failed_title');
+      Alert.alert(t('signup_failed_title'), typeof msg === 'string' ? msg : t('signup_failed_msg'));
     } finally {
       setLoading(false);
     }
@@ -72,17 +74,17 @@ export default function SignupScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Animated.View entering={FadeInDown.duration(400)}>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Fill your information below or register{'\n'}with your social account.</Text>
+          <Text style={styles.title}>{t('signup_title')}</Text>
+          <Text style={styles.subtitle}>{t('signup_subtitle')}</Text>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(80).duration(400)} style={styles.form}>
           {[
-            { label: 'First Name', value: firstName, set: setFirstName, placeholder: 'Esther', icon: 'user' as const },
-            { label: 'Last Name', value: lastName, set: setLastName, placeholder: 'Howard', icon: 'user' as const },
-            { label: 'Email', value: email, set: setEmail, placeholder: 'example@gmail.com', icon: 'mail' as const },
+            { label: t('signup_first'), key: 'first', value: firstName, set: setFirstName, placeholder: 'Esther', icon: 'user' as const },
+            { label: t('signup_last'), key: 'last', value: lastName, set: setLastName, placeholder: 'Howard', icon: 'user' as const },
+            { label: t('signup_email'), key: 'email', value: email, set: setEmail, placeholder: 'example@gmail.com', icon: 'mail' as const },
           ].map((f) => (
-            <View key={f.label} style={styles.fieldWrap}>
+            <View key={f.key} style={styles.fieldWrap}>
               <Text style={styles.label}>{f.label}</Text>
               <View style={styles.inputRow}>
                 <Feather name={f.icon} size={18} color={c.mutedForeground} style={styles.inputIcon} />
@@ -92,8 +94,8 @@ export default function SignupScreen() {
                   placeholderTextColor={c.mutedForeground}
                   value={f.value}
                   onChangeText={f.set}
-                  autoCapitalize={f.label.includes('Name') ? 'words' : 'none'}
-                  keyboardType={f.label === 'Email' ? 'email-address' : 'default'}
+                  autoCapitalize={f.key === 'first' || f.key === 'last' ? 'words' : 'none'}
+                  keyboardType={f.key === 'email' ? 'email-address' : 'default'}
                   autoCorrect={false}
                 />
               </View>
@@ -101,7 +103,7 @@ export default function SignupScreen() {
           ))}
 
           <View style={styles.fieldWrap}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>{t('login_password')}</Text>
             <View style={styles.inputRow}>
               <Feather name="lock" size={18} color={c.mutedForeground} style={styles.inputIcon} />
               <TextInput
@@ -123,8 +125,8 @@ export default function SignupScreen() {
               {agreed && <Feather name="check" size={12} color="#FFF" />}
             </View>
             <Text style={styles.termsText}>
-              Agree with{' '}
-              <Text style={[styles.termsLink, { color: c.primary }]}>Terms & Condition</Text>
+              {t('signup_agree')}
+              <Text style={[styles.termsLink, { color: c.primary }]}>{t('signup_terms')}</Text>
             </Text>
           </TouchableOpacity>
 
@@ -133,12 +135,12 @@ export default function SignupScreen() {
             onPress={handleSignup}
             disabled={loading}
           >
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Sign Up</Text>}
+            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>{t('signup_submit')}</Text>}
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.divLine} />
-            <Text style={styles.divText}>Or sign up with</Text>
+            <Text style={styles.divText}>{t('signup_or')}</Text>
             <View style={styles.divLine} />
           </View>
 
@@ -151,10 +153,10 @@ export default function SignupScreen() {
           </View>
 
           <View style={styles.loginRow}>
-            <Text style={styles.loginText}>Already have an account? </Text>
+            <Text style={styles.loginText}>{t('signup_have')}</Text>
             <Link href="/(auth)/login" asChild>
               <TouchableOpacity>
-                <Text style={[styles.loginLink, { color: c.primary }]}>Sign In</Text>
+                <Text style={[styles.loginLink, { color: c.primary }]}>{t('signup_signin')}</Text>
               </TouchableOpacity>
             </Link>
           </View>

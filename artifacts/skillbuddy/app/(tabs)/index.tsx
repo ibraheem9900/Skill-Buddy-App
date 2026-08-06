@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/context/ThemeContext';
 import { Image } from 'expo-image';
 import { BLOG_POSTS } from '@/data/blogData';
@@ -53,11 +54,12 @@ const BADGE_TIERS = [
 ];
 
 // ─── SkillBuddy Specialties ───────────────────────────────────────────────────
+// Titles/descriptions are translation keys (full 5-language coverage).
 const SPECIALTIES = [
-  { icon: 'shield-check-outline', title: 'Built on Trust',        desc: 'Reviewed providers with verified IDs and credentials.' },
-  { icon: 'account-check-outline',title: 'Verified Experts',      desc: 'Every professional passes our rigorous vetting process.' },
-  { icon: 'tag-outline',          title: 'Transparent Pricing',   desc: 'See the full price before you book — no surprise charges.' },
-  { icon: 'headset',              title: '24/7 Support',          desc: 'Our team is available around the clock whenever you need help.' },
+  { icon: 'shield-check-outline',  titleKey: 'home_specialty_1', descKey: 'home_specialty_1_desc' },
+  { icon: 'account-check-outline', titleKey: 'home_specialty_2', descKey: 'home_specialty_2_desc' },
+  { icon: 'tag-outline',           titleKey: 'home_specialty_3', descKey: 'home_specialty_3_desc' },
+  { icon: 'headset',               titleKey: 'home_specialty_4', descKey: 'home_specialty_4_desc' },
 ] as const;
 
 // ─── Quick-access tiles ───────────────────────────────────────────────────────
@@ -83,8 +85,9 @@ function Stars({ count }: { count: number }) {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors: c } = useTheme();
+  const { theme, colors: c } = useTheme();
   const { t } = useLanguage();
+  const isDark = theme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
   const [offerIdx, setOfferIdx] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -110,6 +113,20 @@ export default function HomeScreen() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 10 }]}>
+        {/* Dark theme: subtle green radial glow at the very top, fading to
+            the near-black header — mirrors the web app's hero. Light theme
+            keeps the plain approved green header. */}
+        {isDark && (
+          <View style={styles.headerGlow} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(77,191,173,0.22)', 'rgba(77,191,173,0.07)', 'transparent']}
+              style={StyleSheet.absoluteFill}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+            />
+            <View style={styles.headerGlowOrb} />
+          </View>
+        )}
         {/* Logo + notification row */}
         <View style={styles.logoRow}>
           <LogoImage variant="white" height={54} />
@@ -179,11 +196,11 @@ export default function HomeScreen() {
             <View style={styles.creditBody}>
               <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
               <Text style={[styles.creditValue, { color: c.text }]}>
-                {CURRENT_USER.creditPoints.toLocaleString()} pts
+                {t('profile_pts', { n: CURRENT_USER.creditPoints.toLocaleString() })}
               </Text>
             </View>
             <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
-              Earn 1 pt{'\n'}per €1 spent
+              {t('home_earn_note')}
             </Text>
           </View>
         </Animated.View>
@@ -308,15 +325,15 @@ export default function HomeScreen() {
             data={SPECIALTIES}
             horizontal
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(s) => s.title}
+            keyExtractor={(s) => s.titleKey}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
             renderItem={({ item }) => (
               <View style={[styles.specialtyCard, { backgroundColor: c.card, borderColor: c.border }]}>
                 <View style={[styles.specialtyIconWrap, { backgroundColor: c.primaryLight }]}>
                   <MaterialCommunityIcons name={item.icon as any} size={22} color={c.primary} />
                 </View>
-                <Text style={[styles.specialtyTitle, { color: c.text }]}>{item.title}</Text>
-                <Text style={[styles.specialtyDesc, { color: c.mutedForeground }]}>{item.desc}</Text>
+                <Text style={[styles.specialtyTitle, { color: c.text }]}>{t(item.titleKey)}</Text>
+                <Text style={[styles.specialtyDesc, { color: c.mutedForeground }]}>{t(item.descKey)}</Text>
               </View>
             )}
           />
@@ -327,7 +344,7 @@ export default function HomeScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_earn_badges')}</Text>
             <TouchableOpacity>
-              <Text style={[styles.seeAll, { color: c.primary }]}>Learn more</Text>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('home_learn_more')}</Text>
             </TouchableOpacity>
           </View>
           <View style={[styles.badgeCard, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -335,10 +352,10 @@ export default function HomeScreen() {
               <View style={styles.badgeCardLeft}>
                 <View style={styles.badgeCardTitleRow}>
                   <Feather name="award" size={15} color={c.primary} />
-                  <Text style={[styles.badgeCardTitle, { color: c.text }]}>Unlock Real Rewards</Text>
+                  <Text style={[styles.badgeCardTitle, { color: c.text }]}>{t('home_unlock_rewards')}</Text>
                 </View>
                 <Text style={[styles.badgeCardSub, { color: c.mutedForeground }]}>
-                  Complete jobs to climb the tiers
+                  {t('home_badge_sub')}
                 </Text>
               </View>
               <View style={styles.badgeTiers}>
@@ -354,7 +371,7 @@ export default function HomeScreen() {
               <View style={[styles.badgeFill, { backgroundColor: c.primary, width: '30%' }]} />
             </View>
             <Text style={[styles.badgeProgressLabel, { color: c.mutedForeground }]}>
-              3 / 10 jobs to Silver
+              {t('home_badge_progress')}
             </Text>
           </View>
         </Animated.View>
@@ -362,7 +379,7 @@ export default function HomeScreen() {
         {/* From the Blog — compact teaser, links to full Blog listing */}
         <Animated.View entering={FadeInDown.delay(170).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>From the Blog</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_from_blog')}</Text>
             <TouchableOpacity onPress={() => router.push('/blog' as any)}>
               <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
@@ -387,14 +404,14 @@ export default function HomeScreen() {
             <View style={styles.inviteLeft}>
               <MaterialCommunityIcons name="account-multiple-plus-outline" size={28} color={c.primary} />
               <View style={styles.inviteText}>
-                <Text style={[styles.inviteTitle, { color: c.text }]}>Invite Friends, Earn Points</Text>
+                <Text style={[styles.inviteTitle, { color: c.text }]}>{t('home_invite_title')}</Text>
                 <Text style={[styles.inviteSub, { color: c.mutedForeground }]}>
-                  Get 50 pts for every friend who books their first service.
+                  {t('home_invite_sub')}
                 </Text>
               </View>
             </View>
             <TouchableOpacity style={[styles.inviteBtn, { backgroundColor: c.primary }]}>
-              <Text style={styles.inviteBtnText}>Invite</Text>
+              <Text style={styles.inviteBtnText}>{t('home_invite_btn')}</Text>
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -413,6 +430,19 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomLeftRadius: 22,
     borderBottomRightRadius: 22,
+    overflow: 'hidden',
+  },
+  headerGlow: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerGlowOrb: {
+    position: 'absolute',
+    top: -70,
+    alignSelf: 'center',
+    width: 260,
+    height: 160,
+    borderRadius: 130,
+    backgroundColor: 'rgba(46, 158, 122, 0.12)',
   },
   logoRow: {
     flexDirection: 'row',

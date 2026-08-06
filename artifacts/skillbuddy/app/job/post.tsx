@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { useAppAlert } from '@/context/AlertModalContext';
 import InlineLoader from '@/components/InlineLoader';
@@ -26,6 +27,7 @@ export default function PostJobScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
   const showAlert = useAppAlert();
 
   const [title, setTitle] = useState('');
@@ -63,12 +65,12 @@ export default function PostJobScreen() {
 
   const validate = () => {
     const next: Record<string, string> = {};
-    if (!title.trim()) next.title = 'Job title is required.';
-    if (!description.trim()) next.description = 'Description is required.';
-    else if (wordCount > 500) next.description = 'Description must be 500 words or fewer.';
-    if (!categoryId) next.category = 'Please select a category.';
-    if (!hourlyRate || rateNum <= 0) next.rate = 'Enter a valid hourly rate.';
-    if (hours <= 0) next.hours = 'Expected hours must be at least 1.';
+    if (!title.trim()) next.title = t('post_err_title');
+    if (!description.trim()) next.description = t('post_err_desc');
+    else if (wordCount > 500) next.description = t('post_err_desc_long');
+    if (!categoryId) next.category = t('post_err_category');
+    if (!hourlyRate || rateNum <= 0) next.rate = t('post_err_rate');
+    if (hours <= 0) next.hours = t('post_err_hours');
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -81,8 +83,8 @@ export default function PostJobScreen() {
     );
     if (activeClientJobs.length >= 5) {
       showAlert({
-        title: 'Job limit reached',
-        message: 'You can have up to 5 active jobs at once. Close or cancel an existing job before posting a new one.',
+        title: t('post_limit_title'),
+        message: t('post_limit_msg'),
         icon: 'alert-circle',
       });
       return;
@@ -121,16 +123,16 @@ export default function PostJobScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Post a Job</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('post_a_job')}</Text>
         <View style={{ width: 22 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Title */}
-        <Text style={[styles.label, { color: c.text }]}>Job Title</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_job_title')}</Text>
         <TextInput
           style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: errors.title ? c.destructive : c.border }]}
-          placeholder="e.g. Deep clean my apartment"
+          placeholder={t('post_title_placeholder')}
           placeholderTextColor={c.mutedForeground}
           value={title}
           onChangeText={setTitle}
@@ -139,14 +141,14 @@ export default function PostJobScreen() {
 
         {/* Description */}
         <View style={styles.labelRow}>
-          <Text style={[styles.label, { color: c.text }]}>Description</Text>
+          <Text style={[styles.label, { color: c.text }]}>{t('post_description')}</Text>
           <Text style={[styles.counter, { color: wordCount > 500 ? c.destructive : c.mutedForeground }]}>
-            {wordCount}/500 words
+            {t('post_words', { n: wordCount })}
           </Text>
         </View>
         <TextInput
           style={[styles.textArea, { backgroundColor: c.input, color: c.text, borderColor: errors.description ? c.destructive : c.border }]}
-          placeholder="Describe what you need done, any special instructions, and access details."
+          placeholder={t('post_desc_placeholder')}
           placeholderTextColor={c.mutedForeground}
           value={description}
           onChangeText={setDescription}
@@ -157,7 +159,7 @@ export default function PostJobScreen() {
         {errors.description && <Text style={[styles.error, { color: c.destructive }]}>{errors.description}</Text>}
 
         {/* Category */}
-        <Text style={[styles.label, { color: c.text }]}>Category</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_category')}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
           {CATEGORIES.map((cat) => (
             <TouchableOpacity
@@ -177,7 +179,7 @@ export default function PostJobScreen() {
                 color={categoryId === cat.id ? '#FFF' : c.text}
               />
               <Text style={[styles.categoryText, { color: categoryId === cat.id ? '#FFF' : c.text }]}>
-                {cat.name}
+                {tCat(cat.id)}
               </Text>
             </TouchableOpacity>
           ))}
@@ -185,21 +187,28 @@ export default function PostJobScreen() {
         {errors.category && <Text style={[styles.error, { color: c.destructive }]}>{errors.category}</Text>}
 
         {/* Date */}
-        <Text style={[styles.label, { color: c.text }]}>Date Needed</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
         <View style={styles.chipWrapRow}>
-          {DATE_OPTIONS.map((d) => (
-            <TouchableOpacity
-              key={d}
-              style={[styles.chip, { backgroundColor: date === d ? c.primary : c.muted }]}
-              onPress={() => setDate(d)}
-            >
-              <Text style={[styles.chipText, { color: date === d ? '#FFF' : c.text }]}>{d}</Text>
-            </TouchableOpacity>
-          ))}
+          {DATE_OPTIONS.map((d) => {
+            const label =
+              d === 'Today' ? t('post_date_today')
+              : d === 'Tomorrow' ? t('post_date_tomorrow')
+              : d === 'This Weekend' ? t('post_date_weekend')
+              : t('post_date_pick');
+            return (
+              <TouchableOpacity
+                key={d}
+                style={[styles.chip, { backgroundColor: date === d ? c.primary : c.muted }]}
+                onPress={() => setDate(d)}
+              >
+                <Text style={[styles.chipText, { color: date === d ? '#FFF' : c.text }]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Time */}
-        <Text style={[styles.label, { color: c.text }]}>Time</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
         <View style={styles.chipWrapRow}>
           {TIME_SLOTS.map((t) => (
             <TouchableOpacity
@@ -213,7 +222,7 @@ export default function PostJobScreen() {
         </View>
 
         {/* Expected hours */}
-        <Text style={[styles.label, { color: c.text }]}>Expected Hours of Work</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_hours')}</Text>
         <View style={[styles.stepper, { backgroundColor: c.input, borderColor: errors.hours ? c.destructive : c.border }]}>
           <TouchableOpacity
             style={[styles.stepperBtn, { backgroundColor: c.muted }]}
@@ -221,7 +230,9 @@ export default function PostJobScreen() {
           >
             <Feather name="minus" size={16} color={c.text} />
           </TouchableOpacity>
-          <Text style={[styles.stepperValue, { color: c.text }]}>{hours} hr{hours !== 1 ? 's' : ''}</Text>
+          <Text style={[styles.stepperValue, { color: c.text }]}>
+            {hours === 1 ? t('post_hours_value', { n: hours }) : t('post_hours_value_plural', { n: hours })}
+          </Text>
           <TouchableOpacity
             style={[styles.stepperBtn, { backgroundColor: c.muted }]}
             onPress={() => setHours((h) => Math.min(24, h + 1))}
@@ -232,7 +243,7 @@ export default function PostJobScreen() {
         {errors.hours && <Text style={[styles.error, { color: c.destructive }]}>{errors.hours}</Text>}
 
         {/* Photo upload */}
-        <Text style={[styles.label, { color: c.text }]}>Photos (up to 5)</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_photos')}</Text>
         <View style={styles.photoRow}>
           {photos.map((uri) => (
             <View key={uri} style={styles.photoThumbWrap}>
@@ -256,7 +267,7 @@ export default function PostJobScreen() {
         </View>
 
         {/* Expected price */}
-        <Text style={[styles.label, { color: c.text }]}>Hourly Rate (€)</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_rate')}</Text>
         <TextInput
           style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: errors.rate ? c.destructive : c.border }]}
           placeholder="20"
@@ -268,15 +279,17 @@ export default function PostJobScreen() {
         {errors.rate && <Text style={[styles.error, { color: c.destructive }]}>{errors.rate}</Text>}
 
         <View style={[styles.totalCard, { backgroundColor: c.primaryLight }]}>
-          <Text style={[styles.totalLabel, { color: c.primary }]}>Expected Budget</Text>
+          <Text style={[styles.totalLabel, { color: c.primary }]}>{t('post_budget')}</Text>
           <Text style={[styles.totalValue, { color: c.primary }]}>€{total.toFixed(0)}</Text>
           <Text style={[styles.totalSub, { color: c.primary }]}>
-            {hours} hr{hours !== 1 ? 's' : ''} × €{rateNum || 0}/hr — shown to bidders as your budget
+            {hours === 1
+              ? t('post_budget_sub', { hours, rate: rateNum || 0 })
+              : t('post_budget_sub_plural', { hours, rate: rateNum || 0 })}
           </Text>
         </View>
 
         {/* Urgency toggle */}
-        <Text style={[styles.label, { color: c.text }]}>Request Type</Text>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
         <View style={styles.urgencyRow}>
           <TouchableOpacity
             style={[
@@ -289,9 +302,9 @@ export default function PostJobScreen() {
             onPress={() => setUrgency('urgent')}
           >
             <Feather name="zap" size={20} color={urgency === 'urgent' ? c.urgent : c.mutedForeground} />
-            <Text style={[styles.urgencyTitle, { color: urgency === 'urgent' ? c.urgent : c.text }]}>Urgent</Text>
+            <Text style={[styles.urgencyTitle, { color: urgency === 'urgent' ? c.urgent : c.text }]}>{t('post_urgent')}</Text>
             <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>
-              Need this within 12 hours — 30-minute live bidding window
+              {t('post_urgent_desc')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -305,9 +318,9 @@ export default function PostJobScreen() {
             onPress={() => setUrgency('regular')}
           >
             <Feather name="clock" size={20} color={urgency === 'regular' ? c.success : c.mutedForeground} />
-            <Text style={[styles.urgencyTitle, { color: urgency === 'regular' ? c.success : c.text }]}>Regular</Text>
+            <Text style={[styles.urgencyTitle, { color: urgency === 'regular' ? c.success : c.text }]}>{t('post_regular')}</Text>
             <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>
-              Need this within 72 hours — 3-hour bidding window
+              {t('post_regular_desc')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -317,7 +330,7 @@ export default function PostJobScreen() {
           onPress={handleSubmit}
           disabled={submitting}
         >
-          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>Post Job & Start Bidding</Text>}
+          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>{t('post_submit')}</Text>}
         </TouchableOpacity>
       </ScrollView>
     </View>

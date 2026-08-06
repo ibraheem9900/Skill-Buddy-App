@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CATEGORIES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 import RangeSlider from '@/components/RangeSlider';
@@ -27,10 +28,10 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
 
 const RATINGS = [
-  { label: '4.5 & above', stars: 4.5 },
-  { label: '4.0 – 4.5',   stars: 4.0 },
-  { label: '3.5 – 4.0',   stars: 3.5 },
-  { label: '3.0 – 3.5',   stars: 3.0 },
+  { labelKey: 'filter_rating_45', stars: 4.5 },
+  { labelKey: 'filter_rating_40', stars: 4.0 },
+  { labelKey: 'filter_rating_35', stars: 3.5 },
+  { labelKey: 'filter_rating_30', stars: 3.0 },
 ];
 
 const TODAY = new Date();
@@ -47,17 +48,19 @@ export default function FilterScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const { filters, setFilters, resetFilters: resetContextFilters } = useServiceFilters();
-  const initialCatName = CATEGORIES.find((cat) => cat.id === filters.categoryId)?.name ?? 'All';
-  const [selectedCat, setSelectedCat] = useState(initialCatName);
+  const ALL = '__all__';
+  const initialCatId = filters.categoryId ?? ALL;
+  const [selectedCat, setSelectedCat] = useState(initialCatId);
   const [selectedRating, setSelectedRating] = useState<number | null>(filters.minRating);
   const [selectedDate, setSelectedDate] = useState<string | null>(filters.date);
   const [minPrice, setMinPrice] = useState(filters.minPrice);
   const [maxPrice, setMaxPrice] = useState(filters.maxPrice);
 
-  const catTabs = ['All', ...CATEGORIES.slice(0, 6).map((cat) => cat.name)];
+  const catTabs = [ALL, ...CATEGORIES.slice(0, 6).map((cat) => cat.id)];
 
   // ── Drag-to-dismiss ───────────────────────────────────────────────────────
   const translateY = useRef(new Animated.Value(0)).current;
@@ -82,7 +85,7 @@ export default function FilterScreen() {
   }, []);
 
   const resetFilters = () => {
-    setSelectedCat('All');
+    setSelectedCat(ALL);
     setSelectedRating(null);
     setSelectedDate(null);
     setMinPrice(DEFAULT_FILTERS.minPrice);
@@ -91,7 +94,7 @@ export default function FilterScreen() {
   };
 
   const applyFilters = () => {
-    const categoryId = selectedCat === 'All' ? null : CATEGORIES.find((cat) => cat.name === selectedCat)?.id ?? null;
+    const categoryId = selectedCat === ALL ? null : selectedCat;
     setFilters({
       categoryId,
       minPrice,
@@ -123,7 +126,7 @@ export default function FilterScreen() {
 
         {/* Header row */}
         <View style={styles.headerRow}>
-          <Text style={[styles.title, { color: c.text }]}>Filter</Text>
+          <Text style={[styles.title, { color: c.text }]}>{t('services_filter')}</Text>
           <TouchableOpacity onPress={dismiss} style={[styles.closeBtn, { backgroundColor: c.muted }]}>
             <Feather name="x" size={18} color={c.text} />
           </TouchableOpacity>
@@ -131,7 +134,7 @@ export default function FilterScreen() {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
           {/* Category */}
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Category</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('filter_category')}</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -148,17 +151,17 @@ export default function FilterScreen() {
                 onPress={() => setSelectedCat(cat)}
               >
                 <Text style={[styles.catTabText, { color: c.mutedForeground }, selectedCat === cat && { color: '#FFF' }]}>
-                  {cat}
+                  {cat === ALL ? t('services_all') : tCat(cat)}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
           {/* Price Range */}
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Price Range</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('filter_price_range')}</Text>
           <View style={styles.priceRow}>
             <View style={[styles.priceBox, { borderColor: c.border, backgroundColor: c.muted }]}>
-              <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Min</Text>
+              <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>{t('filter_min')}</Text>
               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{minPrice}</Text>
             </View>
             <RangeSlider
@@ -172,13 +175,13 @@ export default function FilterScreen() {
               }}
             />
             <View style={[styles.priceBox, { borderColor: c.border, backgroundColor: c.muted }]}>
-              <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Max</Text>
+              <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>{t('filter_max')}</Text>
               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{maxPrice}</Text>
             </View>
           </View>
 
           {/* Reviews */}
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Minimum Rating</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('filter_min_rating')}</Text>
           <View style={{ paddingHorizontal: 20, gap: 12 }}>
             {RATINGS.map((r) => (
               <TouchableOpacity
@@ -192,7 +195,7 @@ export default function FilterScreen() {
                     <MaterialIcons key={i} name="star" size={14} color={i <= Math.floor(r.stars) ? '#FFB800' : c.border} />
                   ))}
                 </View>
-                <Text style={[styles.ratingLabel, { color: c.text }]}>{r.label}</Text>
+                <Text style={[styles.ratingLabel, { color: c.text }]}>{t(r.labelKey as any)}</Text>
                 <View
                   style={[
                     styles.radio,
@@ -209,7 +212,7 @@ export default function FilterScreen() {
           </View>
 
           {/* Available Date */}
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Available Date</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('filter_available_date')}</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -226,7 +229,7 @@ export default function FilterScreen() {
                 onPress={() => setSelectedDate(selectedDate === d.key ? null : d.key)}
               >
                 <Text style={[styles.dateDay, { color: c.mutedForeground }, selectedDate === d.key && { color: '#FFF' }]}>
-                  {d.key}
+                  {d.key === 'Today' ? t('filter_today') : d.key}
                 </Text>
                 <Text style={[styles.dateNum, { color: c.text }, selectedDate === d.key && { color: '#FFF' }]}>
                   {d.sub}
@@ -242,13 +245,13 @@ export default function FilterScreen() {
             style={[styles.resetBtn, { borderColor: c.primary }]}
             onPress={resetFilters}
           >
-            <Text style={[styles.resetText, { color: c.primary }]}>Reset Filter</Text>
+            <Text style={[styles.resetText, { color: c.primary }]}>{t('action_reset')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.applyBtn, { backgroundColor: c.primary }]}
             onPress={applyFilters}
           >
-            <Text style={styles.applyText}>Apply</Text>
+            <Text style={styles.applyText}>{t('action_apply')}</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>

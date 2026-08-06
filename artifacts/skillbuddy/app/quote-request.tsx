@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 type ContactPref = 'Phone' | 'Email' | 'Chat';
 const CONTACT_OPTIONS: ContactPref[] = ['Phone', 'Email', 'Chat'];
@@ -25,6 +26,7 @@ export default function QuoteRequestScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   const [description, setDescription] = useState('');
   const [contact, setContact] = useState<ContactPref>('Chat');
@@ -33,7 +35,7 @@ export default function QuoteRequestScreen() {
 
   const handleSubmit = () => {
     if (!description.trim()) {
-      Alert.alert('Missing Info', 'Please describe the service you need.');
+      Alert.alert(t('quote_missing_title'), t('quote_missing_msg'));
       return;
     }
     setSubmitting(true);
@@ -51,15 +53,15 @@ export default function QuoteRequestScreen() {
           <View style={[styles.successIcon, { backgroundColor: c.primaryLight }]}>
             <Feather name="check-circle" size={48} color={c.primary} />
           </View>
-          <Text style={[styles.successTitle, { color: c.text }]}>Request Sent!</Text>
+          <Text style={[styles.successTitle, { color: c.text }]}>{t('quote_success_title')}</Text>
           <Text style={[styles.successSub, { color: c.mutedForeground }]}>
-            Our team will review your request and get back to you via {contact}.
+            {t('quote_success_sub', { contact })}
           </Text>
           <TouchableOpacity
             style={[styles.doneBtn, { backgroundColor: c.primary }]}
             onPress={() => router.back()}
           >
-            <Text style={styles.doneBtnText}>Done</Text>
+            <Text style={styles.doneBtnText}>{t('quote_done')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -73,7 +75,7 @@ export default function QuoteRequestScreen() {
         <TouchableOpacity onPress={() => router.back()} style={[styles.closeBtn, { backgroundColor: c.muted }]}>
           <Feather name="x" size={18} color={c.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: c.text }]}>Request a Custom Quote</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('quote_title')}</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -83,16 +85,16 @@ export default function QuoteRequestScreen() {
         bottomOffset={60}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.sectionLabel, { color: c.text }]}>Describe what you need</Text>
+        <Text style={[styles.sectionLabel, { color: c.text }]}>{t('quote_describe')}</Text>
         <Text style={[styles.sectionHint, { color: c.mutedForeground }]}>
-          Tell us about the service you're looking for — the more detail, the better.
+          {t('quote_describe_hint')}
         </Text>
         <View style={[styles.textAreaWrap, { borderColor: c.border, backgroundColor: c.input }]}>
           <TextInput
             style={[styles.textArea, { color: c.text }]}
             value={description}
             onChangeText={setDescription}
-            placeholder="e.g. I need a deep kitchen clean in a 3-bedroom apartment every two weeks…"
+            placeholder={t('quote_placeholder')}
             placeholderTextColor={c.mutedForeground}
             multiline
             numberOfLines={6}
@@ -100,9 +102,9 @@ export default function QuoteRequestScreen() {
             autoCorrect
           />
         </View>
-        <Text style={[styles.charCount, { color: c.mutedForeground }]}>{description.length} chars</Text>
+        <Text style={[styles.charCount, { color: c.mutedForeground }]}>{t('quote_chars', { n: description.length })}</Text>
 
-        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 24 }]}>Preferred contact method</Text>
+        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 24 }]}>{t('quote_contact_method')}</Text>
         <View style={styles.segRow}>
           {CONTACT_OPTIONS.map((opt) => (
             <TouchableOpacity
@@ -120,7 +122,9 @@ export default function QuoteRequestScreen() {
                 size={16}
                 color={contact === opt ? '#FFF' : c.mutedForeground}
               />
-              <Text style={[styles.segText, { color: contact === opt ? '#FFF' : c.text }]}>{opt}</Text>
+              <Text style={[styles.segText, { color: contact === opt ? '#FFF' : c.text }]}>
+                {opt === 'Phone' ? t('quote_contact_phone') : opt === 'Email' ? t('quote_contact_email') : t('quote_contact_chat')}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -135,11 +139,11 @@ export default function QuoteRequestScreen() {
           activeOpacity={0.85}
         >
           {submitting ? (
-            <Text style={styles.submitBtnText}>Sending…</Text>
+            <Text style={styles.submitBtnText}>{t('quote_sending')}</Text>
           ) : (
             <>
               <Feather name="send" size={18} color="#FFF" />
-              <Text style={styles.submitBtnText}>Submit Request</Text>
+              <Text style={styles.submitBtnText}>{t('quote_submit')}</Text>
             </>
           )}
         </TouchableOpacity>

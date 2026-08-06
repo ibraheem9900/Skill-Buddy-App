@@ -20,8 +20,9 @@ interface Props {
   animateOnMount?: boolean;
 }
 
-// Original aspect ratio of the brand mark: ~2.26 : 1
-const ASPECT = 2.26;
+// Original aspect ratio of the brand mark asset (cropped to content bounds):
+// 278 x 115 = 2.417 : 1
+const ASPECT = 2.417;
 
 const TINTS: Record<Variant, string> = {
   white: '#FFFFFF',
@@ -47,11 +48,11 @@ export default function LogoImage({ variant = 'green', height = 32, animateOnMou
   }));
   return (
     <Animated.Image
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      source={require('@/assets/images/logo-icon.png')}
-      style={[styles.img, { width, height }, animatedStyle]}
-      tintColor={TINTS[variant]}
-      resizeMode="contain"
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  source={require('@/assets/images/logo-icon.png')}
+  style={[styles.img, { width, height }, animatedStyle]}
+  tintColor={TINTS[variant]}
+  resizeMode="contain"
     />
   );
 }

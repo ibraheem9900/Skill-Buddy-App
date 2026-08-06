@@ -15,6 +15,7 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const { width } = Dimensions.get('window');
 const c = colors.light;
@@ -29,30 +30,16 @@ const LANGS: Lang[] = [
 ];
 
 const SLIDES = [
-  {
-    id: 1,
-    title: 'Explore Professional\nServices Provider',
-    subtitle: 'Find the best local service providers around you and book instantly.',
-    icon: 'home' as const,
-  },
-  {
-    id: 2,
-    title: 'Explore Services by\ninteractive Map',
-    subtitle: 'Discover nearby providers on a live map and filter by category.',
-    icon: 'map' as const,
-  },
-  {
-    id: 3,
-    title: 'Choose Your\nPayment Plan',
-    subtitle: 'Pay now, pay later, or pay in monthly instalments. You choose.',
-    icon: 'credit-card' as const,
-  },
+  { id: 1, titleKey: 'onb_slide_1_title', subtitleKey: 'onb_slide_1_sub', icon: 'home' as const },
+  { id: 2, titleKey: 'onb_slide_2_title', subtitleKey: 'onb_slide_2_sub', icon: 'map' as const },
+  { id: 3, titleKey: 'onb_slide_3_title', subtitleKey: 'onb_slide_3_sub', icon: 'credit-card' as const },
 ];
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setOnboardingSeen } = useAuth();
+  const { t, setLanguage } = useLanguage();
   const [step, setStep] = useState<'language' | 'slides'>('language');
   const [selectedLang, setSelectedLang] = useState('en');
   const [slideIdx, setSlideIdx] = useState(0);
@@ -88,11 +75,11 @@ export default function OnboardingScreen() {
     return (
       <View style={[styles.screen, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
         <TouchableOpacity style={styles.skipBtn} onPress={finish}>
-          <Text style={styles.skipText}>Skip</Text>
+          <Text style={styles.skipText}>{t('onb_skip')}</Text>
         </TouchableOpacity>
         <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.langContent}>
-          <Text style={styles.langTitle}>Select Language</Text>
-          <Text style={styles.langSubtitle}>Tip: You can change this later in Settings</Text>
+          <Text style={styles.langTitle}>{t('onb_select_language')}</Text>
+          <Text style={styles.langSubtitle}>{t('onb_lang_tip')}</Text>
           <View style={styles.langList}>
             {LANGS.map((lang) => (
               <TouchableOpacity
@@ -101,7 +88,7 @@ export default function OnboardingScreen() {
                   styles.langItem,
                   selectedLang === lang.code && { backgroundColor: c.primaryLight, borderColor: c.primary },
                 ]}
-                onPress={() => setSelectedLang(lang.code)}
+                onPress={() => { setSelectedLang(lang.code); setLanguage(lang.code as any); }}
               >
                 <Text style={styles.langFlag}>{lang.flag}</Text>
                 <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Manrope_600SemiBold' }]}>
@@ -129,7 +116,7 @@ export default function OnboardingScreen() {
   return (
     <View style={[styles.screen, { paddingBottom: insets.bottom + 20 }]}>
       <TouchableOpacity style={[styles.skipBtn, { top: insets.top + 12 }]} onPress={finish}>
-        <Text style={styles.skipText}>Skip</Text>
+        <Text style={styles.skipText}>{t('onb_skip')}</Text>
       </TouchableOpacity>
       <FlatList
         ref={flatRef}
@@ -146,8 +133,8 @@ export default function OnboardingScreen() {
               <Feather name={item.icon} size={80} color={c.primary} />
             </View>
             <Animated.View entering={FadeIn.duration(400)}>
-              <Text style={styles.slideTitle}>{item.title}</Text>
-              <Text style={styles.slideSubtitle}>{item.subtitle}</Text>
+              <Text style={styles.slideTitle}>{t(item.titleKey)}</Text>
+              <Text style={styles.slideSubtitle}>{t(item.subtitleKey)}</Text>
             </Animated.View>
           </View>
         )}

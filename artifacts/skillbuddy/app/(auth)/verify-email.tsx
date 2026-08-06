@@ -5,12 +5,14 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import colors from '@/constants/colors';
+import { useLanguage } from '@/context/LanguageContext';
 
 const c = colors.light;
 
 export default function VerifyEmailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { t } = useLanguage();
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}>
@@ -21,21 +23,17 @@ export default function VerifyEmailScreen() {
         <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
           <Feather name="mail" size={56} color={c.primary} />
         </View>
-        <Text style={styles.title}>Check Your Email</Text>
-        <Text style={styles.subtitle}>
-          We've sent a verification link to your email address. Please check your inbox and click the link to verify your account.
-        </Text>
+        <Text style={styles.title}>{t('ve_title')}</Text>
+        <Text style={styles.subtitle}>{t('ve_subtitle')}</Text>
         <View style={styles.infoBox}>
           <Feather name="info" size={16} color={c.primary} />
-          <Text style={styles.infoText}>
-            After verifying your email, you can complete your profile setup to start using SkillBuddy.
-          </Text>
+          <Text style={styles.infoText}>{t('ve_info')}</Text>
         </View>
         <TouchableOpacity style={[styles.btn, { backgroundColor: c.primary }]} onPress={() => router.replace('/(auth)/login')}>
-          <Text style={styles.btnText}>Back to Login</Text>
+          <Text style={styles.btnText}>{t('ve_back')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.resendBtn}>
-          <Text style={[styles.resendText, { color: c.primary }]}>Didn't receive it? Resend email</Text>
+          <Text style={[styles.resendText, { color: c.primary }]}>{t('ve_resend')}</Text>
         </TouchableOpacity>
       </Animated.View>
     </View>

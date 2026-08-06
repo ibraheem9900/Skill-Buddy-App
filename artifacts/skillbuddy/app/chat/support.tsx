@@ -13,33 +13,35 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import type { ChatMessage } from '@/types';
 
 const ISSUE_CATEGORIES = [
-  { id: 'booking', label: 'Booking Issue', icon: 'calendar' as const },
-  { id: 'payment', label: 'Payment & Billing', icon: 'credit-card' as const },
-  { id: 'account', label: 'Account & Profile', icon: 'user' as const },
-  { id: 'safety', label: 'Safety Concern', icon: 'shield' as const },
-  { id: 'other', label: 'Something Else', icon: 'help-circle' as const },
+  { id: 'booking', labelKey: 'support_cat_booking', icon: 'calendar' as const },
+  { id: 'payment', labelKey: 'support_cat_payment', icon: 'credit-card' as const },
+  { id: 'account', labelKey: 'support_cat_account', icon: 'user' as const },
+  { id: 'safety', labelKey: 'support_cat_safety', icon: 'shield' as const },
+  { id: 'other', labelKey: 'support_cat_other', icon: 'help-circle' as const },
 ];
 
 export default function SupportChatScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [category, setCategory] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
 
-  const startChat = (catId: string, label: string) => {
+  const startChat = (catId: string, labelKey: string) => {
     setCategory(catId);
     setMessages([
       {
         id: 'sys1',
-        text: `Thanks for reaching out about "${label}". A SkillBuddy Support agent will be with you shortly. In the meantime, tell us more about the issue.`,
+        text: t('support_welcome', { label: t(labelKey as any) }),
         sender: 'other',
         timestamp: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
-        senderName: 'SkillBuddy Support',
+        senderName: t('support_title'),
       },
     ]);
   };
@@ -62,10 +64,10 @@ export default function SupportChatScreen() {
       <View style={[styles.header, { backgroundColor: c.primary }]}>
         <BackButton />
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>SkillBuddy Support</Text>
+          <Text style={styles.headerTitle}>{t('support_title')}</Text>
           <View style={styles.supportBadge}>
             <Feather name="headphones" size={11} color="#FFF" />
-            <Text style={styles.supportBadgeText}>Support</Text>
+            <Text style={styles.supportBadgeText}>{t('support_badge')}</Text>
           </View>
         </View>
         <View style={{ width: 40 }} />
@@ -73,17 +75,17 @@ export default function SupportChatScreen() {
 
       {!category ? (
         <View style={{ padding: 20 }}>
-          <Text style={[styles.prompt, { color: c.text }]}>What can we help you with?</Text>
+          <Text style={[styles.prompt, { color: c.text }]}>{t('support_prompt')}</Text>
           {ISSUE_CATEGORIES.map((cat) => (
             <TouchableOpacity
               key={cat.id}
               style={[styles.catCard, { backgroundColor: c.card, borderColor: c.border }]}
-              onPress={() => startChat(cat.id, cat.label)}
+              onPress={() => startChat(cat.id, cat.labelKey)}
             >
               <View style={[styles.catIcon, { backgroundColor: c.accent }]}>
                 <Feather name={cat.icon} size={18} color={c.primary} />
               </View>
-              <Text style={[styles.catLabel, { color: c.text }]}>{cat.label}</Text>
+              <Text style={[styles.catLabel, { color: c.text }]}>{t(cat.labelKey as any)}</Text>
               <Feather name="chevron-right" size={18} color={c.border} />
             </TouchableOpacity>
           ))}
@@ -111,7 +113,7 @@ export default function SupportChatScreen() {
               style={[styles.input, { backgroundColor: c.input, color: c.text }]}
               value={input}
               onChangeText={setInput}
-              placeholder="Describe your issue..."
+              placeholder={t('support_input')}
               placeholderTextColor={c.mutedForeground}
               multiline
             />

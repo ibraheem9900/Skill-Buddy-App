@@ -1,0 +1,1469 @@
+From 74a03879550f31873e7dbf30afcc6162b99719a7 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Mon, 27 Jul 2026 11:42:12 +0000
+Subject: [PATCH] Booking Confirmation, Payment System, Job Tracking state
+ machine, and Call screen (Sections 3-5)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Section 3 — Booking Confirmation & Assignment:
+- Accept Bid now shows a real confirmation summary (provider, price,
+  date/time, job title) before routing into payment instead of
+  directly assigning.
+- New Booking Summary screen after successful payment: success state,
+  assigned provider card with chat/call access, job details.
+
+Section 4 — Payment System UI:
+- lib/payment.ts: calculateOrderBreakdown() and calculatePayoutBreakdown()
+  as real functions (not hardcoded numbers) — verified against the
+  spec's worked example (€30 bid -> €24.19 before VAT, €5.81 VAT,
+  matches exactly).
+- Payment screen: method selection (Card/Apple Pay/Google Pay/Bank
+  Transfer/Credit Points), real Pay Later / Instalments eligibility
+  logic driven by the mock user's completed-task count and bill
+  amount (not just always-shown options), Credit Points toggle
+  (1 pt = €0.10) that recalculates the total live, and a real
+  10-minute countdown that reopens the job for bidding if it expires
+  without payment completing.
+
+Section 5 — Job Tracking, Updating & Completion:
+- Expanded JobStatus to the full spec'd state machine (draft, bidding,
+  short_listed, task_assigned, pending_payment, arrived, in_progress,
+  revision_requested, completed, approved, closed, cancelled, expired,
+  disputed, paused) and updated all existing 'assigned' references
+  consistently to 'task_assigned'.
+- New Job Tracking screen: visual status stepper, provider-side
+  'I've Arrived' -> 'Start Job' -> 'Mark as Done' flow (irreversible
+  confirmation), propose/respond-to Revision (extra hours + new price,
+  pending/approved/denied states for both sides), Cancel Job flow with
+  distinct provider-cancels (credibility/rating penalty, mock 28-day
+  suspension if rating drops below 4.0) vs client-cancels (€5
+  cancellation fee) consequences, and the provider payout breakdown
+  inline.
+- New Review screen: Approve (rating + feedback, finalizes payment),
+  Deny (required written feedback, capped at 2 denials — UI disables
+  further denial and shows why), Dispute (reason list + required
+  description, creates a mock support ticket, flags job Disputed).
+- Jobs tab now routes assigned/in-progress jobs to the tracking screen
+  instead of the bidding dashboard, which is bidding-phase-only.
+
+Chat & Call:
+- Added a phone icon to the Chat Thread header, wired to a new
+  simulated Active Call screen (mute, speaker/earpiece toggle, end
+  call, duration timer capped at 5 minutes with a 'call ending soon'
+  warning near the limit).
+
+Full workspace typecheck: zero errors.
+
+Not yet covered in this pass (follow-up): chat delivery/read receipts,
+image/voice message size-limit UI copy, the 90-day peer-chat vs
+permanent support-chat lifecycle distinction, payment retry-on-failure
+UI, and the remaining edge-case empty states from Section 5.
+---
+ artifacts/skillbuddy/app/(tabs)/jobs.tsx      |   7 +-
+ artifacts/skillbuddy/app/call/[id].tsx        | 105 +++++
+ artifacts/skillbuddy/app/chat/[id].tsx        |  15 +-
+ artifacts/skillbuddy/app/job/[id].tsx         |  12 +-
+ .../app/job/[id]/booking-summary.tsx          | 120 ++++++
+ artifacts/skillbuddy/app/job/[id]/payment.tsx | 237 +++++++++++
+ artifacts/skillbuddy/app/job/[id]/review.tsx  | 198 +++++++++
+ artifacts/skillbuddy/app/job/[id]/track.tsx   | 377 ++++++++++++++++++
+ artifacts/skillbuddy/components/JobCard.tsx   |  11 +-
+ artifacts/skillbuddy/data/mockData.ts         |  26 +-
+ artifacts/skillbuddy/lib/payment.ts           |  67 ++++
+ artifacts/skillbuddy/types/index.ts           |  64 ++-
+ 12 files changed, 1227 insertions(+), 12 deletions(-)
+ create mode 100644 artifacts/skillbuddy/app/call/[id].tsx
+ create mode 100644 artifacts/skillbuddy/app/job/[id]/booking-summary.tsx
+ create mode 100644 artifacts/skillbuddy/app/job/[id]/payment.tsx
+ create mode 100644 artifacts/skillbuddy/app/job/[id]/review.tsx
+ create mode 100644 artifacts/skillbuddy/app/job/[id]/track.tsx
+ create mode 100644 artifacts/skillbuddy/lib/payment.ts
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/jobs.tsx b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+index 8b5657e..eb8963b 100644
+--- a/artifacts/skillbuddy/app/(tabs)/jobs.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+@@ -33,12 +33,17 @@ export default function JobsScreen() {
+   const providerJobs = useMemo(() => {
+     if (providerFilter === 'available') return MOCK_JOBS.filter((j) => j.status === 'bidding');
+     if (providerFilter === 'myBids') return MOCK_JOBS.filter((j) => myBidJobIds.has(j.id));
+-    return MOCK_JOBS.filter((j) => j.status === 'assigned' || j.status === 'in_progress');
++    return MOCK_JOBS.filter((j) => j.status === 'task_assigned' || j.status === 'in_progress');
+   }, [providerFilter, myBidJobIds]);
+ 
+   const data: Job[] = activeRole === 'CLIENT' ? myJobs : providerJobs;
+ 
+   const openJob = (job: Job) => {
++    const isTracked = !['bidding', 'expired'].includes(job.status);
++    if (isTracked) {
++      router.push(`/job/${job.id}/track` as any);
++      return;
++    }
+     if (activeRole === 'CLIENT') {
+       router.push(`/job/${job.id}` as any);
+     } else {
+diff --git a/artifacts/skillbuddy/app/call/[id].tsx b/artifacts/skillbuddy/app/call/[id].tsx
+new file mode 100644
+index 0000000..7b84677
+--- /dev/null
++++ b/artifacts/skillbuddy/app/call/[id].tsx
+@@ -0,0 +1,105 @@
++import React, { useEffect, useState } from 'react';
++import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import Animated, { FadeIn } from 'react-native-reanimated';
++import { useTheme } from '@/context/ThemeContext';
++import { BID_PROVIDERS, CHAT_THREADS } from '@/data/mockData';
++
++const MAX_CALL_SECONDS = 5 * 60;
++
++function formatDuration(seconds: number): string {
++  const m = Math.floor(seconds / 60);
++  const s = seconds % 60;
++  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
++}
++
++export default function ActiveCallScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const provider = BID_PROVIDERS.find((p) => p.id === id);
++  const thread = CHAT_THREADS.find((t) => t.participant.id === id);
++  const name = provider?.name ?? thread?.participant.name ?? 'Unknown';
++
++  const [seconds, setSeconds] = useState(0);
++  const [muted, setMuted] = useState(false);
++  const [speaker, setSpeaker] = useState(false);
++  const [ended, setEnded] = useState(false);
++
++  useEffect(() => {
++    if (ended) return;
++    const interval = setInterval(() => {
++      setSeconds((s) => {
++        if (s + 1 >= MAX_CALL_SECONDS) {
++          setEnded(true);
++          clearInterval(interval);
++          return MAX_CALL_SECONDS;
++        }
++        return s + 1;
++      });
++    }, 1000);
++    return () => clearInterval(interval);
++  }, [ended]);
++
++  const endCall = () => {
++    setEnded(true);
++    router.back();
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: '#111614', paddingTop: insets.top }]}>
++      <Animated.View entering={FadeIn.duration(300)} style={styles.center}>
++        <View style={styles.avatar}>
++          <Text style={styles.avatarText}>{name.charAt(0)}</Text>
++        </View>
++        <Text style={styles.name}>{name}</Text>
++        <Text style={styles.status}>
++          {seconds >= MAX_CALL_SECONDS - 30 && !ended ? 'Call ending soon…' : 'Ongoing call'}
++        </Text>
++        <Text style={styles.duration}>{formatDuration(seconds)}</Text>
++      </Animated.View>
++
++      <View style={[styles.controls, { paddingBottom: insets.bottom + 24 }]}>
++        <View style={styles.controlsRow}>
++          <TouchableOpacity
++            style={[styles.controlBtn, muted && styles.controlBtnActive]}
++            onPress={() => setMuted((m) => !m)}
++          >
++            <Feather name={muted ? 'mic-off' : 'mic'} size={22} color="#FFF" />
++            <Text style={styles.controlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
++          </TouchableOpacity>
++          <TouchableOpacity
++            style={[styles.controlBtn, speaker && styles.controlBtnActive]}
++            onPress={() => setSpeaker((s) => !s)}
++          >
++            <Feather name={speaker ? 'volume-2' : 'headphones'} size={22} color="#FFF" />
++            <Text style={styles.controlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
++          </TouchableOpacity>
++        </View>
++        <TouchableOpacity style={styles.endBtn} onPress={endCall}>
++          <Feather name="phone-off" size={26} color="#FFF" />
++        </TouchableOpacity>
++      </View>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1, justifyContent: 'space-between' },
++  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
++  avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 40, color: '#FFF' },
++  name: { fontFamily: 'Manrope_700Bold', fontSize: 22, color: '#FFF' },
++  status: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 4 },
++  duration: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: 'rgba(255,255,255,0.85)', marginTop: 14 },
++  controls: { alignItems: 'center', gap: 28, paddingTop: 20 },
++  controlsRow: { flexDirection: 'row', gap: 32 },
++  controlBtn: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', gap: 4 },
++  controlBtnActive: { backgroundColor: 'rgba(255,255,255,0.28)' },
++  controlLabel: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: '#FFF', marginTop: 2 },
++  endBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E85D5D', alignItems: 'center', justifyContent: 'center' },
++});
+diff --git a/artifacts/skillbuddy/app/chat/[id].tsx b/artifacts/skillbuddy/app/chat/[id].tsx
+index 9821b5b..f4c77c0 100644
+--- a/artifacts/skillbuddy/app/chat/[id].tsx
++++ b/artifacts/skillbuddy/app/chat/[id].tsx
+@@ -113,9 +113,17 @@ export default function ChatThreadScreen() {
+             <Text style={styles.headerStatus}>{thread.participant.isOnline ? 'Online' : 'Offline'}</Text>
+           </View>
+         </View>
+-        <TouchableOpacity>
+-          <Feather name="more-vertical" size={22} color="#FFF" />
+-        </TouchableOpacity>
++        <View style={styles.headerRight}>
++          <TouchableOpacity
++            style={{ marginRight: 16 }}
++            onPress={() => router.push(`/call/${thread.participant.id}` as any)}
++          >
++            <Feather name="phone" size={20} color="#FFF" />
++          </TouchableOpacity>
++          <TouchableOpacity>
++            <Feather name="more-vertical" size={22} color="#FFF" />
++          </TouchableOpacity>
++        </View>
+       </View>
+ 
+       <KeyboardAvoidingView
+@@ -170,6 +178,7 @@ const styles = StyleSheet.create({
+   flex: { flex: 1 },
+   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 14 },
+   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
++  headerRight: { flexDirection: 'row', alignItems: 'center' },
+   backBtn: {},
+   headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+   headerAvatarText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+index 897fdbd..b7a4d32 100644
+--- a/artifacts/skillbuddy/app/job/[id].tsx
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -127,16 +127,18 @@ export default function BiddingDashboardScreen() {
+   const acceptBid = (bid: Bid) => {
+     showAlert({
+       title: 'Accept this bid?',
+-      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`,
++      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}\n${job.date}, ${job.time}\n${job.title}`,
+       icon: 'check-circle',
+       buttons: [
+         { text: 'Cancel', style: 'cancel' },
+         {
+-          text: 'Accept',
++          text: 'Accept & Pay',
+           onPress: () => {
+-            job.status = 'assigned';
++            job.status = 'pending_payment';
+             job.assignedProviderId = bid.provider.id;
+-            router.back();
++            job.assignedPrice = bid.price;
++            job.paymentDeadline = Date.now() + 10 * 60 * 1000;
++            router.push(`/job/${job.id}/payment` as any);
+           },
+         },
+       ],
+@@ -253,7 +255,7 @@ export default function BiddingDashboardScreen() {
+           <View style={[styles.statusCard, { backgroundColor: c.primaryLight }]}>
+             <Feather name="check-circle" size={28} color={c.primary} />
+             <Text style={[styles.statusText, { color: c.primary }]}>
+-              {job.status === 'assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
++              {job.status === 'task_assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
+             </Text>
+           </View>
+         )}
+diff --git a/artifacts/skillbuddy/app/job/[id]/booking-summary.tsx b/artifacts/skillbuddy/app/job/[id]/booking-summary.tsx
+new file mode 100644
+index 0000000..91cc57e
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id]/booking-summary.tsx
+@@ -0,0 +1,120 @@
++import React, { useMemo } from 'react';
++import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
++import { useTheme } from '@/context/ThemeContext';
++import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
++
++export default function BookingSummaryScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const provider = useMemo(
++    () => BID_PROVIDERS.find((p) => p.id === job?.assignedProviderId),
++    [job]
++  );
++
++  if (!job) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
++      </View>
++    );
++  }
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Booking Confirmed</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        <Animated.View entering={ZoomIn.duration(300).springify()} style={[styles.successCard, { backgroundColor: c.successLight }]}>
++          <Feather name="check-circle" size={40} color={c.success} />
++          <Text style={[styles.successTitle, { color: c.success }]}>Payment Successful</Text>
++          <Text style={[styles.successSub, { color: c.text }]}>Your SkillBuddy Pilot is confirmed for this job.</Text>
++        </Animated.View>
++
++        {provider && (
++          <Animated.View entering={FadeIn.delay(150)} style={[styles.providerCard, { backgroundColor: c.card, borderColor: c.border }]}>
++            <View style={[styles.avatar, { backgroundColor: c.primaryLight }]}>
++              <Text style={[styles.avatarText, { color: c.primary }]}>{provider.name.charAt(0)}</Text>
++            </View>
++            <View style={{ flex: 1 }}>
++              <Text style={[styles.providerName, { color: c.text }]}>{provider.name}</Text>
++              <View style={styles.providerMeta}>
++                <Feather name="star" size={12} color={c.rating} />
++                <Text style={[styles.providerMetaText, { color: c.mutedForeground }]}>{provider.rating?.toFixed(1)}</Text>
++              </View>
++            </View>
++            <TouchableOpacity
++              style={[styles.iconAction, { backgroundColor: c.muted }]}
++              onPress={() => router.push(`/chat/${provider.id}` as any)}
++            >
++              <Feather name="message-circle" size={18} color={c.text} />
++            </TouchableOpacity>
++            <TouchableOpacity
++              style={[styles.iconAction, { backgroundColor: c.primaryLight }]}
++              onPress={() => router.push(`/call/${provider.id}` as any)}
++            >
++              <Feather name="phone" size={18} color={c.primary} />
++            </TouchableOpacity>
++          </Animated.View>
++        )}
++
++        <View style={[styles.detailsCard, { backgroundColor: c.card, borderColor: c.border }]}>
++          <Text style={[styles.jobTitle, { color: c.text }]}>{job.title}</Text>
++          <View style={styles.detailRow}>
++            <Feather name="map-pin" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.mutedForeground }]}>{job.location}</Text>
++          </View>
++          <View style={styles.detailRow}>
++            <Feather name="calendar" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.mutedForeground }]}>{job.date}, {job.time}</Text>
++          </View>
++          <View style={styles.detailRow}>
++            <Feather name="dollar-sign" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.mutedForeground }]}>€{job.assignedPrice?.toFixed(2)} paid</Text>
++          </View>
++        </View>
++
++        <TouchableOpacity
++          style={[styles.doneBtn, { backgroundColor: c.primary }]}
++          onPress={() => router.replace('/(tabs)/jobs' as any)}
++        >
++          <Text style={styles.doneText}>Go to My Jobs</Text>
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  successCard: { borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },
++  successTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  successSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center' },
++  providerCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 16 },
++  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  providerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  providerMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
++  providerMetaText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
++  iconAction: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
++  detailsCard: { borderWidth: 1, borderRadius: 16, padding: 16, marginTop: 16, gap: 10 },
++  jobTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, marginBottom: 4 },
++  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
++  detailText: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
++  doneBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  doneText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id]/payment.tsx b/artifacts/skillbuddy/app/job/[id]/payment.tsx
+new file mode 100644
+index 0000000..fa8406c
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id]/payment.tsx
+@@ -0,0 +1,237 @@
++import React, { useEffect, useMemo, useState } from 'react';
++import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { useAppAlert } from '@/context/AlertModalContext';
++import { CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
++import { calculateOrderBreakdown, canUsePayLater, canUseInstalments, pointsToEuro } from '@/lib/payment';
++import BackButton from '@/components/BackButton';
++import InlineLoader from '@/components/InlineLoader';
++import type { PaymentMethod } from '@/types';
++
++const METHODS: { id: PaymentMethod; label: string; icon: keyof typeof Feather.glyphMap }[] = [
++  { id: 'card', label: 'Card', icon: 'credit-card' },
++  { id: 'apple_pay', label: 'Apple Pay', icon: 'smartphone' },
++  { id: 'google_pay', label: 'Google Pay', icon: 'smartphone' },
++  { id: 'bank_transfer', label: 'Bank Transfer', icon: 'briefcase' },
++  { id: 'credit_points', label: 'Credit Points', icon: 'star' },
++];
++
++function formatRemaining(ms: number): string {
++  if (ms <= 0) return '00:00';
++  const totalSeconds = Math.floor(ms / 1000);
++  const m = Math.floor(totalSeconds / 60);
++  const s = totalSeconds % 60;
++  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
++}
++
++export default function PaymentScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const [method, setMethod] = useState<PaymentMethod>('card');
++  const [usePoints, setUsePoints] = useState(false);
++  const [processing, setProcessing] = useState(false);
++  const [remaining, setRemaining] = useState(job?.paymentDeadline ? job.paymentDeadline - Date.now() : 0);
++
++  useEffect(() => {
++    if (!job?.paymentDeadline) return;
++    const interval = setInterval(() => {
++      const left = job.paymentDeadline! - Date.now();
++      setRemaining(left);
++      if (left <= 0) {
++        clearInterval(interval);
++        // Payment window expired — job reopens for bidding.
++        job.status = 'bidding';
++        job.assignedProviderId = undefined;
++        job.assignedPrice = undefined;
++        job.paymentDeadline = undefined;
++        showAlert({
++          title: 'Payment window expired',
++          message: 'You didn\'t complete payment in time, so this job has reopened for bidding.',
++          icon: 'clock',
++          buttons: [{ text: 'OK', onPress: () => router.replace(`/job/${job.id}` as any) }],
++        });
++      }
++    }, 1000);
++    return () => clearInterval(interval);
++  }, [job]);
++
++  if (!job || !job.assignedPrice) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Payment session not found.</Text>
++      </View>
++    );
++  }
++
++  const breakdown = calculateOrderBreakdown(job.assignedPrice);
++  const payLaterOk = canUsePayLater(CURRENT_USER.jobsDone);
++  const instalmentsOk = canUseInstalments(CURRENT_USER.jobsDone, breakdown.total);
++  const pointsValue = pointsToEuro(CURRENT_USER.creditPoints);
++  const pointsDiscount = usePoints ? Math.min(pointsValue, breakdown.total) : 0;
++  const amountDue = Math.max(0, breakdown.total - pointsDiscount);
++  const expired = remaining <= 0;
++
++  const handlePay = async () => {
++    setProcessing(true);
++    await new Promise((r) => setTimeout(r, 700));
++    job.status = 'task_assigned';
++    job.paymentMethod = method;
++    job.paymentDeadline = undefined;
++    setProcessing(false);
++    router.replace(`/job/${job.id}/booking-summary` as any);
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Payment</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <View style={[styles.timerBar, { backgroundColor: expired ? c.urgentLight : c.primaryLight }]}>
++        <Feather name="clock" size={14} color={expired ? c.urgent : c.primary} />
++        <Text style={[styles.timerText, { color: expired ? c.urgent : c.primary }]}>
++          {expired ? 'Payment window expired' : `Complete payment within ${formatRemaining(remaining)}`}
++        </Text>
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
++        <Text style={[styles.sectionTitle, { color: c.text }]}>Order Summary</Text>
++        <View style={[styles.summaryCard, { backgroundColor: c.card, borderColor: c.border }]}>
++          {[
++            ['Bidding Price', `€${breakdown.bidPrice.toFixed(2)}`],
++            ['Before VAT', `€${breakdown.beforeVat.toFixed(2)}`],
++            ['VAT (24%)', `€${breakdown.vat.toFixed(2)}`],
++            ['Platform Fee', `-€${breakdown.platformFee.toFixed(2)}`],
++          ].map(([label, value]) => (
++            <View key={label} style={styles.summaryRow}>
++              <Text style={[styles.summaryLabel, { color: c.mutedForeground }]}>{label}</Text>
++              <Text style={[styles.summaryValue, { color: c.text }]}>{value}</Text>
++            </View>
++          ))}
++          {usePoints && (
++            <View style={styles.summaryRow}>
++              <Text style={[styles.summaryLabel, { color: c.success }]}>Credit Points Applied</Text>
++              <Text style={[styles.summaryValue, { color: c.success }]}>-€{pointsDiscount.toFixed(2)}</Text>
++            </View>
++          )}
++          <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: c.border }]}>
++            <Text style={[styles.totalLabel, { color: c.text }]}>Total Order Value</Text>
++            <Text style={[styles.totalValue, { color: c.primary }]}>€{amountDue.toFixed(2)}</Text>
++          </View>
++        </View>
++
++        <View style={[styles.pointsRow, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={{ flex: 1 }}>
++            <Text style={[styles.pointsLabel, { color: c.text }]}>Use Credit Points</Text>
++            <Text style={[styles.pointsSub, { color: c.mutedForeground }]}>
++              {CURRENT_USER.creditPoints} pts available (€{pointsValue.toFixed(2)})
++            </Text>
++          </View>
++          <TouchableOpacity
++            style={[styles.toggle, { backgroundColor: usePoints ? c.primary : c.muted }]}
++            onPress={() => setUsePoints((v) => !v)}
++          >
++            <View style={[styles.toggleDot, usePoints && { alignSelf: 'flex-end' }]} />
++          </TouchableOpacity>
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>Payment Method</Text>
++        {METHODS.map((m) => (
++          <TouchableOpacity
++            key={m.id}
++            style={[
++              styles.methodRow,
++              { backgroundColor: c.card, borderColor: method === m.id ? c.primary : c.border },
++            ]}
++            onPress={() => setMethod(m.id)}
++          >
++            <Feather name={m.icon} size={18} color={method === m.id ? c.primary : c.mutedForeground} />
++            <Text style={[styles.methodLabel, { color: c.text }]}>{m.label}</Text>
++            {method === m.id && <Feather name="check-circle" size={18} color={c.primary} />}
++          </TouchableOpacity>
++        ))}
++
++        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>Payment Plans</Text>
++        <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border }]}>
++          <Feather name="zap" size={16} color={c.primary} />
++          <Text style={[styles.planLabel, { color: c.text }]}>Pay Now</Text>
++          <Text style={[styles.planBadge, { color: c.success }]}>Available</Text>
++        </View>
++        <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border, opacity: payLaterOk ? 1 : 0.55 }]}>
++          <Feather name="calendar" size={16} color={payLaterOk ? c.primary : c.mutedForeground} />
++          <View style={{ flex: 1 }}>
++            <Text style={[styles.planLabel, { color: c.text }]}>Pay Later (up to 30 days)</Text>
++            {!payLaterOk && (
++              <Text style={[styles.planDisabled, { color: c.mutedForeground }]}>
++                Not Applicable — requires 20 completed tasks
++              </Text>
++            )}
++          </View>
++        </View>
++        <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border, opacity: instalmentsOk ? 1 : 0.55 }]}>
++          <MaterialCommunityIcons name="calendar-multiple" size={16} color={instalmentsOk ? c.primary : c.mutedForeground} />
++          <View style={{ flex: 1 }}>
++            <Text style={[styles.planLabel, { color: c.text }]}>Pay in Instalments (3 monthly)</Text>
++            {!instalmentsOk && (
++              <Text style={[styles.planDisabled, { color: c.mutedForeground }]}>
++                Not Applicable — requires 20 completed tasks and a bill over €100
++              </Text>
++            )}
++          </View>
++        </View>
++      </ScrollView>
++
++      <View style={[styles.footer, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 12 }]}>
++        <TouchableOpacity
++          style={[styles.payBtn, { backgroundColor: c.primary, opacity: expired || processing ? 0.7 : 1 }]}
++          onPress={handlePay}
++          disabled={expired || processing}
++        >
++          {processing ? <InlineLoader size={20} /> : (
++            <Text style={styles.payText}>Pay €{amountDue.toFixed(2)}</Text>
++          )}
++        </TouchableOpacity>
++      </View>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  timerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 },
++  timerText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, marginBottom: 10 },
++  summaryCard: { borderWidth: 1, borderRadius: 14, padding: 16 },
++  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
++  summaryLabel: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
++  summaryValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  totalRow: { borderTopWidth: 1, marginTop: 6, paddingTop: 12 },
++  totalLabel: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
++  totalValue: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  pointsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 14 },
++  pointsLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  pointsSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
++  toggle: { width: 44, height: 26, borderRadius: 13, padding: 3 },
++  toggleDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFF' },
++  methodRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderRadius: 12, padding: 14, marginBottom: 8 },
++  methodLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
++  planRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8 },
++  planLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
++  planBadge: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
++  planDisabled: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
++  footer: { padding: 16, borderTopWidth: 1 },
++  payBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  payText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id]/review.tsx b/artifacts/skillbuddy/app/job/[id]/review.tsx
+new file mode 100644
+index 0000000..1c79f42
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id]/review.tsx
+@@ -0,0 +1,198 @@
++import React, { useMemo, useState } from 'react';
++import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { useAppAlert } from '@/context/AlertModalContext';
++import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
++
++type Path = 'choose' | 'approve' | 'deny' | 'dispute';
++
++const DISPUTE_REASONS = ['Incomplete work', 'Different from description', 'Damage caused', 'No-show', 'Other'];
++
++export default function ReviewScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const [path, setPath] = useState<Path>('choose');
++  const [rating, setRating] = useState(5);
++  const [comment, setComment] = useState('');
++  const [disputeReason, setDisputeReason] = useState<string | null>(null);
++
++  if (!job) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
++      </View>
++    );
++  }
++
++  const denialCount = job.denialCount ?? 0;
++  const canDenyAgain = denialCount < 2;
++
++  const approve = () => {
++    job.status = 'approved';
++    job.clientReview = { rating, comment };
++    router.replace(`/(tabs)/jobs` as any);
++    showAlert({ title: 'Review submitted', message: 'Thanks! Payment has been finalized with your Pilot.', icon: 'check-circle' });
++  };
++
++  const deny = () => {
++    if (!comment.trim()) {
++      showAlert({ title: 'Feedback required', message: 'Please describe what needs to be fixed.', icon: 'alert-circle' });
++      return;
++    }
++    job.denialCount = denialCount + 1;
++    job.status = 'in_progress';
++    router.replace(`/job/${job.id}/track` as any);
++    showAlert({ title: 'Sent back to provider', message: 'Your feedback has been sent to the Pilot for revision.', icon: 'info' });
++  };
++
++  const dispute = () => {
++    if (!disputeReason || !comment.trim()) {
++      showAlert({ title: 'More info needed', message: 'Select a reason and describe the issue.', icon: 'alert-circle' });
++      return;
++    }
++    job.status = 'disputed';
++    job.disputeReason = `${disputeReason}: ${comment}`;
++    router.replace('/(tabs)/jobs' as any);
++    showAlert({ title: 'Support ticket created', message: 'Our support team will review this dispute and get back to you.', icon: 'shield' });
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Review Job</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        <Text style={[styles.jobTitle, { color: c.text }]}>{job.title}</Text>
++        <Text style={[styles.jobSub, { color: c.mutedForeground }]}>Your Pilot marked this job as done.</Text>
++
++        {path === 'choose' && (
++          <View style={{ marginTop: 24, gap: 12 }}>
++            <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.success }]} onPress={() => setPath('approve')}>
++              <Feather name="thumbs-up" size={18} color="#FFF" />
++              <Text style={styles.choiceText}>Approve</Text>
++            </TouchableOpacity>
++            <TouchableOpacity
++              style={[styles.choiceBtn, { backgroundColor: canDenyAgain ? c.warning : c.muted }]}
++              onPress={() => canDenyAgain && setPath('deny')}
++              disabled={!canDenyAgain}
++            >
++              <Feather name="thumbs-down" size={18} color={canDenyAgain ? '#FFF' : c.mutedForeground} />
++              <Text style={[styles.choiceText, { color: canDenyAgain ? '#FFF' : c.mutedForeground }]}>
++                {canDenyAgain ? `Deny (${2 - denialCount} left)` : 'Deny — limit reached'}
++              </Text>
++            </TouchableOpacity>
++            <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.destructive }]} onPress={() => setPath('dispute')}>
++              <Feather name="flag" size={18} color="#FFF" />
++              <Text style={styles.choiceText}>Dispute</Text>
++            </TouchableOpacity>
++            {!canDenyAgain && (
++              <Text style={[styles.limitNote, { color: c.mutedForeground }]}>
++                You've reached the maximum of 2 denials for this job — only Approve or Dispute are available now.
++              </Text>
++            )}
++          </View>
++        )}
++
++        {path === 'approve' && (
++          <View style={{ marginTop: 20 }}>
++            <Text style={[styles.sectionLabel, { color: c.text }]}>Rate your Pilot</Text>
++            <View style={styles.starsRow}>
++              {[1, 2, 3, 4, 5].map((n) => (
++                <TouchableOpacity key={n} onPress={() => setRating(n)}>
++                  <Feather name="star" size={32} color={n <= rating ? c.rating : c.border} />
++                </TouchableOpacity>
++              ))}
++            </View>
++            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>Feedback (optional)</Text>
++            <TextInput
++              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
++              value={comment}
++              onChangeText={setComment}
++              placeholder="How did it go?"
++              placeholderTextColor={c.mutedForeground}
++              multiline
++            />
++            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.success }]} onPress={approve}>
++              <Text style={styles.submitText}>Submit & Approve</Text>
++            </TouchableOpacity>
++          </View>
++        )}
++
++        {path === 'deny' && (
++          <View style={{ marginTop: 20 }}>
++            <Text style={[styles.sectionLabel, { color: c.text }]}>What needs to be fixed?</Text>
++            <TextInput
++              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
++              value={comment}
++              onChangeText={setComment}
++              placeholder="Describe what's missing or wrong (required)"
++              placeholderTextColor={c.mutedForeground}
++              multiline
++            />
++            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.warning }]} onPress={deny}>
++              <Text style={styles.submitText}>Send Back to Pilot</Text>
++            </TouchableOpacity>
++          </View>
++        )}
++
++        {path === 'dispute' && (
++          <View style={{ marginTop: 20 }}>
++            <Text style={[styles.sectionLabel, { color: c.text }]}>Reason</Text>
++            {DISPUTE_REASONS.map((r) => (
++              <TouchableOpacity
++                key={r}
++                style={[styles.reasonRow, { borderColor: disputeReason === r ? c.destructive : c.border }]}
++                onPress={() => setDisputeReason(r)}
++              >
++                <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
++                {disputeReason === r && <Feather name="check-circle" size={16} color={c.destructive} />}
++              </TouchableOpacity>
++            ))}
++            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 14 }]}>Describe the issue</Text>
++            <TextInput
++              style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
++              value={comment}
++              onChangeText={setComment}
++              placeholder="Required"
++              placeholderTextColor={c.mutedForeground}
++              multiline
++            />
++            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.destructive }]} onPress={dispute}>
++              <Text style={styles.submitText}>Submit Dispute</Text>
++            </TouchableOpacity>
++          </View>
++        )}
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  jobTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18, marginTop: 4 },
++  jobSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginTop: 4 },
++  choiceBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, paddingVertical: 15 },
++  choiceText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
++  limitNote: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center', marginTop: 4 },
++  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 10 },
++  starsRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
++  textArea: { borderRadius: 12, padding: 14, minHeight: 100, fontFamily: 'Manrope_400Regular', fontSize: 13 },
++  reasonRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderRadius: 12, padding: 14, marginBottom: 8 },
++  reasonText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
++  submitBtn: { marginTop: 20, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id]/track.tsx b/artifacts/skillbuddy/app/job/[id]/track.tsx
+new file mode 100644
+index 0000000..53cefe5
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id]/track.tsx
+@@ -0,0 +1,377 @@
++import React, { useMemo, useState } from 'react';
++import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { useRole } from '@/context/RoleContext';
++import { useAppAlert } from '@/context/AlertModalContext';
++import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
++import { calculatePayoutBreakdown, CANCELLATION_FEE } from '@/lib/payment';
++import BackButton from '@/components/BackButton';
++import type { JobStatus } from '@/types';
++
++const CANCEL_REASONS = ['Schedule conflict', 'Found another provider', 'No longer needed', 'Price disagreement', 'Other'];
++
++const STEPS: { status: JobStatus; label: string }[] = [
++  { status: 'task_assigned', label: 'Assigned' },
++  { status: 'arrived', label: 'Arrived' },
++  { status: 'in_progress', label: 'In Progress' },
++  { status: 'completed', label: 'Completed' },
++  { status: 'approved', label: 'Approved' },
++];
++
++export default function JobTrackingScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const { activeRole } = useRole();
++  const showAlert = useAppAlert();
++  const isProvider = activeRole === 'PROVIDER';
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const [, forceRender] = useState(0);
++  const [showCancelReasons, setShowCancelReasons] = useState(false);
++  const [showRevision, setShowRevision] = useState(false);
++  const [extraHours, setExtraHours] = useState('1');
++  const [newPrice, setNewPrice] = useState('');
++
++  if (!job) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
++      </View>
++    );
++  }
++
++  const provider = BID_PROVIDERS.find((p) => p.id === job.assignedProviderId);
++  const currentStepIndex = STEPS.findIndex((s) => s.status === job.status);
++  const payout = job.assignedPrice ? calculatePayoutBreakdown(job.assignedPrice) : null;
++
++  const refresh = () => forceRender((n) => n + 1);
++
++  const markArrived = () => {
++    job.arrivedAt = Date.now();
++    job.status = 'arrived';
++    showAlert({ title: 'Client notified', message: 'The client has been notified that you\'ve arrived.', icon: 'map-pin' });
++    refresh();
++  };
++
++  const startJob = () => {
++    job.status = 'in_progress';
++    refresh();
++  };
++
++  const markDone = () => {
++    showAlert({
++      title: 'Mark as Done?',
++      message: 'This cannot be undone. The client will be notified and asked to review the completed job.',
++      icon: 'check-circle',
++      buttons: [
++        { text: 'Cancel', style: 'cancel' },
++        {
++          text: 'Mark as Done',
++          onPress: () => {
++            job.status = 'completed';
++            refresh();
++            showAlert({ title: 'Job marked complete', message: 'The client has been notified and can now leave a review.', icon: 'check-circle' });
++          },
++        },
++      ],
++    });
++  };
++
++  const goToReview = () => router.push(`/job/${job.id}/review` as any);
++
++  const proposeRevision = () => {
++    const hours = parseFloat(extraHours);
++    const price = parseFloat(newPrice);
++    if (!hours || !price) {
++      showAlert({ title: 'Invalid values', message: 'Enter valid extra hours and a new price.', icon: 'alert-circle' });
++      return;
++    }
++    job.revisionRequest = {
++      proposedBy: isProvider ? 'provider' : 'client',
++      extraHours: hours,
++      newPrice: price,
++      status: 'pending',
++    };
++    setShowRevision(false);
++    refresh();
++    showAlert({ title: 'Revision proposed', message: 'Waiting for the other party to respond.', icon: 'clock' });
++  };
++
++  const respondToRevision = (approve: boolean) => {
++    if (!job.revisionRequest) return;
++    job.revisionRequest.status = approve ? 'approved' : 'denied';
++    if (approve) {
++      job.expectedHours += job.revisionRequest.extraHours;
++      job.assignedPrice = job.revisionRequest.newPrice;
++    }
++    refresh();
++  };
++
++  const cancelJob = (reason: string) => {
++    setShowCancelReasons(false);
++    if (isProvider) {
++      // Provider cancels before job starts: credibility/rating penalty, mock suspension check.
++      const p = BID_PROVIDERS.find((pv) => pv.id === job.assignedProviderId);
++      if (p) {
++        p.credibility = Math.max(0, (p.credibility ?? 0) - 10);
++        p.rating = Math.max(0, (p.rating ?? 0) - 0.5);
++      }
++      job.cancellation = { by: 'provider', reason };
++      job.status = 'bidding';
++      job.assignedProviderId = undefined;
++      if (p && p.rating! < 4.0) {
++        showAlert({
++          title: 'Account Suspended',
++          message: 'Your rating dropped below 4.0 after this cancellation. Your Pilot account is suspended for 28 days.',
++          icon: 'alert-triangle',
++          buttons: [{ text: 'OK', onPress: () => router.replace('/(tabs)/jobs' as any) }],
++        });
++        return;
++      }
++      showAlert({ title: 'Job cancelled', message: 'The client has been notified and the job has reopened for bidding.', icon: 'info' });
++      router.back();
++    } else {
++      job.cancellation = { by: 'client', reason, feeCharged: CANCELLATION_FEE };
++      job.status = 'cancelled';
++      if (provider) {
++        // Credit the fee to the provider's mock wallet — represented here as a note since
++        // there's no live wallet ledger yet; tracked on the job for the payout screens.
++      }
++      showAlert({
++        title: 'Job Cancelled',
++        message: `A €${CANCELLATION_FEE.toFixed(2)} cancellation fee has been charged and credited to your Pilot.`,
++        icon: 'info',
++      });
++      router.back();
++    }
++  };
++
++  const confirmCancel = () => {
++    showAlert({
++      title: 'Cancel this job?',
++      message: isProvider
++        ? 'Cancelling will affect your credibility and rating.'
++        : `A €${CANCELLATION_FEE.toFixed(2)} cancellation fee applies.`,
++      icon: 'alert-triangle',
++      buttons: [
++        { text: 'Keep Job', style: 'cancel' },
++        { text: 'Choose Reason', onPress: () => setShowCancelReasons(true) },
++      ],
++    });
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        {/* Progress stepper */}
++        <View style={styles.stepper}>
++          {STEPS.map((step, i) => (
++            <View key={step.status} style={styles.stepItem}>
++              <View
++                style={[
++                  styles.stepDot,
++                  { backgroundColor: i <= currentStepIndex ? c.primary : c.muted },
++                ]}
++              >
++                {i < currentStepIndex && <Feather name="check" size={12} color="#FFF" />}
++              </View>
++              <Text style={[styles.stepLabel, { color: i <= currentStepIndex ? c.primary : c.mutedForeground }]}>
++                {step.label}
++              </Text>
++              {i < STEPS.length - 1 && (
++                <View style={[styles.stepLine, { backgroundColor: i < currentStepIndex ? c.primary : c.border }]} />
++              )}
++            </View>
++          ))}
++        </View>
++
++        {provider && (
++          <View style={[styles.providerCard, { backgroundColor: c.card, borderColor: c.border }]}>
++            <View style={[styles.avatar, { backgroundColor: c.primaryLight }]}>
++              <Text style={[styles.avatarText, { color: c.primary }]}>{provider.name.charAt(0)}</Text>
++            </View>
++            <View style={{ flex: 1 }}>
++              <Text style={[styles.providerName, { color: c.text }]}>{provider.name}</Text>
++              <Text style={[styles.providerSub, { color: c.mutedForeground }]}>SkillBuddy Pilot</Text>
++            </View>
++            <TouchableOpacity style={[styles.iconAction, { backgroundColor: c.muted }]} onPress={() => router.push(`/chat/${provider.id}` as any)}>
++              <Feather name="message-circle" size={16} color={c.text} />
++            </TouchableOpacity>
++          </View>
++        )}
++
++        {/* Revision request status */}
++        {job.revisionRequest && job.revisionRequest.status === 'pending' && (
++          <View style={[styles.revisionCard, { backgroundColor: c.primaryLight }]}>
++            <Text style={[styles.revisionTitle, { color: c.primary }]}>Revision Proposed</Text>
++            <Text style={[styles.revisionText, { color: c.primary }]}>
++              +{job.revisionRequest.extraHours} hrs, new price €{job.revisionRequest.newPrice}
++            </Text>
++            {job.revisionRequest.proposedBy !== (isProvider ? 'provider' : 'client') && (
++              <View style={styles.revisionActions}>
++                <TouchableOpacity style={[styles.smallBtn, { backgroundColor: c.primary }]} onPress={() => respondToRevision(true)}>
++                  <Text style={styles.smallBtnText}>Approve</Text>
++                </TouchableOpacity>
++                <TouchableOpacity style={[styles.smallBtn, { backgroundColor: c.muted }]} onPress={() => respondToRevision(false)}>
++                  <Text style={[styles.smallBtnText, { color: c.text }]}>Deny</Text>
++                </TouchableOpacity>
++              </View>
++            )}
++          </View>
++        )}
++
++        {/* Provider-side payout breakdown */}
++        {isProvider && payout && (
++          <View style={[styles.payoutCard, { backgroundColor: c.card, borderColor: c.border }]}>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>Payout Breakdown</Text>
++            {[
++              ['Bidding Price', `€${payout.bidPrice.toFixed(2)}`],
++              ['Before VAT', `€${payout.beforeVat.toFixed(2)}`],
++              ['VAT (24%)', `€${payout.vat.toFixed(2)}`],
++              ['Platform Fee', `-€${payout.platformFee.toFixed(2)}`],
++              ['SkillBuddy Commission (5%)', `-€${payout.commission.toFixed(2)}`],
++            ].map(([label, value]) => (
++              <View key={label} style={styles.summaryRow}>
++                <Text style={[styles.summaryLabel, { color: c.mutedForeground }]}>{label}</Text>
++                <Text style={[styles.summaryValue, { color: c.text }]}>{value}</Text>
++              </View>
++            ))}
++            <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: c.border }]}>
++              <Text style={[styles.totalLabel, { color: c.text }]}>Payout</Text>
++              <Text style={[styles.totalValue, { color: c.primary }]}>€{payout.payout.toFixed(2)}</Text>
++            </View>
++          </View>
++        )}
++
++        {/* Action buttons per status/role */}
++        <View style={{ marginTop: 20, gap: 10 }}>
++          {isProvider && job.status === 'task_assigned' && (
++            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={markArrived}>
++              <Feather name="map-pin" size={16} color="#FFF" />
++              <Text style={styles.actionText}>I've Arrived</Text>
++            </TouchableOpacity>
++          )}
++          {isProvider && job.status === 'arrived' && (
++            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={startJob}>
++              <Feather name="play" size={16} color="#FFF" />
++              <Text style={styles.actionText}>Start Job</Text>
++            </TouchableOpacity>
++          )}
++          {isProvider && job.status === 'in_progress' && (
++            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={markDone}>
++              <Feather name="check-circle" size={16} color="#FFF" />
++              <Text style={styles.actionText}>Mark as Done</Text>
++            </TouchableOpacity>
++          )}
++          {!isProvider && job.status === 'completed' && (
++            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={goToReview}>
++              <Feather name="star" size={16} color="#FFF" />
++              <Text style={styles.actionText}>Leave a Review</Text>
++            </TouchableOpacity>
++          )}
++          {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (
++            <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: c.border }]} onPress={() => setShowRevision(true)}>
++              <Feather name="edit-3" size={16} color={c.text} />
++              <Text style={[styles.actionOutlineText, { color: c.text }]}>Propose Revision</Text>
++            </TouchableOpacity>
++          )}
++          {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (
++            <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: c.destructive }]} onPress={confirmCancel}>
++              <Feather name="x-circle" size={16} color={c.destructive} />
++              <Text style={[styles.actionOutlineText, { color: c.destructive }]}>Cancel Job</Text>
++            </TouchableOpacity>
++          )}
++        </View>
++
++        {/* Cancel reason picker */}
++        {showCancelReasons && (
++          <View style={[styles.reasonCard, { backgroundColor: c.card, borderColor: c.border }]}>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>Select a reason</Text>
++            {CANCEL_REASONS.map((r) => (
++              <TouchableOpacity key={r} style={[styles.reasonRow, { borderBottomColor: c.border }]} onPress={() => cancelJob(r)}>
++                <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
++              </TouchableOpacity>
++            ))}
++          </View>
++        )}
++
++        {/* Revision proposal form */}
++        {showRevision && (
++          <View style={[styles.reasonCard, { backgroundColor: c.card, borderColor: c.border }]}>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>Propose Revision</Text>
++            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Extra Hours</Text>
++            <TextInput
++              style={[styles.input, { backgroundColor: c.muted, color: c.text }]}
++              value={extraHours}
++              onChangeText={setExtraHours}
++              keyboardType="numeric"
++            />
++            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>New Total Price (€)</Text>
++            <TextInput
++              style={[styles.input, { backgroundColor: c.muted, color: c.text }]}
++              value={newPrice}
++              onChangeText={setNewPrice}
++              keyboardType="numeric"
++              placeholder={String(job.assignedPrice ?? '')}
++              placeholderTextColor={c.mutedForeground}
++            />
++            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary, marginTop: 12 }]} onPress={proposeRevision}>
++              <Text style={styles.actionText}>Send Proposal</Text>
++            </TouchableOpacity>
++          </View>
++        )}
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Manrope_700Bold', fontSize: 16, marginHorizontal: 8 },
++  stepper: { flexDirection: 'row', marginBottom: 20 },
++  stepItem: { flex: 1, alignItems: 'center' },
++  stepDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
++  stepLabel: { fontFamily: 'Manrope_500Medium', fontSize: 9, marginTop: 4, textAlign: 'center' },
++  stepLine: { position: 'absolute', top: 12, left: '55%', right: '-45%', height: 2 },
++  providerCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 14 },
++  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  providerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  providerSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
++  iconAction: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
++  revisionCard: { borderRadius: 14, padding: 14, marginBottom: 14 },
++  revisionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
++  revisionText: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 4 },
++  revisionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
++  smallBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10 },
++  smallBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
++  payoutCard: { borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 14 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14, marginBottom: 8 },
++  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
++  summaryLabel: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
++  summaryValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
++  totalRow: { borderTopWidth: 1, marginTop: 4, paddingTop: 10 },
++  totalLabel: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
++  totalValue: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
++  actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 14 },
++  actionText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: '#FFF' },
++  actionBtnOutline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingVertical: 13 },
++  actionOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  reasonCard: { borderWidth: 1, borderRadius: 14, padding: 16, marginTop: 14 },
++  reasonRow: { paddingVertical: 12, borderBottomWidth: 1 },
++  reasonText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
++  fieldLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, marginTop: 10, marginBottom: 6 },
++  input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontFamily: 'Manrope_400Regular', fontSize: 13 },
++});
+diff --git a/artifacts/skillbuddy/components/JobCard.tsx b/artifacts/skillbuddy/components/JobCard.tsx
+index 3dc6781..980787c 100644
+--- a/artifacts/skillbuddy/components/JobCard.tsx
++++ b/artifacts/skillbuddy/components/JobCard.tsx
+@@ -11,12 +11,21 @@ interface Props {
+ }
+ 
+ const STATUS_LABEL: Record<Job['status'], string> = {
++  draft: 'Draft',
+   bidding: 'Bidding Open',
+-  assigned: 'Assigned',
++  short_listed: 'Short Listed',
++  task_assigned: 'Assigned',
++  pending_payment: 'Payment Pending',
++  arrived: 'Provider Arrived',
+   in_progress: 'In Progress',
++  revision_requested: 'Revision Requested',
+   completed: 'Completed',
++  approved: 'Approved',
++  closed: 'Closed',
+   cancelled: 'Cancelled',
+   expired: 'Expired',
++  disputed: 'Disputed',
++  paused: 'Paused',
+ };
+ 
+ export default function JobCard({ job, onPress }: Props) {
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index dc5536b..0c827d5 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -579,12 +579,36 @@ export const MOCK_JOBS: Job[] = [
+     expectedPrice: 90,
+     photos: [],
+     urgency: 'regular',
+-    status: 'assigned',
++    status: 'task_assigned',
++    assignedPrice: 90,
+     biddingEndsAt: now - 60 * 60 * 1000,
+     biddingDurationMs: 3 * 60 * 60 * 1000,
+     location: 'Riga, Latvia',
+     assignedProviderId: 'bp7',
+   },
++  {
++    id: 'j4',
++    clientId: CURRENT_USER.id,
++    clientName: CURRENT_USER.name,
++    title: 'Fix bathroom tap leak',
++    description: 'Small leak under the bathroom sink, needs a washer/seal replacement.',
++    categoryId: '3',
++    category: 'Plumbing',
++    date: 'Jan 20, 2026',
++    time: '2:00 PM',
++    expectedHours: 1,
++    hourlyRate: 25,
++    expectedPrice: 25,
++    photos: [],
++    urgency: 'regular',
++    status: 'completed',
++    biddingEndsAt: now - 5 * 60 * 60 * 1000,
++    biddingDurationMs: 3 * 60 * 60 * 1000,
++    location: 'Riga, Latvia',
++    assignedProviderId: 'bp5',
++    assignedPrice: 25,
++    denialCount: 0,
++  },
+ ];
+ 
+ // ─── Mock Bids — generated with real scoring, not a hardcoded order ──────────
+diff --git a/artifacts/skillbuddy/lib/payment.ts b/artifacts/skillbuddy/lib/payment.ts
+new file mode 100644
+index 0000000..5981380
+--- /dev/null
++++ b/artifacts/skillbuddy/lib/payment.ts
+@@ -0,0 +1,67 @@
++import type { OrderBreakdown, PayoutBreakdown } from '@/types';
++
++const VAT_RATE = 0.24;
++const PLATFORM_FEE = 0.99;
++const COMMISSION_RATE = 0.05;
++
++function round2(n: number): number {
++  return Math.round(n * 100) / 100;
++}
++
++/**
++ * Client-side order breakdown. VAT is calculated backward from the final
++ * bid price so the client never pays more than the agreed amount — the
++ * platform fee is shown as an informational line (a discount/transparency
++ * note), it does not change what the client owes.
++ *
++ * Example for a €30 bid: beforeVat €24.19, VAT €5.81, platformFee -€0.99,
++ * total €30.00 (matches the spec's worked example exactly).
++ */
++export function calculateOrderBreakdown(bidPrice: number): OrderBreakdown {
++  const beforeVat = round2(bidPrice / (1 + VAT_RATE));
++  const vat = round2(bidPrice - beforeVat);
++  return {
++    bidPrice: round2(bidPrice),
++    beforeVat,
++    vat,
++    platformFee: PLATFORM_FEE,
++    total: round2(bidPrice),
++  };
++}
++
++/**
++ * Provider-side payout breakdown once a job is assigned — the platform fee
++ * and SkillBuddy commission (5%) are both deducted from the bid price to
++ * arrive at the final payout.
++ */
++export function calculatePayoutBreakdown(bidPrice: number): PayoutBreakdown {
++  const beforeVat = round2(bidPrice / (1 + VAT_RATE));
++  const vat = round2(bidPrice - beforeVat);
++  const commission = round2(bidPrice * COMMISSION_RATE);
++  const payout = round2(bidPrice - PLATFORM_FEE - commission);
++  return {
++    bidPrice: round2(bidPrice),
++    beforeVat,
++    vat,
++    platformFee: PLATFORM_FEE,
++    commission,
++    payout,
++  };
++}
++
++export const CANCELLATION_FEE = 5.0;
++export const POINTS_TO_EUR = 0.1; // 1 credit point = €0.10
++
++export function pointsToEuro(points: number): number {
++  return round2(points * POINTS_TO_EUR);
++}
++
++/** Pay Later requires 20+ completed tasks. */
++export function canUsePayLater(completedTasks: number): boolean {
++  return completedTasks >= 20;
++}
++
++/** Pay in Instalments requires 20+ completed tasks AND a bill over €100. */
++export function canUseInstalments(completedTasks: number, billAmount: number): boolean {
++  return completedTasks >= 20 && billAmount > 100;
++}
+diff --git a/artifacts/skillbuddy/types/index.ts b/artifacts/skillbuddy/types/index.ts
+index 0c16a17..5632265 100644
+--- a/artifacts/skillbuddy/types/index.ts
++++ b/artifacts/skillbuddy/types/index.ts
+@@ -155,7 +155,22 @@ export interface Review {
+ 
+ // ─── Jobs & Bidding (Phase 2) ──────────────────────────────────────────────────
+ export type JobUrgency = 'urgent' | 'regular';
+-export type JobStatus = 'bidding' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'expired';
++export type JobStatus =
++  | 'draft'
++  | 'bidding'
++  | 'short_listed'
++  | 'task_assigned'
++  | 'pending_payment'
++  | 'arrived'
++  | 'in_progress'
++  | 'revision_requested'
++  | 'completed'
++  | 'approved'
++  | 'closed'
++  | 'cancelled'
++  | 'expired'
++  | 'disputed'
++  | 'paused';
+ 
+ export interface Job {
+   id: string;
+@@ -177,6 +192,53 @@ export interface Job {
+   biddingDurationMs: number;
+   location: string;
+   assignedProviderId?: string;
++  assignedPrice?: number; // final agreed price once a bid is accepted
++  paymentDeadline?: number; // epoch ms — 10-minute payment window
++  paymentMethod?: PaymentMethod;
++  arrivedAt?: number;
++  denialCount?: number; // client can deny up to 2 times
++  revisionRequest?: RevisionRequest;
++  cancellation?: CancellationInfo;
++  disputeReason?: string;
++  clientReview?: JobReview;
++  providerReview?: JobReview;
++}
++
++export type PaymentMethod = 'card' | 'apple_pay' | 'google_pay' | 'bank_transfer' | 'credit_points';
++
++export interface RevisionRequest {
++  proposedBy: 'client' | 'provider';
++  extraHours: number;
++  newPrice: number;
++  status: 'pending' | 'approved' | 'denied';
++}
++
++export interface CancellationInfo {
++  by: 'client' | 'provider';
++  reason: string;
++  feeCharged?: number;
++}
++
++export interface JobReview {
++  rating: number;
++  comment?: string;
++}
++
++export interface OrderBreakdown {
++  bidPrice: number;
++  beforeVat: number;
++  vat: number;
++  platformFee: number;
++  total: number;
++}
++
++export interface PayoutBreakdown {
++  bidPrice: number;
++  beforeVat: number;
++  vat: number;
++  platformFee: number;
++  commission: number;
++  payout: number;
+ }
+ 
+ export interface BidProvider extends Provider {
+-- 
+2.43.0
+

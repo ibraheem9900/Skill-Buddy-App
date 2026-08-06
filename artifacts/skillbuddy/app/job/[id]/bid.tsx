@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { CURRENT_USER, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
@@ -39,6 +40,7 @@ export default function ProviderJobBidScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
   const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
@@ -55,7 +57,7 @@ export default function ProviderJobBidScreen() {
   if (!job) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <EmptyState icon="alert-circle" title="Job not found" />
+        <EmptyState icon="alert-circle" title={t('job_not_found')} />
       </View>
     );
   }
@@ -65,7 +67,7 @@ export default function ProviderJobBidScreen() {
   const submitBid = async () => {
     const priceNum = parseFloat(price);
     if (!priceNum || priceNum <= 0) {
-      showAlert({ title: 'Invalid price', message: 'Please enter a valid bid amount.', icon: 'alert-circle' });
+      showAlert({ title: t('bid_invalid_title'), message: t('bid_invalid_msg'), icon: 'alert-circle' });
       return;
     }
     setSubmitting(true);
@@ -88,13 +90,13 @@ export default function ProviderJobBidScreen() {
 
   const cancelBid = () => {
     showAlert({
-      title: 'Cancel Bid',
-      message: 'Are you sure you want to withdraw your bid?',
+      title: t('bid_cancel_title'),
+      message: t('bid_cancel_msg'),
       icon: 'alert-triangle',
       buttons: [
-        { text: 'Keep Bid', style: 'cancel' },
+        { text: t('bid_keep'), style: 'cancel' },
         {
-          text: 'Cancel Bid',
+          text: t('bid_cancel_title'),
           style: 'destructive',
           onPress: () => {
             const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
@@ -117,7 +119,7 @@ export default function ProviderJobBidScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>Job Details</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{t('bid_job_details')}</Text>
         <View style={{ width: 22 }} />
       </View>
 
@@ -125,7 +127,7 @@ export default function ProviderJobBidScreen() {
         {/* Urgency + countdown */}
         <View style={[styles.urgencyBadge, { borderColor: accent }]}>
           <Feather name={job.urgency === 'urgent' ? 'zap' : 'clock'} size={14} color={accent} />
-          <Text style={[styles.urgencyBadgeText, { color: accent }]}>{job.urgency === 'urgent' ? 'Urgent Job' : 'Regular Job'}</Text>
+          <Text style={[styles.urgencyBadgeText, { color: accent }]}>{job.urgency === 'urgent' ? t('bid_urgent_job') : t('bid_regular_job')}</Text>
         </View>
         {job.status === 'bidding' && <CountdownTimer endsAt={job.biddingEndsAt} urgency={job.urgency} />}
 
@@ -143,7 +145,7 @@ export default function ProviderJobBidScreen() {
               <MaterialCommunityIcons name="star" size={13} color={c.rating} />
               <Text style={[styles.clientStatText, { color: c.text }]}>4.8</Text>
             </View>
-            <Text style={[styles.clientStatSub, { color: c.mutedForeground }]}>12 jobs posted</Text>
+            <Text style={[styles.clientStatSub, { color: c.mutedForeground }]}>{t('bid_jobs_posted', { n: 12 })}</Text>
           </View>
         </View>
 
@@ -154,7 +156,7 @@ export default function ProviderJobBidScreen() {
         <View style={styles.detailGrid}>
           <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
             <Feather name="tag" size={14} color={c.mutedForeground} />
-            <Text style={[styles.detailText, { color: c.text }]}>{job.category}</Text>
+            <Text style={[styles.detailText, { color: c.text }]}>{tCat(job.categoryId)}</Text>
           </View>
           <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
             <Feather name="calendar" size={14} color={c.mutedForeground} />
@@ -162,11 +164,11 @@ export default function ProviderJobBidScreen() {
           </View>
           <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
             <Feather name="clock" size={14} color={c.mutedForeground} />
-            <Text style={[styles.detailText, { color: c.text }]}>{job.expectedHours} hrs expected</Text>
+            <Text style={[styles.detailText, { color: c.text }]}>{t('bid_hours_expected', { n: job.expectedHours })}</Text>
           </View>
           <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
             <Feather name="dollar-sign" size={14} color={c.mutedForeground} />
-            <Text style={[styles.detailText, { color: c.text }]}>€{job.expectedPrice} budget</Text>
+            <Text style={[styles.detailText, { color: c.text }]}>{t('bid_budget', { n: job.expectedPrice })}</Text>
           </View>
         </View>
 
@@ -180,16 +182,16 @@ export default function ProviderJobBidScreen() {
 
         {/* My score preview */}
         <View style={[styles.scoreCard, { backgroundColor: c.primaryLight }]}>
-          <Text style={[styles.scoreLabel, { color: c.primary }]}>Your match score for this job</Text>
+          <Text style={[styles.scoreLabel, { color: c.primary }]}>{t('bid_match_score')}</Text>
           <Text style={[styles.scoreValue, { color: c.primary }]}>{myScore.total}/100</Text>
         </View>
 
         {/* Submit / Modify bid */}
         {job.status === 'bidding' ? (
           <>
-            <Text style={[styles.label, { color: c.text }]}>{submitted ? 'Modify Your Bid' : 'Submit Your Bid'}</Text>
+            <Text style={[styles.label, { color: c.text }]}>{submitted ? t('bid_modify') : t('bid_submit')}</Text>
 
-            <Text style={[styles.sublabel, { color: c.mutedForeground }]}>Offered Price (€)</Text>
+            <Text style={[styles.sublabel, { color: c.mutedForeground }]}>{t('bid_offer_price')}</Text>
             <View style={styles.priceRow}>
               {[-10, -5, 5, 10].map((delta) => (
                 <TouchableOpacity
@@ -206,11 +208,11 @@ export default function ProviderJobBidScreen() {
               value={price}
               onChangeText={setPrice}
               keyboardType="numeric"
-              placeholder="Enter your price"
+              placeholder={t('bid_enter_price')}
               placeholderTextColor={c.mutedForeground}
             />
 
-            <Text style={[styles.sublabel, { color: c.mutedForeground, marginTop: 14 }]}>Expected Time of Arrival</Text>
+            <Text style={[styles.sublabel, { color: c.mutedForeground, marginTop: 14 }]}>{t('bid_eta')}</Text>
             <View style={styles.chipRow}>
               {['15 min', '30 min', '45 min', '1 hr'].map((e) => (
                 <TouchableOpacity
@@ -229,19 +231,19 @@ export default function ProviderJobBidScreen() {
               disabled={submitting}
             >
               {submitting ? <InlineLoader size={20} /> : (
-                <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
+                <Text style={styles.submitText}>{submitted ? t('bid_update') : t('bid_submit_short')}</Text>
               )}
             </TouchableOpacity>
 
             {submitted && (
               <TouchableOpacity style={[styles.cancelBidBtn, { borderColor: c.border }]} onPress={cancelBid}>
-                <Text style={[styles.cancelBidText, { color: c.destructive }]}>Cancel Bid</Text>
+                <Text style={[styles.cancelBidText, { color: c.destructive }]}>{t('bid_cancel')}</Text>
               </TouchableOpacity>
             )}
           </>
         ) : (
           <View style={[styles.closedCard, { backgroundColor: c.muted }]}>
-            <Text style={[styles.closedText, { color: c.mutedForeground }]}>Bidding has closed for this job.</Text>
+            <Text style={[styles.closedText, { color: c.mutedForeground }]}>{t('bid_closed')}</Text>
           </View>
         )}
       </ScrollView>

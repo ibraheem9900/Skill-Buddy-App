@@ -1,0 +1,1790 @@
+From e27a98391fdca3b694f210d7751313050197f08e Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Tue, 21 Jul 2026 21:21:50 +0000
+Subject: [PATCH] Phase 2 (part 2): Hardcoded data audit, logo fix, loaders,
+ chat keyboard fix, back-button consistency, full Profile build
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Task 1 — Hardcoded greeting audit:
+- Home already used CURRENT_USER.name correctly; Profile was pulling the
+  name from a separate AuthContext user object instead. Unified both
+  screens onto the single CURRENT_USER mock identity so a name change
+  in one place reflects everywhere.
+
+Task 2 — Logo size/asset fix:
+- Profile screen was rendering LogoMark, a hand-traced SVG recreation,
+  instead of the real logo asset. Replaced with LogoImage (same
+  component Home uses) at the same 40px height for true consistency.
+
+Task 3 — App-wide loaders:
+- Added InlineLoader (small rotating logo mark) to complement the
+  existing full-screen BrandedLoader (breathing pulse), giving the
+  two-tier loading pattern the spec called for.
+- Wired into Post a Job submit and Submit/Modify Bid — both now show
+  the branded inline loader and disable double-taps during the async
+  mock submission.
+
+Task 4 — Chat keyboard fix:
+- Root cause: KeyboardAvoidingView's behavior prop was literally
+  'undefined' on Android, so there was no keyboard avoidance at all
+  on that platform. Switched to react-native-keyboard-controller's
+  KeyboardAvoidingView (already a project dependency, used elsewhere),
+  which handles both platforms correctly with behavior='padding'.
+- Applied the same fix to the new Support chat screen.
+
+Task 5 — Back button consistency:
+- New shared BackButton component (circular, theme-surface color,
+  subtle shadow, ChevronLeft icon per spec).
+- Applied across category/[id], search, booking/[id], profile/edit,
+  chat/[id], and the three Jobs-phase screens, replacing bare icons
+  and one-off inline styles.
+
+Task 6 — Full Profile build (Modules 1C/1D):
+- Extended CURRENT_USER mock with username, personal code, address,
+  phone, job/payment stats, verification statuses, skills, masked
+  card/IBAN; added CREDIT_HISTORY and PROVIDER_JOB_HISTORY mock data.
+- Rebuilt Profile tab: Client/Provider toggle (using RoleContext),
+  role-aware stat row, sectioned menu with real destinations.
+- New screens: Credit Points (balance + redemption history), Documents
+  (face verification + residence permit status w/ reupload), Wallet
+  (role-aware spending/earnings, masked payment details), Professional
+  Info (role-aware — client stats vs. provider skills/performance/job
+  history, reusing the scoring engine from the Jobs phase), Settings
+  (theme/notifications/language/change password), Safety & Help (SOS +
+  legal links), Legal (About/Privacy/Terms), FAQs (search + category
+  tabs + expandable Q&A), and a visually-distinguished Support chat
+  variant with an issue-category picker.
+
+Full workspace typecheck: zero errors across all 9 projects.
+---
+ artifacts/skillbuddy/app/(tabs)/profile.tsx   | 135 ++++++++++++----
+ artifacts/skillbuddy/app/booking/[id].tsx     |   5 +-
+ artifacts/skillbuddy/app/category/[id].tsx    |   7 +-
+ artifacts/skillbuddy/app/chat/[id].tsx        |  11 +-
+ artifacts/skillbuddy/app/chat/support.tsx     | 146 +++++++++++++++++
+ artifacts/skillbuddy/app/job/[id].tsx         |   5 +-
+ artifacts/skillbuddy/app/job/[id]/bid.tsx     |  22 ++-
+ artifacts/skillbuddy/app/job/post.tsx         |  20 ++-
+ .../skillbuddy/app/profile/credit-points.tsx  |  71 +++++++++
+ .../skillbuddy/app/profile/documents.tsx      |  87 ++++++++++
+ artifacts/skillbuddy/app/profile/edit.tsx     |   5 +-
+ artifacts/skillbuddy/app/profile/faqs.tsx     | 123 +++++++++++++++
+ artifacts/skillbuddy/app/profile/legal.tsx    |  62 ++++++++
+ .../skillbuddy/app/profile/professional.tsx   | 148 ++++++++++++++++++
+ artifacts/skillbuddy/app/profile/safety.tsx   |  79 ++++++++++
+ artifacts/skillbuddy/app/profile/settings.tsx |  94 +++++++++++
+ artifacts/skillbuddy/app/profile/wallet.tsx   |  95 +++++++++++
+ artifacts/skillbuddy/app/search.tsx           |   5 +-
+ .../skillbuddy/components/BackButton.tsx      |  45 ++++++
+ .../skillbuddy/components/InlineLoader.tsx    |  52 ++++++
+ artifacts/skillbuddy/data/mockData.ts         |  56 +++++++
+ 21 files changed, 1208 insertions(+), 65 deletions(-)
+ create mode 100644 artifacts/skillbuddy/app/chat/support.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/credit-points.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/documents.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/faqs.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/legal.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/professional.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/safety.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/settings.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/wallet.tsx
+ create mode 100644 artifacts/skillbuddy/components/BackButton.tsx
+ create mode 100644 artifacts/skillbuddy/components/InlineLoader.tsx
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/profile.tsx b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+index 07620c5..4dc0e3d 100644
+--- a/artifacts/skillbuddy/app/(tabs)/profile.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+@@ -6,7 +6,9 @@ import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
+ import { useAuth } from '@/context/AuthContext';
+-import LogoMark from '@/components/LogoMark';
++import { useRole } from '@/context/RoleContext';
++import { CURRENT_USER } from '@/data/mockData';
++import LogoImage from '@/components/LogoImage';
+ 
+ interface MenuItem {
+   icon: keyof typeof Feather.glyphMap;
+@@ -21,14 +23,18 @@ interface MenuItem {
+ export default function ProfileScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+-  const { user, logout } = useAuth();
++  const { logout } = useAuth();
+   const { colors: c, theme, toggleTheme } = useTheme();
++  const { activeRole, isBothRoles, toggleRole } = useRole();
+   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
+ 
+   const toggleBtnRef = useRef<View>(null);
+ 
+-  const name = user ? `${user.first_name} ${user.last_name}` : 'Guest User';
+-  const email = user?.email ?? 'user@skillbuddy.com';
++  // Consistent, single source of truth for the logged-in identity — matches
++  // Home's greeting and the Jobs client identity, so a name change anywhere
++  // (CURRENT_USER) reflects everywhere.
++  const name = CURRENT_USER.name;
++  const email = CURRENT_USER.email;
+ 
+   const handleLogout = () => {
+     Alert.alert('Log Out', 'Are you sure you want to log out?', [
+@@ -49,27 +55,26 @@ export default function ProfileScreen() {
+     }
+   };
+ 
+-  const SECTIONS: { title: string; items: MenuItem[] }[] = [
++  const clientSections: { title: string; items: MenuItem[] }[] = [
+     {
+       title: 'General',
+       items: [
+         { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
+-        { icon: 'briefcase', label: 'Professional Info' },
+-        { icon: 'file-text', label: 'Documents' },
+-        { icon: 'star', label: 'Credit Points', badge: `${user?.credit_points ?? 0} pts` },
++        { icon: 'briefcase', label: 'Professional Info', route: '/profile/professional' },
++        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
++        { icon: 'star', label: 'Credit Points', route: '/profile/credit-points', badge: `${CURRENT_USER.creditPoints} pts` },
+       ],
+     },
+     {
+       title: 'Payments',
+       items: [
+-        { icon: 'credit-card', label: 'Payment Methods' },
+-        { icon: 'dollar-sign', label: 'Wallet & Earnings' },
+-        { icon: 'clock', label: 'Transaction History' },
++        { icon: 'credit-card', label: 'Wallet & Payments', route: '/profile/wallet' },
+       ],
+     },
+     {
+-      title: 'Appearance',
++      title: 'Settings',
+       items: [
++        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
+         {
+           icon: theme === 'dark' ? 'sun' : 'moon',
+           label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+@@ -79,14 +84,14 @@ export default function ProfileScreen() {
+       ],
+     },
+     {
+-      title: 'Support',
++      title: 'Support & Safety',
+       items: [
+-        { icon: 'help-circle', label: 'Help & Support' },
+-        { icon: 'message-circle', label: 'Contact Support' },
+-        { icon: 'book-open', label: 'FAQs' },
+-        { icon: 'shield', label: 'Privacy & Policy' },
+-        { icon: 'file', label: 'Terms & Conditions' },
+-        { icon: 'info', label: 'About Us' },
++        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
++        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
++        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
++        { icon: 'info', label: 'About Us', route: '/profile/legal?type=about' },
++        { icon: 'file', label: 'Privacy & Cookie Policy', route: '/profile/legal?type=privacy' },
++        { icon: 'shield', label: 'Terms & Conditions', route: '/profile/legal?type=terms' },
+       ],
+     },
+     {
+@@ -97,6 +102,51 @@ export default function ProfileScreen() {
+     },
+   ];
+ 
++  const providerSections: { title: string; items: MenuItem[] }[] = [
++    {
++      title: 'General',
++      items: [
++        { icon: 'user', label: 'Personal Information', route: '/profile/edit' },
++        { icon: 'award', label: 'Professional Info', route: '/profile/professional' },
++        { icon: 'file-text', label: 'Documents', route: '/profile/documents' },
++      ],
++    },
++    {
++      title: 'Earnings',
++      items: [
++        { icon: 'dollar-sign', label: 'Wallet & Earnings', route: '/profile/wallet' },
++      ],
++    },
++    {
++      title: 'Settings',
++      items: [
++        { icon: 'sliders', label: 'Settings', route: '/profile/settings' },
++        {
++          icon: theme === 'dark' ? 'sun' : 'moon',
++          label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
++          action: handleThemeToggle,
++          isThemeToggle: true,
++        },
++      ],
++    },
++    {
++      title: 'Support & Safety',
++      items: [
++        { icon: 'message-circle', label: 'Chat with Support', route: '/chat/support' },
++        { icon: 'shield', label: 'Safety & Help', route: '/profile/safety' },
++        { icon: 'book-open', label: 'FAQs', route: '/profile/faqs' },
++      ],
++    },
++    {
++      title: '',
++      items: [
++        { icon: 'log-out', label: 'Log Out', action: handleLogout, color: c.destructive },
++      ],
++    },
++  ];
++
++  const SECTIONS = activeRole === 'CLIENT' ? clientSections : providerSections;
++
+   return (
+     <ScrollView
+       style={[styles.root, { backgroundColor: c.background }]}
+@@ -105,9 +155,9 @@ export default function ProfileScreen() {
+     >
+       {/* Profile Header */}
+       <View style={[styles.profileHeader, { backgroundColor: c.headerBg, paddingTop: insets.top + 12 }]}>
+-        {/* Logo mark + theme toggle row */}
++        {/* Logo mark + theme toggle row — real brand asset, consistent size with Home header */}
+         <View style={styles.headerTopRow}>
+-          <LogoMark color="#FFFFFF" size={34} />
++          <LogoImage variant="white" height={40} />
+           <View ref={toggleBtnRef} collapsable={false}>
+             <TouchableOpacity
+               style={styles.themeToggleBtn}
+@@ -119,9 +169,26 @@ export default function ProfileScreen() {
+           </View>
+         </View>
+ 
++        {isBothRoles && (
++          <View style={styles.roleSwitchWrap}>
++            <TouchableOpacity
++              style={[styles.roleSwitchOption, activeRole === 'CLIENT' && styles.roleSwitchActive]}
++              onPress={() => activeRole !== 'CLIENT' && toggleRole()}
++            >
++              <Text style={[styles.roleSwitchText, activeRole === 'CLIENT' && { color: c.primary }]}>Client</Text>
++            </TouchableOpacity>
++            <TouchableOpacity
++              style={[styles.roleSwitchOption, activeRole === 'PROVIDER' && styles.roleSwitchActive]}
++              onPress={() => activeRole !== 'PROVIDER' && toggleRole()}
++            >
++              <Text style={[styles.roleSwitchText, activeRole === 'PROVIDER' && { color: c.primary }]}>SkillBuddy Pilot</Text>
++            </TouchableOpacity>
++          </View>
++        )}
++
+         <View style={styles.avatarWrap}>
+           <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'rgba(255,255,255,0.4)' }]}>
+-            <Text style={styles.avatarText}>{user?.first_name?.charAt(0) ?? 'U'}</Text>
++            <Text style={styles.avatarText}>{CURRENT_USER.firstName.charAt(0)}</Text>
+           </View>
+           <TouchableOpacity style={[styles.editAvatarBtn, { backgroundColor: c.primary, borderColor: '#FFF' }]}>
+             <Feather name="camera" size={14} color="#FFF" />
+@@ -129,20 +196,18 @@ export default function ProfileScreen() {
+         </View>
+         <Text style={styles.name}>{name}</Text>
+         <Text style={styles.email}>{email}</Text>
+-        {user?.role && (
+-          <View style={styles.roleBadge}>
+-            <Text style={styles.roleText}>{user.role}</Text>
+-          </View>
+-        )}
++        <View style={styles.roleBadge}>
++          <Text style={styles.roleText}>{activeRole === 'CLIENT' ? 'Client' : 'SkillBuddy Pilot'}</Text>
++        </View>
+       </View>
+ 
+       {/* Stats Row */}
+       <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+         <View style={[styles.statsRow, { backgroundColor: c.card, shadowColor: '#000' }]}>
+           {[
+-            { label: 'Jobs Done', value: user?.jobs_done ?? 24 },
+-            { label: 'Active Jobs', value: user?.active_jobs ?? 2 },
+-            { label: 'Credit Pts', value: user?.credit_points ?? 48 },
++            { label: 'Jobs Done', value: CURRENT_USER.jobsDone },
++            { label: 'Active Jobs', value: CURRENT_USER.activeJobs },
++            { label: 'Credit Pts', value: CURRENT_USER.creditPoints },
+           ].map((stat, i) => (
+             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
+               <Text style={[styles.statValue, { color: c.primary }]}>{stat.value}</Text>
+@@ -220,6 +285,16 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
++  roleSwitchWrap: {
++    flexDirection: 'row',
++    backgroundColor: 'rgba(255,255,255,0.15)',
++    borderRadius: 12,
++    padding: 3,
++    marginBottom: 16,
++  },
++  roleSwitchOption: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9 },
++  roleSwitchActive: { backgroundColor: '#FFFFFF' },
++  roleSwitchText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+   avatarWrap: { position: 'relative', marginBottom: 12 },
+   avatar: {
+     width: 88,
+diff --git a/artifacts/skillbuddy/app/booking/[id].tsx b/artifacts/skillbuddy/app/booking/[id].tsx
+index 69155e8..4198e19 100644
+--- a/artifacts/skillbuddy/app/booking/[id].tsx
++++ b/artifacts/skillbuddy/app/booking/[id].tsx
+@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import * as Haptics from 'expo-haptics';
+ import colors from '@/constants/colors';
+ import { SERVICES } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
+ 
+ const c = colors.light;
+ 
+@@ -51,9 +52,7 @@ export default function BookingScreen() {
+     <View style={[styles.root, { paddingTop: insets.top }]}>
+       {/* Header */}
+       <View style={[styles.header, { backgroundColor: c.primary }]}>
+-        <TouchableOpacity onPress={() => router.back()}>
+-          <Feather name="arrow-left" size={22} color="#FFF" />
+-        </TouchableOpacity>
++        <BackButton />
+         <View style={styles.headerMid}>
+           <Text style={styles.headerTitle}>Select Service</Text>
+           <Text style={styles.headerSubtitle}>Appointment Time:</Text>
+diff --git a/artifacts/skillbuddy/app/category/[id].tsx b/artifacts/skillbuddy/app/category/[id].tsx
+index c495c34..33b5a50 100644
+--- a/artifacts/skillbuddy/app/category/[id].tsx
++++ b/artifacts/skillbuddy/app/category/[id].tsx
+@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
+ import { CATEGORIES, SUBSERVICES } from '@/data/mockData';
+ import { getServiceForSubservice } from '@/lib/serviceLookup';
++import BackButton from '@/components/BackButton';
+ 
+ export default function CategoryDetailScreen() {
+   const insets = useSafeAreaInsets();
+@@ -26,11 +27,9 @@ export default function CategoryDetailScreen() {
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       {/* Header */}
+       <View style={[styles.header, { backgroundColor: c.primary }]}>
+-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+-          <Feather name="arrow-left" size={22} color="#FFF" />
+-        </TouchableOpacity>
++        <BackButton />
+         <Text style={styles.headerTitle}>{category.name}</Text>
+-        <View style={{ width: 38 }} />
++        <View style={{ width: 40 }} />
+       </View>
+ 
+       <FlatList
+diff --git a/artifacts/skillbuddy/app/chat/[id].tsx b/artifacts/skillbuddy/app/chat/[id].tsx
+index b9a055b..6450710 100644
+--- a/artifacts/skillbuddy/app/chat/[id].tsx
++++ b/artifacts/skillbuddy/app/chat/[id].tsx
+@@ -1,7 +1,6 @@
+ import React, { useRef, useState } from 'react';
+ import {
+   FlatList,
+-  KeyboardAvoidingView,
+   Platform,
+   Pressable,
+   StyleSheet,
+@@ -10,6 +9,7 @@ import {
+   TouchableOpacity,
+   View,
+ } from 'react-native';
++import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useLocalSearchParams, useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
+ import Animated, { FadeIn } from 'react-native-reanimated';
+ import colors from '@/constants/colors';
+ import { CHAT_THREADS } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
+ import type { ChatMessage } from '@/types';
+ 
+ const c = colors.light;
+@@ -102,11 +103,7 @@ export default function ChatThreadScreen() {
+       {/* Header */}
+       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: c.primary }]}>
+         <View style={styles.headerLeft}>
+-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+-            <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+-              <Feather name="arrow-left" size={18} color="#FFF" />
+-            </View>
+-          </TouchableOpacity>
++          <BackButton color="#FFF" style={{ backgroundColor: 'rgba(255,255,255,0.25)', shadowOpacity: 0 }} />
+           <View style={[styles.headerAvatar, { backgroundColor: '#FFF' }]}>
+             <Text style={[styles.headerAvatarText, { color: c.primary }]}>{thread.participant.name.charAt(0)}</Text>
+           </View>
+@@ -122,7 +119,7 @@ export default function ChatThreadScreen() {
+ 
+       <KeyboardAvoidingView
+         style={styles.flex}
+-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
++        behavior="padding"
+         keyboardVerticalOffset={0}
+       >
+         {/* Date separator */}
+diff --git a/artifacts/skillbuddy/app/chat/support.tsx b/artifacts/skillbuddy/app/chat/support.tsx
+new file mode 100644
+index 0000000..31483b8
+--- /dev/null
++++ b/artifacts/skillbuddy/app/chat/support.tsx
+@@ -0,0 +1,146 @@
++import React, { useState } from 'react';
++import {
++  FlatList,
++  Platform,
++  StyleSheet,
++  Text,
++  TextInput,
++  TouchableOpacity,
++  View,
++} from 'react-native';
++import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather } from '@expo/vector-icons';
++import Animated, { FadeIn } from 'react-native-reanimated';
++import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++import type { ChatMessage } from '@/types';
++
++const ISSUE_CATEGORIES = [
++  { id: 'booking', label: 'Booking Issue', icon: 'calendar' as const },
++  { id: 'payment', label: 'Payment & Billing', icon: 'credit-card' as const },
++  { id: 'account', label: 'Account & Profile', icon: 'user' as const },
++  { id: 'safety', label: 'Safety Concern', icon: 'shield' as const },
++  { id: 'other', label: 'Something Else', icon: 'help-circle' as const },
++];
++
++export default function SupportChatScreen() {
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++  const [category, setCategory] = useState<string | null>(null);
++  const [messages, setMessages] = useState<ChatMessage[]>([]);
++  const [input, setInput] = useState('');
++
++  const startChat = (catId: string, label: string) => {
++    setCategory(catId);
++    setMessages([
++      {
++        id: 'sys1',
++        text: `Thanks for reaching out about "${label}". A SkillBuddy Support agent will be with you shortly. In the meantime, tell us more about the issue.`,
++        sender: 'other',
++        timestamp: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
++        senderName: 'SkillBuddy Support',
++      },
++    ]);
++  };
++
++  const send = () => {
++    if (!input.trim()) return;
++    const msg: ChatMessage = {
++      id: Date.now().toString(),
++      text: input.trim(),
++      sender: 'me',
++      timestamp: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
++      senderName: 'You',
++    };
++    setMessages((prev) => [msg, ...prev]);
++    setInput('');
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.primary }]}>
++        <BackButton />
++        <View style={styles.headerCenter}>
++          <Text style={styles.headerTitle}>SkillBuddy Support</Text>
++          <View style={styles.supportBadge}>
++            <Feather name="headphones" size={11} color="#FFF" />
++            <Text style={styles.supportBadgeText}>Support</Text>
++          </View>
++        </View>
++        <View style={{ width: 40 }} />
++      </View>
++
++      {!category ? (
++        <View style={{ padding: 20 }}>
++          <Text style={[styles.prompt, { color: c.text }]}>What can we help you with?</Text>
++          {ISSUE_CATEGORIES.map((cat) => (
++            <TouchableOpacity
++              key={cat.id}
++              style={[styles.catCard, { backgroundColor: c.card, borderColor: c.border }]}
++              onPress={() => startChat(cat.id, cat.label)}
++            >
++              <View style={[styles.catIcon, { backgroundColor: c.accent }]}>
++                <Feather name={cat.icon} size={18} color={c.primary} />
++              </View>
++              <Text style={[styles.catLabel, { color: c.text }]}>{cat.label}</Text>
++              <Feather name="chevron-right" size={18} color={c.border} />
++            </TouchableOpacity>
++          ))}
++        </View>
++      ) : (
++        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
++          <FlatList
++            data={messages}
++            keyExtractor={(m) => m.id}
++            inverted
++            contentContainerStyle={{ padding: 16 }}
++            renderItem={({ item }) => {
++              const isMe = item.sender === 'me';
++              return (
++                <Animated.View entering={FadeIn.duration(200)} style={[styles.msgRow, isMe && styles.msgRowMe]}>
++                  <View style={[styles.bubble, isMe ? { backgroundColor: c.primary } : { backgroundColor: c.card, borderWidth: 1, borderColor: c.border }]}>
++                    <Text style={[styles.msgText, { color: isMe ? '#FFF' : c.text }]}>{item.text}</Text>
++                  </View>
++                </Animated.View>
++              );
++            }}
++          />
++          <View style={[styles.inputBar, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 10 }]}>
++            <TextInput
++              style={[styles.input, { backgroundColor: c.input, color: c.text }]}
++              value={input}
++              onChangeText={setInput}
++              placeholder="Describe your issue..."
++              placeholderTextColor={c.mutedForeground}
++              multiline
++            />
++            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: input.trim() ? c.primary : c.muted }]} onPress={send}>
++              <Feather name="send" size={16} color={input.trim() ? '#FFF' : c.mutedForeground} />
++            </TouchableOpacity>
++          </View>
++        </KeyboardAvoidingView>
++      )}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
++  headerCenter: { alignItems: 'center', gap: 4 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#FFF' },
++  supportBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
++  supportBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 10, color: '#FFF' },
++  prompt: { fontFamily: 'Inter_700Bold', fontSize: 18, marginBottom: 16 },
++  catCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
++  catIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
++  catLabel: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  msgRow: { marginBottom: 10, maxWidth: '80%' },
++  msgRowMe: { alignSelf: 'flex-end' },
++  bubble: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
++  msgText: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20 },
++  inputBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1 },
++  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 100 },
++  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+index 0d34d58..cd3b104 100644
+--- a/artifacts/skillbuddy/app/job/[id].tsx
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
+ import { BID_PROVIDERS, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
+ import { calculateProviderScore } from '@/lib/scoring';
+ import CountdownTimer from '@/components/CountdownTimer';
+@@ -122,9 +123,7 @@ export default function BiddingDashboardScreen() {
+   return (
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+-          <Feather name="arrow-left" size={22} color={c.text} />
+-        </TouchableOpacity>
++        <BackButton />
+         <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
+         <TouchableOpacity onPress={cancelJob} style={styles.backBtn}>
+           <Feather name="x-circle" size={20} color={c.destructive} />
+diff --git a/artifacts/skillbuddy/app/job/[id]/bid.tsx b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+index 1cf8d69..daf410f 100644
+--- a/artifacts/skillbuddy/app/job/[id]/bid.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+@@ -4,9 +4,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useLocalSearchParams, useRouter } from 'expo-router';
+ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
+ import { CURRENT_USER, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
+ import { calculateProviderScore } from '@/lib/scoring';
+ import CountdownTimer from '@/components/CountdownTimer';
++import InlineLoader from '@/components/InlineLoader';
+ import EmptyState from '@/components/EmptyState';
+ import type { Bid, BidProvider } from '@/types';
+ 
+@@ -41,6 +43,7 @@ export default function ProviderJobBidScreen() {
+   const [price, setPrice] = useState(existingBid ? String(existingBid.price) : String(job?.expectedPrice ?? ''));
+   const [eta, setEta] = useState(existingBid?.eta ?? '30 min');
+   const [submitted, setSubmitted] = useState(!!existingBid);
++  const [submitting, setSubmitting] = useState(false);
+ 
+   if (!job) {
+     return (
+@@ -52,12 +55,13 @@ export default function ProviderJobBidScreen() {
+ 
+   const myScore = calculateProviderScore(ME_AS_PROVIDER);
+ 
+-  const submitBid = () => {
++  const submitBid = async () => {
+     const priceNum = parseFloat(price);
+     if (!priceNum || priceNum <= 0) {
+       Alert.alert('Invalid price', 'Please enter a valid bid amount.');
+       return;
+     }
++    setSubmitting(true);
+     const bid: Bid = {
+       id: existingBid?.id ?? `bid_${job.id}_me_${Date.now()}`,
+       jobId: job.id,
+@@ -67,9 +71,11 @@ export default function ProviderJobBidScreen() {
+       createdAt: Date.now(),
+       score: myScore.total,
+     };
++    await new Promise((resolve) => setTimeout(resolve, 450));
+     const idx = MOCK_BIDS.findIndex((b) => b.id === bid.id);
+     if (idx >= 0) MOCK_BIDS[idx] = bid;
+     else MOCK_BIDS.push(bid);
++    setSubmitting(false);
+     setSubmitted(true);
+   };
+ 
+@@ -98,9 +104,7 @@ export default function ProviderJobBidScreen() {
+   return (
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+-          <Feather name="arrow-left" size={22} color={c.text} />
+-        </TouchableOpacity>
++        <BackButton />
+         <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>Job Details</Text>
+         <View style={{ width: 22 }} />
+       </View>
+@@ -207,8 +211,14 @@ export default function ProviderJobBidScreen() {
+               ))}
+             </View>
+ 
+-            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={submitBid}>
+-              <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
++            <TouchableOpacity
++              style={[styles.submitBtn, { backgroundColor: c.primary, opacity: submitting ? 0.8 : 1 }]}
++              onPress={submitBid}
++              disabled={submitting}
++            >
++              {submitting ? <InlineLoader size={20} /> : (
++                <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
++              )}
+             </TouchableOpacity>
+ 
+             {submitted && (
+diff --git a/artifacts/skillbuddy/app/job/post.tsx b/artifacts/skillbuddy/app/job/post.tsx
+index 0d360f7..9d48e85 100644
+--- a/artifacts/skillbuddy/app/job/post.tsx
++++ b/artifacts/skillbuddy/app/job/post.tsx
+@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
+ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+ import * as ImagePicker from 'expo-image-picker';
+ import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++import InlineLoader from '@/components/InlineLoader';
+ import { CATEGORIES, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
+ import type { Job, JobUrgency } from '@/types';
+ 
+@@ -34,6 +36,7 @@ export default function PostJobScreen() {
+   const [photos, setPhotos] = useState<string[]>([]);
+   const [urgency, setUrgency] = useState<JobUrgency>('regular');
+   const [errors, setErrors] = useState<Record<string, string>>({});
++  const [submitting, setSubmitting] = useState(false);
+ 
+   const wordCount = description.trim().length ? description.trim().split(/\s+/).length : 0;
+   const rateNum = parseFloat(hourlyRate) || 0;
+@@ -68,8 +71,9 @@ export default function PostJobScreen() {
+     return Object.keys(next).length === 0;
+   };
+ 
+-  const handleSubmit = () => {
++  const handleSubmit = async () => {
+     if (!validate()) return;
++    setSubmitting(true);
+ 
+     const durationMs = urgency === 'urgent' ? 30 * 60 * 1000 : 3 * 60 * 60 * 1000;
+     const newJob: Job = {
+@@ -92,6 +96,8 @@ export default function PostJobScreen() {
+       biddingDurationMs: durationMs,
+       location: 'Riga, Latvia',
+     };
++    // Small delay so the loading state is visible — mirrors a real network round-trip.
++    await new Promise((resolve) => setTimeout(resolve, 500));
+     MOCK_JOBS.unshift(newJob);
+     router.replace(`/job/${newJob.id}` as any);
+   };
+@@ -99,9 +105,7 @@ export default function PostJobScreen() {
+   return (
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+-          <Feather name="arrow-left" size={22} color={c.text} />
+-        </TouchableOpacity>
++        <BackButton />
+         <Text style={[styles.headerTitle, { color: c.text }]}>Post a Job</Text>
+         <View style={{ width: 22 }} />
+       </View>
+@@ -293,8 +297,12 @@ export default function PostJobScreen() {
+           </TouchableOpacity>
+         </View>
+ 
+-        <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={handleSubmit}>
+-          <Text style={styles.submitText}>Post Job & Start Bidding</Text>
++        <TouchableOpacity
++          style={[styles.submitBtn, { backgroundColor: c.primary, opacity: submitting ? 0.8 : 1 }]}
++          onPress={handleSubmit}
++          disabled={submitting}
++        >
++          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>Post Job & Start Bidding</Text>}
+         </TouchableOpacity>
+       </ScrollView>
+     </View>
+diff --git a/artifacts/skillbuddy/app/profile/credit-points.tsx b/artifacts/skillbuddy/app/profile/credit-points.tsx
+new file mode 100644
+index 0000000..4655f81
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/credit-points.tsx
+@@ -0,0 +1,71 @@
++import React from 'react';
++import { FlatList, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { CURRENT_USER, CREDIT_HISTORY } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
++
++export default function CreditPointsScreen() {
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Credit Points</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <View style={[styles.balanceCard, { backgroundColor: c.primary }]}>
++        <Feather name="star" size={28} color="#FFF" />
++        <Text style={styles.balanceValue}>{CURRENT_USER.creditPoints}</Text>
++        <Text style={styles.balanceLabel}>Current Balance</Text>
++        <Text style={styles.balanceSub}>Earn 1 pt per €1 spent</Text>
++      </View>
++
++      <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Redemption History</Text>
++
++      <FlatList
++        data={CREDIT_HISTORY}
++        keyExtractor={(t) => t.id}
++        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
++        renderItem={({ item }) => (
++          <View style={[styles.txRow, { borderBottomColor: c.border }]}>
++            <View style={[styles.txIcon, { backgroundColor: item.change > 0 ? c.successLight : c.urgentLight }]}>
++              <Feather name={item.change > 0 ? 'plus' : 'minus'} size={14} color={item.change > 0 ? c.success : c.urgent} />
++            </View>
++            <View style={{ flex: 1 }}>
++              <Text style={[styles.txDesc, { color: c.text }]}>{item.description}</Text>
++              <Text style={[styles.txDate, { color: c.mutedForeground }]}>{item.date}</Text>
++            </View>
++            <View style={{ alignItems: 'flex-end' }}>
++              <Text style={[styles.txChange, { color: item.change > 0 ? c.success : c.urgent }]}>
++                {item.change > 0 ? '+' : ''}{item.change}
++              </Text>
++              <Text style={[styles.txBalance, { color: c.mutedForeground }]}>Bal: {item.balanceAfter}</Text>
++            </View>
++          </View>
++        )}
++      />
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  balanceCard: { margin: 20, borderRadius: 20, padding: 24, alignItems: 'center', gap: 4 },
++  balanceValue: { fontFamily: 'Inter_700Bold', fontSize: 40, color: '#FFF', marginTop: 4 },
++  balanceLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.9)' },
++  balanceSub: { fontFamily: 'Inter_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 6 },
++  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, paddingHorizontal: 20, marginBottom: 8 },
++  txRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1 },
++  txIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
++  txDesc: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  txDate: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  txChange: { fontFamily: 'Inter_700Bold', fontSize: 14 },
++  txBalance: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/documents.tsx b/artifacts/skillbuddy/app/profile/documents.tsx
+new file mode 100644
+index 0000000..fe0e6d2
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/documents.tsx
+@@ -0,0 +1,87 @@
++import React from 'react';
++import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather } from '@expo/vector-icons';
++import * as ImagePicker from 'expo-image-picker';
++import { useTheme } from '@/context/ThemeContext';
++import { CURRENT_USER } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
++
++type DocStatus = 'verified' | 'pending' | 'rejected';
++
++const STATUS_META: Record<DocStatus, { label: string; icon: keyof typeof Feather.glyphMap }> = {
++  verified: { label: 'Verified', icon: 'check-circle' },
++  pending: { label: 'Pending Review', icon: 'clock' },
++  rejected: { label: 'Rejected — please reupload', icon: 'alert-circle' },
++};
++
++function DocumentRow({ title, status }: { title: string; status: DocStatus }) {
++  const { colors: c } = useTheme();
++  const meta = STATUS_META[status];
++  const accent = status === 'verified' ? c.success : status === 'pending' ? c.warning : c.destructive;
++  const accentLight = status === 'verified' ? c.successLight : status === 'pending' ? '#FFF6E8' : c.urgentLight;
++
++  const handleAction = async () => {
++    if (status === 'verified') return;
++    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
++    if (!permission.granted) return;
++    Alert.alert('Reupload', `Select a new photo for "${title}" to submit for review.`);
++  };
++
++  return (
++    <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>
++      <View style={[styles.docIcon, { backgroundColor: c.accent }]}>
++        <Feather name="file-text" size={18} color={c.primary} />
++      </View>
++      <View style={{ flex: 1 }}>
++        <Text style={[styles.docTitle, { color: c.text }]}>{title}</Text>
++        <View style={[styles.statusChip, { backgroundColor: accentLight }]}>
++          <Feather name={meta.icon} size={11} color={accent} />
++          <Text style={[styles.statusText, { color: accent }]}>{meta.label}</Text>
++        </View>
++      </View>
++      <TouchableOpacity style={[styles.docAction, { borderColor: c.border }]} onPress={handleAction}>
++        <Text style={[styles.docActionText, { color: c.text }]}>
++          {status === 'verified' ? 'View' : 'Reupload'}
++        </Text>
++      </TouchableOpacity>
++    </View>
++  );
++}
++
++export default function DocumentsScreen() {
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Documents</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
++        <Text style={[styles.hint, { color: c.mutedForeground }]}>
++          Verified documents help build trust with clients and pilots on SkillBuddy.
++        </Text>
++        <DocumentRow title="Face Verification" status={CURRENT_USER.faceVerification} />
++        <DocumentRow title="Residence Permit" status={CURRENT_USER.residencePermit} />
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  hint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, marginBottom: 16 },
++  docCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 12 },
++  docIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
++  docTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginBottom: 6 },
++  statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
++  statusText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++  docAction: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
++  docActionText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/edit.tsx b/artifacts/skillbuddy/app/profile/edit.tsx
+index d29c8bb..9acce90 100644
+--- a/artifacts/skillbuddy/app/profile/edit.tsx
++++ b/artifacts/skillbuddy/app/profile/edit.tsx
+@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
+ import colors from '@/constants/colors';
+ import { useAuth } from '@/context/AuthContext';
+ import { authApi } from '@/services/api';
++import BackButton from '@/components/BackButton';
+ 
+ const c = colors.light;
+ 
+@@ -36,9 +37,7 @@ export default function EditProfileScreen() {
+   return (
+     <View style={[styles.root, { paddingTop: insets.top }]}>
+       <View style={styles.header}>
+-        <TouchableOpacity onPress={() => router.back()}>
+-          <Feather name="arrow-left" size={22} color="#1A1A1A" />
+-        </TouchableOpacity>
++        <BackButton />
+         <Text style={styles.title}>Edit Profile</Text>
+         <TouchableOpacity onPress={handleSave} disabled={loading}>
+           {loading ? <ActivityIndicator size="small" color={c.primary} /> : (
+diff --git a/artifacts/skillbuddy/app/profile/faqs.tsx b/artifacts/skillbuddy/app/profile/faqs.tsx
+new file mode 100644
+index 0000000..6f29e19
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/faqs.tsx
+@@ -0,0 +1,123 @@
++import React, { useMemo, useState } from 'react';
++import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++
++interface FAQ {
++  id: string;
++  category: string;
++  question: string;
++  answer: string;
++}
++
++const FAQS: FAQ[] = [
++  { id: 'f1', category: 'Booking', question: 'How do I post a job?', answer: 'Go to the Jobs tab and tap "Post a Job". Fill in the details, choose Urgent or Regular, and submit — bidding starts immediately.' },
++  { id: 'f2', category: 'Booking', question: 'What\'s the difference between Urgent and Regular jobs?', answer: 'Urgent jobs need to be done within 12 hours and have a 30-minute bidding window. Regular jobs need to be done within 72 hours with a 3-hour bidding window.' },
++  { id: 'f3', category: 'Payments', question: 'How are Credit Points earned?', answer: 'You earn 1 point per €1 spent on completed bookings. Points can be redeemed for discounts on future bookings.' },
++  { id: 'f4', category: 'Payments', question: 'When do SkillBuddy Pilots get paid?', answer: 'Payouts are processed after a job is marked complete and approved by the client, minus the platform fee.' },
++  { id: 'f5', category: 'Account', question: 'Can I be both a Client and a SkillBuddy Pilot?', answer: 'Yes — if you register as both, a toggle appears on your Profile letting you switch between the two views at any time.' },
++  { id: 'f6', category: 'Account', question: 'How is my match score calculated?', answer: 'Providers are scored out of 100 based on distance, star rating, badge tier, credibility %, and average response time.' },
++];
++
++const CATEGORIES = ['All', 'Booking', 'Payments', 'Account'];
++
++export default function FaqsScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const [query, setQuery] = useState('');
++  const [category, setCategory] = useState('All');
++  const [expandedId, setExpandedId] = useState<string | null>(null);
++
++  const filtered = useMemo(() => {
++    return FAQS.filter((f) => {
++      const matchesCategory = category === 'All' || f.category === category;
++      const matchesQuery = !query.trim() || f.question.toLowerCase().includes(query.trim().toLowerCase());
++      return matchesCategory && matchesQuery;
++    });
++  }, [query, category]);
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>FAQs</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <View style={styles.searchWrap}>
++        <View style={[styles.searchBar, { backgroundColor: c.input }]}>
++          <Feather name="search" size={16} color={c.mutedForeground} />
++          <TextInput
++            style={[styles.searchInput, { color: c.text }]}
++            placeholder="Search FAQs..."
++            placeholderTextColor={c.mutedForeground}
++            value={query}
++            onChangeText={setQuery}
++          />
++        </View>
++      </View>
++
++      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsRow} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
++        {CATEGORIES.map((cat) => (
++          <TouchableOpacity
++            key={cat}
++            style={[styles.tab, { backgroundColor: category === cat ? c.primary : c.muted }]}
++            onPress={() => setCategory(cat)}
++          >
++            <Text style={[styles.tabText, { color: category === cat ? '#FFF' : c.text }]}>{cat}</Text>
++          </TouchableOpacity>
++        ))}
++      </ScrollView>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        {filtered.map((faq) => {
++          const expanded = expandedId === faq.id;
++          return (
++            <TouchableOpacity
++              key={faq.id}
++              style={[styles.faqCard, { backgroundColor: c.card, borderColor: c.border }]}
++              onPress={() => setExpandedId(expanded ? null : faq.id)}
++              activeOpacity={0.8}
++            >
++              <View style={styles.faqHeader}>
++                <Text style={[styles.faqQuestion, { color: c.text }]}>{faq.question}</Text>
++                <Feather name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={c.mutedForeground} />
++              </View>
++              {expanded && <Text style={[styles.faqAnswer, { color: c.mutedForeground }]}>{faq.answer}</Text>}
++            </TouchableOpacity>
++          );
++        })}
++
++        <TouchableOpacity
++          style={[styles.contactBtn, { backgroundColor: c.primary }]}
++          onPress={() => router.push('/chat/support' as any)}
++        >
++          <Feather name="message-circle" size={16} color="#FFF" />
++          <Text style={styles.contactText}>Still need help? Chat with Support</Text>
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  searchWrap: { paddingHorizontal: 20, paddingTop: 16 },
++  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
++  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  tabsRow: { marginTop: 14, marginBottom: 4, flexGrow: 0 },
++  tab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
++  tabText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  faqCard: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
++  faqHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
++  faqQuestion: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  faqAnswer: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, marginTop: 10 },
++  contactBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, paddingVertical: 14, marginTop: 10 },
++  contactText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/app/profile/legal.tsx b/artifacts/skillbuddy/app/profile/legal.tsx
+new file mode 100644
+index 0000000..1d6fda3
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/legal.tsx
+@@ -0,0 +1,62 @@
++import React from 'react';
++import { ScrollView, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams } from 'expo-router';
++import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++
++const CONTENT: Record<string, { title: string; body: string[] }> = {
++  about: {
++    title: 'About Us',
++    body: [
++      'SkillBuddy connects people who need everyday services done with verified local professionals — SkillBuddy Pilots — across the Baltic region.',
++      'Our mission is to make booking trusted help as simple as a few taps: post a job or browse services, compare real bids, and get it done.',
++      'Every SkillBuddy Pilot is verified through our documents and credibility system before they can bid on jobs.',
++    ],
++  },
++  privacy: {
++    title: 'Privacy & Cookie Policy',
++    body: [
++      'We collect only the information needed to connect clients with SkillBuddy Pilots and process bookings: account details, job/service data, and payment records.',
++      'We never sell personal data to third parties. Location data is used only to match nearby providers and is never shared beyond what a job requires.',
++      'Cookies and similar technologies are used to keep you signed in and to remember your preferences (theme, language).',
++    ],
++  },
++  terms: {
++    title: 'Terms & Conditions',
++    body: [
++      'By using SkillBuddy, you agree to provide accurate information when posting jobs or bidding on them.',
++      'Cancellation fees apply only after a provider has been assigned to a job — cancelling before assignment is always free.',
++      'SkillBuddy Pilots are independent providers; SkillBuddy facilitates the connection and payment but is not the employer of any Pilot.',
++    ],
++  },
++};
++
++export default function LegalScreen() {
++  const { type } = useLocalSearchParams<{ type: string }>();
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++  const content = CONTENT[type as string] ?? CONTENT.about;
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>{content.title}</Text>
++        <View style={{ width: 40 }} />
++      </View>
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        {content.body.map((p, i) => (
++          <Text key={i} style={[styles.paragraph, { color: c.text }]}>{p}</Text>
++        ))}
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  paragraph: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, marginBottom: 16 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/professional.tsx b/artifacts/skillbuddy/app/profile/professional.tsx
+new file mode 100644
+index 0000000..34e0ebf
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/professional.tsx
+@@ -0,0 +1,148 @@
++import React from 'react';
++import { FlatList, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { useRole } from '@/context/RoleContext';
++import { CURRENT_USER, PROVIDER_JOB_HISTORY } from '@/data/mockData';
++import { calculateProviderScore } from '@/lib/scoring';
++import BackButton from '@/components/BackButton';
++import type { BidProvider } from '@/types';
++
++const ME_AS_PROVIDER: BidProvider = {
++  id: 'me-provider',
++  name: CURRENT_USER.name,
++  rating: 4.7,
++  reviewCount: 58,
++  jobsDone: 41,
++  badge: 2,
++  credibility: 90,
++  specialty: CURRENT_USER.primarySkill,
++  location: CURRENT_USER.address,
++  isOnline: true,
++  distanceKm: 3.1,
++  responseTimeMin: 9,
++};
++
++export default function ProfessionalInfoScreen() {
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++  const { activeRole } = useRole();
++  const isProvider = activeRole === 'PROVIDER';
++  const score = calculateProviderScore(ME_AS_PROVIDER);
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Professional Info</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      {!isProvider ? (
++        <View style={{ padding: 20 }}>
++          <View style={styles.statGrid}>
++            {[
++              { label: 'Jobs Done', value: CURRENT_USER.jobsDone, icon: 'check-circle' as const },
++              { label: 'Active Jobs', value: CURRENT_USER.activeJobs, icon: 'clock' as const },
++              { label: 'Due Payments', value: `€${CURRENT_USER.duePayments}`, icon: 'dollar-sign' as const },
++            ].map((s) => (
++              <View key={s.label} style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                <Feather name={s.icon} size={18} color={c.primary} />
++                <Text style={[styles.statValue, { color: c.text }]}>{s.value}</Text>
++                <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{s.label}</Text>
++              </View>
++            ))}
++          </View>
++        </View>
++      ) : (
++        <FlatList
++          ListHeaderComponent={
++            <View style={{ padding: 20, paddingBottom: 0 }}>
++              <View style={[styles.skillsCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                <View style={styles.skillRow}>
++                  <MaterialCommunityIcons name="star-circle-outline" size={18} color={c.primary} />
++                  <View>
++                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>Primary Skill</Text>
++                    <Text style={[styles.skillValue, { color: c.text }]}>{CURRENT_USER.primarySkill}</Text>
++                  </View>
++                </View>
++                <View style={[styles.skillRow, { borderTopWidth: 1, borderTopColor: c.border, paddingTop: 12, marginTop: 12 }]}>
++                  <MaterialCommunityIcons name="star-outline" size={18} color={c.mutedForeground} />
++                  <View>
++                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>Secondary Skill</Text>
++                    <Text style={[styles.skillValue, { color: c.text }]}>{CURRENT_USER.secondarySkill}</Text>
++                  </View>
++                </View>
++              </View>
++
++              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Performance Metrics</Text>
++              <View style={styles.statGrid}>
++                <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                  <Feather name="star" size={18} color={c.rating} />
++                  <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.rating}</Text>
++                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Rating</Text>
++                </View>
++                <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                  <Feather name="check-circle" size={18} color={c.primary} />
++                  <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.jobsDone}</Text>
++                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Jobs Done</Text>
++                </View>
++                <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                  <Feather name="zap" size={18} color={c.warning} />
++                  <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.responseTimeMin}m</Text>
++                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Avg. Response</Text>
++                </View>
++              </View>
++
++              <View style={[styles.scoreCard, { backgroundColor: c.primaryLight }]}>
++                <Text style={[styles.scoreLabel, { color: c.primary }]}>Your overall match score</Text>
++                <Text style={[styles.scoreValue, { color: c.primary }]}>{score.total}/100</Text>
++              </View>
++
++              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Job History</Text>
++            </View>
++          }
++          data={PROVIDER_JOB_HISTORY}
++          keyExtractor={(j) => j.id}
++          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
++          renderItem={({ item }) => (
++            <View style={[styles.historyRow, { borderBottomColor: c.border }]}>
++              <View style={{ flex: 1 }}>
++                <Text style={[styles.historyClient, { color: c.text }]}>{item.clientName}</Text>
++                <Text style={[styles.historyMeta, { color: c.mutedForeground }]}>{item.category} · {item.date}</Text>
++              </View>
++              <View style={styles.historyRating}>
++                <Feather name="star" size={13} color={c.rating} />
++                <Text style={[styles.historyRatingText, { color: c.text }]}>{item.ratingGiven.toFixed(1)}</Text>
++              </View>
++            </View>
++          )}
++        />
++      )}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  statGrid: { flexDirection: 'row', gap: 10 },
++  statCard: { flex: 1, borderWidth: 1, borderRadius: 14, padding: 14, alignItems: 'center', gap: 6 },
++  statValue: { fontFamily: 'Inter_700Bold', fontSize: 17 },
++  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center' },
++  skillsCard: { borderWidth: 1, borderRadius: 14, padding: 16 },
++  skillRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
++  skillLabel: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  skillValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginTop: 2 },
++  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 10 },
++  scoreCard: { borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 14 },
++  scoreLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  scoreValue: { fontFamily: 'Inter_700Bold', fontSize: 22, marginTop: 2 },
++  historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1 },
++  historyClient: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  historyMeta: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  historyRating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
++  historyRatingText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/safety.tsx b/artifacts/skillbuddy/app/profile/safety.tsx
+new file mode 100644
+index 0000000..10f0799
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/safety.tsx
+@@ -0,0 +1,79 @@
++import React from 'react';
++import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++
++export default function SafetyScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const handleSOS = () => {
++    Alert.alert(
++      'Emergency Contact',
++      'In an emergency, call your local emergency number immediately.\n\nLatvia Emergency: 112',
++      [{ text: 'OK' }]
++    );
++  };
++
++  const LINKS = [
++    { icon: 'shield' as const, label: 'Privacy & Cookie Policy', route: '/profile/legal?type=privacy' },
++    { icon: 'file' as const, label: 'Terms & Conditions', route: '/profile/legal?type=terms' },
++    { icon: 'message-circle' as const, label: 'Contact Us', route: '/chat/support' },
++  ];
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Safety & Help</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        <TouchableOpacity style={[styles.sosBtn, { backgroundColor: c.destructive }]} onPress={handleSOS}>
++          <View style={styles.sosIconWrap}>
++            <Feather name="alert-triangle" size={22} color="#FFF" />
++          </View>
++          <View style={{ flex: 1 }}>
++            <Text style={styles.sosTitle}>Emergency SOS</Text>
++            <Text style={styles.sosSub}>Tap for emergency contact information</Text>
++          </View>
++          <Feather name="chevron-right" size={20} color="#FFF" />
++        </TouchableOpacity>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Legal & Support</Text>
++        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++          {LINKS.map((l, i) => (
++            <TouchableOpacity
++              key={l.label}
++              style={[styles.row, i < LINKS.length - 1 && { borderBottomWidth: 1, borderBottomColor: c.border }]}
++              onPress={() => router.push(l.route as any)}
++            >
++              <Feather name={l.icon} size={18} color={c.primary} />
++              <Text style={[styles.rowLabel, { color: c.text }]}>{l.label}</Text>
++              <Feather name="chevron-right" size={18} color={c.border} />
++            </TouchableOpacity>
++          ))}
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  sosBtn: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginTop: 4 },
++  sosIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
++  sosTitle: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
++  sosSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
++  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 8 },
++  card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
++  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
++  rowLabel: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/settings.tsx b/artifacts/skillbuddy/app/profile/settings.tsx
+new file mode 100644
+index 0000000..2132111
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/settings.tsx
+@@ -0,0 +1,94 @@
++import React, { useState } from 'react';
++import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import BackButton from '@/components/BackButton';
++
++const LANGUAGES = [
++  { code: 'en', name: 'English' },
++  { code: 'de', name: 'German' },
++  { code: 'et', name: 'Estonian' },
++  { code: 'lv', name: 'Latvian' },
++  { code: 'lt', name: 'Lithuanian' },
++];
++
++export default function SettingsScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c, theme, toggleTheme } = useTheme();
++  const [notifBooking, setNotifBooking] = useState(true);
++  const [notifOffers, setNotifOffers] = useState(true);
++  const [notifChat, setNotifChat] = useState(true);
++  const [language, setLanguage] = useState('en');
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Settings</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Appearance</Text>
++        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={styles.row}>
++            <Text style={[styles.rowLabel, { color: c.text }]}>Dark Mode</Text>
++            <Switch value={theme === 'dark'} onValueChange={() => toggleTheme()} trackColor={{ true: c.primary }} />
++          </View>
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Notifications</Text>
++        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={[styles.row, { borderBottomWidth: 1, borderBottomColor: c.border }]}>
++            <Text style={[styles.rowLabel, { color: c.text }]}>Booking Updates</Text>
++            <Switch value={notifBooking} onValueChange={setNotifBooking} trackColor={{ true: c.primary }} />
++          </View>
++          <View style={[styles.row, { borderBottomWidth: 1, borderBottomColor: c.border }]}>
++            <Text style={[styles.rowLabel, { color: c.text }]}>Offers & Promotions</Text>
++            <Switch value={notifOffers} onValueChange={setNotifOffers} trackColor={{ true: c.primary }} />
++          </View>
++          <View style={styles.row}>
++            <Text style={[styles.rowLabel, { color: c.text }]}>Chat Messages</Text>
++            <Switch value={notifChat} onValueChange={setNotifChat} trackColor={{ true: c.primary }} />
++          </View>
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Language</Text>
++        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++          {LANGUAGES.map((lang, i) => (
++            <TouchableOpacity
++              key={lang.code}
++              style={[styles.row, i < LANGUAGES.length - 1 && { borderBottomWidth: 1, borderBottomColor: c.border }]}
++              onPress={() => setLanguage(lang.code)}
++            >
++              <Text style={[styles.rowLabel, { color: c.text }]}>{lang.name}</Text>
++              {language === lang.code && <Feather name="check" size={18} color={c.primary} />}
++            </TouchableOpacity>
++          ))}
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Account</Text>
++        <TouchableOpacity
++          style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border }]}
++          onPress={() => router.push('/profile/edit' as any)}
++        >
++          <Text style={[styles.rowLabel, { color: c.text }]}>Change Password</Text>
++          <Feather name="chevron-right" size={18} color={c.border} />
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 20, marginBottom: 8 },
++  card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
++  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
++  rowLabel: { fontFamily: 'Inter_500Medium', fontSize: 14 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/wallet.tsx b/artifacts/skillbuddy/app/profile/wallet.tsx
+new file mode 100644
+index 0000000..3fe5f73
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/wallet.tsx
+@@ -0,0 +1,95 @@
++import React from 'react';
++import { ScrollView, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { useRole } from '@/context/RoleContext';
++import { CURRENT_USER } from '@/data/mockData';
++import BackButton from '@/components/BackButton';
++
++export default function WalletScreen() {
++  const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
++  const { activeRole } = useRole();
++  const isProvider = activeRole === 'PROVIDER';
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>{isProvider ? 'Wallet & Earnings' : 'Wallet & Payments'}</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
++        <View style={[styles.summaryCard, { backgroundColor: c.primary }]}>
++          <Text style={styles.summaryLabel}>{isProvider ? 'Total Earned' : 'Total Spent'}</Text>
++          <Text style={styles.summaryValue}>€{isProvider ? '2,140' : '860'}</Text>
++          <View style={styles.summaryRow}>
++            <Text style={styles.summarySub}>{isProvider ? 'Pending payout' : 'This month'}</Text>
++            <Text style={styles.summarySubValue}>€{isProvider ? '180' : '210'}</Text>
++          </View>
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Breakdown</Text>
++        <View style={[styles.breakdownCard, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={styles.breakdownRow}>
++            <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>
++              {isProvider ? 'Platform fee (10%)' : 'Platform fee'}
++            </Text>
++            <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '214' : '38'}</Text>
++          </View>
++          <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
++            <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>Taxes</Text>
++            <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '96' : '—'}</Text>
++          </View>
++          <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
++            <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>
++              {isProvider ? 'Pending payout' : 'Payment dues'}
++            </Text>
++            <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '180' : CURRENT_USER.duePayments}</Text>
++          </View>
++        </View>
++
++        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>
++          {isProvider ? 'Payout Details' : 'Payment Method'}
++        </Text>
++        <View style={[styles.cardRow, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={[styles.cardIcon, { backgroundColor: c.accent }]}>
++            <MaterialCommunityIcons name={isProvider ? 'bank-outline' : 'credit-card-outline'} size={20} color={c.primary} />
++          </View>
++          <View style={{ flex: 1 }}>
++            <Text style={[styles.cardMasked, { color: c.text }]}>
++              {isProvider ? CURRENT_USER.iban : CURRENT_USER.maskedCard}
++            </Text>
++            <Text style={[styles.cardSub, { color: c.mutedForeground }]}>
++              {isProvider ? 'Payout account' : 'Default payment method'}
++            </Text>
++          </View>
++          <Feather name="chevron-right" size={18} color={c.border} />
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  summaryCard: { borderRadius: 20, padding: 22, marginTop: 4 },
++  summaryLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.85)' },
++  summaryValue: { fontFamily: 'Inter_700Bold', fontSize: 34, color: '#FFF', marginTop: 4, marginBottom: 12 },
++  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)', paddingTop: 12 },
++  summarySub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
++  summarySubValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 8 },
++  breakdownCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
++  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
++  breakdownLabel: { fontFamily: 'Inter_400Regular', fontSize: 13 },
++  breakdownValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14 },
++  cardIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
++  cardMasked: { fontFamily: 'Inter_600SemiBold', fontSize: 14, letterSpacing: 1 },
++  cardSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++});
+diff --git a/artifacts/skillbuddy/app/search.tsx b/artifacts/skillbuddy/app/search.tsx
+index 5ced3a7..a3a55e9 100644
+--- a/artifacts/skillbuddy/app/search.tsx
++++ b/artifacts/skillbuddy/app/search.tsx
+@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
++import BackButton from '@/components/BackButton';
+ import { useTheme } from '@/context/ThemeContext';
+ import { SERVICES, CATEGORIES, SUBSERVICES } from '@/data/mockData';
+ import { getServiceForSubservice } from '@/lib/serviceLookup';
+@@ -131,9 +132,7 @@ export default function SearchScreen() {
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       {/* Search Header */}
+       <View style={[styles.searchHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+-        <TouchableOpacity onPress={() => router.back()}>
+-          <Feather name="arrow-left" size={22} color={c.text} />
+-        </TouchableOpacity>
++        <BackButton />
+         <View style={[styles.searchBar, { backgroundColor: c.input }]}>
+           <Feather name="search" size={18} color={c.primary} />
+           <TextInput
+diff --git a/artifacts/skillbuddy/components/BackButton.tsx b/artifacts/skillbuddy/components/BackButton.tsx
+new file mode 100644
+index 0000000..2298ae5
+--- /dev/null
++++ b/artifacts/skillbuddy/components/BackButton.tsx
+@@ -0,0 +1,45 @@
++import React from 'react';
++import { StyleSheet, TouchableOpacity } from 'react-native';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++
++interface Props {
++  onPress?: () => void;
++  color?: string;
++  style?: object;
++}
++
++/**
++ * Standard circular back button — used on every screen with a back action.
++ * Theme-surface-colored circle, subtle shadow, ChevronLeft icon.
++ */
++export default function BackButton({ onPress, color, style }: Props) {
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  return (
++    <TouchableOpacity
++      style={[styles.btn, { backgroundColor: c.surface, shadowColor: '#000' }, style]}
++      onPress={onPress ?? (() => router.back())}
++      activeOpacity={0.75}
++      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
++    >
++      <Feather name="chevron-left" size={22} color={color ?? c.text} />
++    </TouchableOpacity>
++  );
++}
++
++const styles = StyleSheet.create({
++  btn: {
++    width: 40,
++    height: 40,
++    borderRadius: 20,
++    alignItems: 'center',
++    justifyContent: 'center',
++    elevation: 3,
++    shadowOffset: { width: 0, height: 2 },
++    shadowOpacity: 0.1,
++    shadowRadius: 4,
++  },
++});
+diff --git a/artifacts/skillbuddy/components/InlineLoader.tsx b/artifacts/skillbuddy/components/InlineLoader.tsx
+new file mode 100644
+index 0000000..9ef633a
+--- /dev/null
++++ b/artifacts/skillbuddy/components/InlineLoader.tsx
+@@ -0,0 +1,52 @@
++import React, { useEffect } from 'react';
++import { StyleSheet, View } from 'react-native';
++import Animated, {
++  useSharedValue,
++  useAnimatedStyle,
++  withRepeat,
++  withTiming,
++  Easing,
++} from 'react-native-reanimated';
++import LogoImage from '@/components/LogoImage';
++import { useTheme } from '@/context/ThemeContext';
++
++interface Props {
++  size?: number;
++  variant?: 'white' | 'green' | 'light';
++}
++
++/**
++ * Small inline branded loader — a smooth rotation loop of the logo mark,
++ * meant to replace a button's label while a quick async action completes.
++ * Pairs with BrandedLoader (full-screen) for the two-tier loading pattern.
++ */
++export default function InlineLoader({ size = 18, variant }: Props) {
++  const { theme } = useTheme();
++  const rotation = useSharedValue(0);
++
++  useEffect(() => {
++    rotation.value = withRepeat(
++      withTiming(360, { duration: 1100, easing: Easing.linear }),
++      -1,
++      false
++    );
++  }, [rotation]);
++
++  const animStyle = useAnimatedStyle(() => ({
++    transform: [{ rotate: `${rotation.value}deg` }],
++  }));
++
++  const resolvedVariant = variant ?? (theme === 'dark' ? 'light' : 'white');
++
++  return (
++    <View style={styles.wrap}>
++      <Animated.View style={animStyle}>
++        <LogoImage variant={resolvedVariant} height={size} />
++      </Animated.View>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  wrap: { alignItems: 'center', justifyContent: 'center' },
++});
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index e508cb0..81464e7 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -8,8 +8,21 @@ export interface MockUser {
+   firstName: string;
+   lastName: string;
+   email: string;
++  phone: string;
++  username: string;
++  personalCode: string;
++  address: string;
+   creditPoints: number;
+   pastBookingCategoryIds: string[];
++  jobsDone: number;
++  activeJobs: number;
++  duePayments: number;
++  faceVerification: 'verified' | 'pending' | 'rejected';
++  residencePermit: 'verified' | 'pending' | 'rejected';
++  primarySkill: string;
++  secondarySkill: string;
++  maskedCard: string;
++  iban: string;
+ }
+ 
+ export const CURRENT_USER: MockUser = {
+@@ -18,10 +31,53 @@ export const CURRENT_USER: MockUser = {
+   firstName: 'Alex',
+   lastName: 'Johnson',
+   email: 'alex.johnson@example.com',
++  phone: '+371 2xxx xx45',
++  username: 'alex.johnson',
++  personalCode: 'SB-2024-88213',
++  address: 'Riga, Latvia',
+   creditPoints: 340,
+   pastBookingCategoryIds: ['1', '6', '4'], // Cleaning, Laundry, Shifting — derived from MOCK_BOOKINGS
++  jobsDone: 24,
++  activeJobs: 2,
++  duePayments: 45,
++  faceVerification: 'verified',
++  residencePermit: 'pending',
++  primarySkill: 'Home Cleaning',
++  secondarySkill: 'Laundry & Ironing',
++  maskedCard: '•••• •••• •••• 4242',
++  iban: 'LV•• XXXX •••• •••• 7821',
+ };
+ 
++export interface CreditTransaction {
++  id: string;
++  date: string;
++  description: string;
++  change: number;
++  balanceAfter: number;
++}
++
++export const CREDIT_HISTORY: CreditTransaction[] = [
++  { id: 'ct1', date: 'Jan 18, 2026', description: 'Earned — Deep House Cleaning booking', change: 18, balanceAfter: 340 },
++  { id: 'ct2', date: 'Jan 12, 2026', description: 'Redeemed — €5 off next booking', change: -50, balanceAfter: 322 },
++  { id: 'ct3', date: 'Jan 5, 2026', description: 'Earned — Floor Cleaning booking', change: 12, balanceAfter: 372 },
++  { id: 'ct4', date: 'Dec 28, 2025', description: 'Earned — Referral bonus', change: 100, balanceAfter: 360 },
++  { id: 'ct5', date: 'Dec 15, 2025', description: 'Earned — Cloth Ironing booking', change: 6, balanceAfter: 260 },
++];
++
++export interface JobHistoryEntry {
++  id: string;
++  clientName: string;
++  date: string;
++  category: string;
++  ratingGiven: number;
++}
++
++export const PROVIDER_JOB_HISTORY: JobHistoryEntry[] = [
++  { id: 'jh1', clientName: 'Martin Luther', date: 'Jan 15, 2026', category: 'Home Cleaning', ratingGiven: 5 },
++  { id: 'jh2', clientName: 'Sarah Connor', date: 'Jan 9, 2026', category: 'Laundry', ratingGiven: 4 },
++  { id: 'jh3', clientName: 'Johan Smith', date: 'Dec 30, 2025', category: 'Home Cleaning', ratingGiven: 5 },
++];
++
+ // ─── Categories ───────────────────────────────────────────────────────────────
+ export const CATEGORIES: Category[] = [
+   { id: '1',  name: 'Cleaning',        iconLib: 'MaterialCommunityIcons', iconName: 'broom',                   color: '#3A9E8F' },
+-- 
+2.43.0
+

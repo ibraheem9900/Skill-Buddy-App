@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
 import { createTicket } from '@/data/ticketStore';
@@ -11,7 +12,7 @@ import BackButton from '@/components/BackButton';
 
 type Path = 'choose' | 'approve' | 'deny' | 'dispute';
 
-const DISPUTE_REASONS = ['Incomplete work', 'Different from description', 'Damage caused', 'No-show', 'Other'];
+const DISPUTE_REASON_KEYS = ['review_dispute_1', 'review_dispute_2', 'review_dispute_3', 'review_dispute_4', 'review_dispute_5'];
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
@@ -22,6 +23,7 @@ export default function ReviewScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
@@ -33,7 +35,7 @@ export default function ReviewScreen() {
   if (!job) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
+        <Text style={{ color: c.text, padding: 20 }}>{t('review_not_found')}</Text>
       </View>
     );
   }
@@ -49,23 +51,23 @@ export default function ReviewScreen() {
       provider.rating = Math.min(5, round1((provider.rating ?? 0) + 0.1));
     }
     router.replace(`/(tabs)/jobs` as any);
-    showAlert({ title: 'Review submitted', message: 'Thanks! Payment has been finalized with your Pilot.', icon: 'check-circle' });
+    showAlert({ title: t('review_submitted_title'), message: t('review_submitted_msg'), icon: 'check-circle' });
   };
 
   const deny = () => {
     if (!comment.trim()) {
-      showAlert({ title: 'Feedback required', message: 'Please describe what needs to be fixed.', icon: 'alert-circle' });
+      showAlert({ title: t('review_feedback_title'), message: t('review_feedback_msg'), icon: 'alert-circle' });
       return;
     }
     job.denialCount = denialCount + 1;
     job.status = 'in_progress';
     router.replace(`/job/${job.id}/track` as any);
-    showAlert({ title: 'Sent back to provider', message: 'Your feedback has been sent to the Pilot for revision.', icon: 'info' });
+    showAlert({ title: t('review_sent_title'), message: t('review_sent_msg'), icon: 'info' });
   };
 
   const dispute = () => {
     if (!disputeReason || !comment.trim()) {
-      showAlert({ title: 'More info needed', message: 'Select a reason and describe the issue.', icon: 'alert-circle' });
+      showAlert({ title: t('review_more_title'), message: t('review_more_msg'), icon: 'alert-circle' });
       return;
     }
     job.status = 'disputed';
@@ -81,8 +83,8 @@ export default function ReviewScreen() {
     });
     router.replace('/(tabs)/jobs' as any);
     showAlert({
-      title: 'Support ticket created',
-      message: `Ticket ${ticket.id} has been created. Our support team will review this dispute and get back to you.`,
+      title: t('review_ticket_title'),
+      message: t('review_ticket_msg', { id: ticket.id }),
       icon: 'shield',
     });
   };
@@ -91,19 +93,19 @@ export default function ReviewScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Review Job</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('review_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
         <Text style={[styles.jobTitle, { color: c.text }]}>{job.title}</Text>
-        <Text style={[styles.jobSub, { color: c.mutedForeground }]}>Your Pilot marked this job as done.</Text>
+        <Text style={[styles.jobSub, { color: c.mutedForeground }]}>{t('review_sub')}</Text>
 
         {path === 'choose' && (
           <View style={{ marginTop: 24, gap: 12 }}>
             <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.success }]} onPress={() => setPath('approve')}>
               <Feather name="thumbs-up" size={18} color="#FFF" />
-              <Text style={styles.choiceText}>Approve</Text>
+              <Text style={styles.choiceText}>{t('review_approve')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.choiceBtn, { backgroundColor: canDenyAgain ? c.warning : c.muted }]}
@@ -112,16 +114,16 @@ export default function ReviewScreen() {
             >
               <Feather name="thumbs-down" size={18} color={canDenyAgain ? '#FFF' : c.mutedForeground} />
               <Text style={[styles.choiceText, { color: canDenyAgain ? '#FFF' : c.mutedForeground }]}>
-                {canDenyAgain ? `Deny (${2 - denialCount} left)` : 'Deny — limit reached'}
+                {canDenyAgain ? t('review_deny_left', { n: 2 - denialCount }) : t('review_deny_limit')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.choiceBtn, { backgroundColor: c.destructive }]} onPress={() => setPath('dispute')}>
               <Feather name="flag" size={18} color="#FFF" />
-              <Text style={styles.choiceText}>Dispute</Text>
+              <Text style={styles.choiceText}>{t('review_dispute')}</Text>
             </TouchableOpacity>
             {!canDenyAgain && (
               <Text style={[styles.limitNote, { color: c.mutedForeground }]}>
-                You've reached the maximum of 2 denials for this job — only Approve or Dispute are available now.
+                {t('review_limit_note')}
               </Text>
             )}
           </View>
@@ -129,7 +131,7 @@ export default function ReviewScreen() {
 
         {path === 'approve' && (
           <View style={{ marginTop: 20 }}>
-            <Text style={[styles.sectionLabel, { color: c.text }]}>Rate your Pilot</Text>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>{t('review_rate')}</Text>
             <View style={styles.starsRow}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <TouchableOpacity key={n} onPress={() => setRating(n)}>
@@ -137,62 +139,65 @@ export default function ReviewScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>Feedback (optional)</Text>
+            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>{t('review_feedback')}</Text>
             <TextInput
               style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
               value={comment}
               onChangeText={setComment}
-              placeholder="How did it go?"
+              placeholder={t('review_feedback_placeholder')}
               placeholderTextColor={c.mutedForeground}
               multiline
             />
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.success }]} onPress={approve}>
-              <Text style={styles.submitText}>Submit & Approve</Text>
+              <Text style={styles.submitText}>{t('review_submit_approve')}</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {path === 'deny' && (
           <View style={{ marginTop: 20 }}>
-            <Text style={[styles.sectionLabel, { color: c.text }]}>What needs to be fixed?</Text>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>{t('review_fix')}</Text>
             <TextInput
               style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
               value={comment}
               onChangeText={setComment}
-              placeholder="Describe what's missing or wrong (required)"
+              placeholder={t('review_fix_placeholder')}
               placeholderTextColor={c.mutedForeground}
               multiline
             />
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.warning }]} onPress={deny}>
-              <Text style={styles.submitText}>Send Back to Pilot</Text>
+              <Text style={styles.submitText}>{t('review_send_back')}</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {path === 'dispute' && (
           <View style={{ marginTop: 20 }}>
-            <Text style={[styles.sectionLabel, { color: c.text }]}>Reason</Text>
-            {DISPUTE_REASONS.map((r) => (
-              <TouchableOpacity
-                key={r}
-                style={[styles.reasonRow, { borderColor: disputeReason === r ? c.destructive : c.border }]}
-                onPress={() => setDisputeReason(r)}
-              >
-                <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
-                {disputeReason === r && <Feather name="check-circle" size={16} color={c.destructive} />}
-              </TouchableOpacity>
-            ))}
-            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 14 }]}>Describe the issue</Text>
+            <Text style={[styles.sectionLabel, { color: c.text }]}>{t('review_reason')}</Text>
+            {DISPUTE_REASON_KEYS.map((key) => {
+              const r = t(key as any);
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.reasonRow, { borderColor: disputeReason === r ? c.destructive : c.border }]}
+                  onPress={() => setDisputeReason(r)}
+                >
+                  <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
+                  {disputeReason === r && <Feather name="check-circle" size={16} color={c.destructive} />}
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={[styles.sectionLabel, { color: c.text, marginTop: 14 }]}>{t('review_describe_issue')}</Text>
             <TextInput
               style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
               value={comment}
               onChangeText={setComment}
-              placeholder="Required"
+              placeholder={t('review_required')}
               placeholderTextColor={c.mutedForeground}
               multiline
             />
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.destructive }]} onPress={dispute}>
-              <Text style={styles.submitText}>Submit Dispute</Text>
+              <Text style={styles.submitText}>{t('review_submit_dispute')}</Text>
             </TouchableOpacity>
           </View>
         )}

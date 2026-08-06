@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { BID_PROVIDERS, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
@@ -35,6 +36,7 @@ export default function BiddingDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
@@ -85,7 +87,7 @@ export default function BiddingDashboardScreen() {
   if (!job) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <EmptyState icon="alert-circle" title="Job not found" />
+        <EmptyState icon="alert-circle" title={t('job_not_found')} />
       </View>
     );
   }
@@ -107,13 +109,13 @@ export default function BiddingDashboardScreen() {
 
   const cancelJob = () => {
     showAlert({
-      title: 'Cancel Job',
-      message: 'Are you sure? No cancellation fee applies at this stage.',
+      title: t('job_cancel_title'),
+      message: t('job_cancel_msg'),
       icon: 'alert-triangle',
       buttons: [
-        { text: 'Keep Job', style: 'cancel' },
+        { text: t('job_keep'), style: 'cancel' },
         {
-          text: 'Cancel Job',
+          text: t('job_cancel_title'),
           style: 'destructive',
           onPress: () => {
             job.status = 'cancelled';
@@ -126,13 +128,13 @@ export default function BiddingDashboardScreen() {
 
   const acceptBid = (bid: Bid) => {
     showAlert({
-      title: 'Accept this bid?',
-      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}\n${job.date}, ${job.time}\n${job.title}`,
+      title: t('job_accept_title'),
+      message: `${bid.provider.name} — €${bid.price}, ${t('bidcard_eta', { eta: bid.eta })}\n${job.date}, ${job.time}\n${job.title}`,
       icon: 'check-circle',
       buttons: [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('action_cancel'), style: 'cancel' },
         {
-          text: 'Accept & Pay',
+          text: t('job_accept_btn'),
           onPress: () => {
             job.status = 'pending_payment';
             job.assignedProviderId = bid.provider.id;
@@ -167,24 +169,24 @@ export default function BiddingDashboardScreen() {
             {!expired && (
               <TouchableOpacity style={[styles.restartBtn, { borderColor: c.border }]} onPress={restartTimer}>
                 <Feather name="refresh-cw" size={14} color={c.text} />
-                <Text style={[styles.restartText, { color: c.text }]}>Restart Timer</Text>
+                <Text style={[styles.restartText, { color: c.text }]}>{t('job_restart_timer')}</Text>
               </TouchableOpacity>
             )}
 
             {expired && bids.length === 0 ? (
               <View style={[styles.noBidsCard, { backgroundColor: c.card, borderColor: c.border }]}>
                 <Feather name="inbox" size={32} color={c.mutedForeground} />
-                <Text style={[styles.noBidsTitle, { color: c.text }]}>No Bids Found</Text>
+                <Text style={[styles.noBidsTitle, { color: c.text }]}>{t('job_no_bids_title')}</Text>
                 <Text style={[styles.noBidsSub, { color: c.mutedForeground }]}>
-                  No SkillBuddy Pilots bid within the window. Try restarting the timer{job.urgency === 'urgent' ? ', or convert this to a Regular request for a longer window.' : '.'}
+                  {t('job_no_bids_sub')}{job.urgency === 'urgent' ? t('job_no_bids_sub_urgent') : t('job_no_bids_sub_period')}
                 </Text>
                 <View style={styles.noBidsActions}>
                   <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.primary }]} onPress={restartTimer}>
-                    <Text style={styles.restartFullText}>Restart Timer</Text>
+                    <Text style={styles.restartFullText}>{t('job_restart_timer')}</Text>
                   </TouchableOpacity>
                   {job.urgency === 'urgent' && (
                     <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.muted }]} onPress={convertToRegular}>
-                      <Text style={[styles.restartFullText, { color: c.text }]}>Convert to Regular</Text>
+                      <Text style={[styles.restartFullText, { color: c.text }]}>{t('job_convert_regular')}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -194,9 +196,9 @@ export default function BiddingDashboardScreen() {
                 {top3.length > 0 && (
                   <>
                     <View style={styles.sectionHeaderRow}>
-                      <Text style={[styles.sectionTitle, { color: c.text }]}>Recommended SkillBuddies</Text>
+                      <Text style={[styles.sectionTitle, { color: c.text }]}>{t('job_recommended')}</Text>
                       <TouchableOpacity onPress={() => setShowAll(true)}>
-                        <Text style={[styles.viewAll, { color: c.primary }]}>View All Offers ({bids.length})</Text>
+                        <Text style={[styles.viewAll, { color: c.primary }]}>{t('job_view_all_offers', { n: bids.length })}</Text>
                       </TouchableOpacity>
                     </View>
                     {top3.map((bid, i) => (
@@ -216,22 +218,22 @@ export default function BiddingDashboardScreen() {
                 {showAll && (
                   <View style={{ marginTop: 8 }}>
                     <View style={styles.sectionHeaderRow}>
-                      <Text style={[styles.sectionTitle, { color: c.text }]}>All Offers</Text>
+                      <Text style={[styles.sectionTitle, { color: c.text }]}>{t('job_all_offers')}</Text>
                     </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                       {([
-                        ['recommended', 'Best Match'],
-                        ['lowPrice', 'Lowest Price'],
-                        ['highRating', 'Highest Rated'],
-                        ['distance', 'Nearest'],
-                        ['badge', 'Badge Tier'],
-                      ] as [SortMode, string][]).map(([mode, label]) => (
+                        ['recommended', 'job_sort_best'],
+                        ['lowPrice', 'job_sort_lowest'],
+                        ['highRating', 'job_sort_highest'],
+                        ['distance', 'job_sort_nearest'],
+                        ['badge', 'job_sort_badge'],
+                      ] as [SortMode, string][]).map(([mode, labelKey]) => (
                         <TouchableOpacity
                           key={mode}
                           style={[styles.sortChip, { backgroundColor: sortMode === mode ? c.primary : c.muted, marginRight: 8 }]}
                           onPress={() => setSortMode(mode)}
                         >
-                          <Text style={[styles.sortChipText, { color: sortMode === mode ? '#FFF' : c.text }]}>{label}</Text>
+                          <Text style={[styles.sortChipText, { color: sortMode === mode ? '#FFF' : c.text }]}>{t(labelKey as any)}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
@@ -255,13 +257,13 @@ export default function BiddingDashboardScreen() {
           <View style={[styles.statusCard, { backgroundColor: c.primaryLight }]}>
             <Feather name="check-circle" size={28} color={c.primary} />
             <Text style={[styles.statusText, { color: c.primary }]}>
-              {job.status === 'task_assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
+              {job.status === 'task_assigned' ? t('job_status_assigned') : job.status === 'cancelled' ? t('job_status_cancelled') : t('job_status_progress')}
             </Text>
           </View>
         )}
 
         <TouchableOpacity style={[styles.cancelBtn, { borderColor: c.border }]} onPress={cancelJob}>
-          <Text style={[styles.cancelText, { color: c.destructive }]}>Cancel Job</Text>
+          <Text style={[styles.cancelText, { color: c.destructive }]}>{t('job_cancel')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

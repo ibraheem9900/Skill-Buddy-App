@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
@@ -10,6 +11,7 @@ import BackButton from '@/components/BackButton';
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const { activeRole } = useRole();
   const isProvider = activeRole === 'PROVIDER';
 
@@ -17,42 +19,42 @@ export default function WalletScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>{isProvider ? 'Wallet & Earnings' : 'Wallet & Payments'}</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{isProvider ? t('wallet_earnings') : t('wallet_payments')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={[styles.summaryCard, { backgroundColor: c.primary }]}>
-          <Text style={styles.summaryLabel}>{isProvider ? 'Total Earned' : 'Total Spent'}</Text>
+          <Text style={styles.summaryLabel}>{isProvider ? t('wallet_total_earned') : t('wallet_total_spent')}</Text>
           <Text style={styles.summaryValue}>€{isProvider ? '2,140' : '860'}</Text>
           <View style={styles.summaryRow}>
-            <Text style={styles.summarySub}>{isProvider ? 'Pending payout' : 'This month'}</Text>
+            <Text style={styles.summarySub}>{isProvider ? t('wallet_pending_payout') : t('wallet_this_month')}</Text>
             <Text style={styles.summarySubValue}>€{isProvider ? '180' : '210'}</Text>
           </View>
         </View>
 
-        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Breakdown</Text>
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('wallet_breakdown')}</Text>
         <View style={[styles.breakdownCard, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={styles.breakdownRow}>
             <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>
-              {isProvider ? 'Platform fee (10%)' : 'Platform fee'}
+              {isProvider ? t('wallet_platform_fee_pct') : t('wallet_platform_fee')}
             </Text>
             <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '214' : '38'}</Text>
           </View>
           <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
-            <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>Taxes</Text>
+            <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>{t('wallet_taxes')}</Text>
             <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '96' : '—'}</Text>
           </View>
           <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
             <Text style={[styles.breakdownLabel, { color: c.mutedForeground }]}>
-              {isProvider ? 'Pending payout' : 'Payment dues'}
+              {isProvider ? t('wallet_pending_payout') : t('wallet_payment_dues')}
             </Text>
             <Text style={[styles.breakdownValue, { color: c.text }]}>€{isProvider ? '180' : CURRENT_USER.duePayments}</Text>
           </View>
         </View>
 
         <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>
-          {isProvider ? 'Payout Details' : 'Payment Method'}
+          {isProvider ? t('wallet_payout_details') : t('wallet_payment_method')}
         </Text>
         <View style={[styles.cardRow, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={[styles.cardIcon, { backgroundColor: c.accent }]}>
@@ -63,7 +65,7 @@ export default function WalletScreen() {
               {isProvider ? CURRENT_USER.iban : CURRENT_USER.maskedCard}
             </Text>
             <Text style={[styles.cardSub, { color: c.mutedForeground }]}>
-              {isProvider ? 'Payout account' : 'Default payment method'}
+              {isProvider ? t('wallet_payout_account') : t('wallet_default_payment')}
             </Text>
           </View>
           <Feather name="chevron-right" size={18} color={c.border} />

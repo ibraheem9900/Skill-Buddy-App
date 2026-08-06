@@ -32,7 +32,7 @@ export default function ServicesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, tCat } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -77,8 +77,8 @@ export default function ServicesScreen() {
 
   const activeCategoryName =
     selectedCatId === ALL_ID
-      ? 'All Services'
-      : (CATEGORIES.find((cat) => cat.id === selectedCatId)?.name ?? 'Services');
+      ? t('services_all_services')
+      : (tCat(CATEGORIES.find((cat) => cat.id === selectedCatId)?.id ?? '') || t('services_title'));
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -135,9 +135,9 @@ export default function ServicesScreen() {
         {/* ── Categories row ────────────────────────────────────────────────── */}
         <View style={styles.catSection}>
           <View style={styles.catHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Categories</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('services_categories')}</Text>
             <TouchableOpacity onPress={() => router.push('/categories')}>
-              <Text style={[styles.seeAll, { color: c.primary }]}>See all</Text>
+              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -165,7 +165,7 @@ export default function ServicesScreen() {
                 color={selectedCatId === ALL_ID ? '#FFF' : c.text}
               />
               <Text style={[styles.catChipText, { color: selectedCatId === ALL_ID ? '#FFF' : c.text }]}>
-                All
+                {t('services_all')}
               </Text>
             </TouchableOpacity>
 
@@ -190,7 +190,7 @@ export default function ServicesScreen() {
                     color={active ? '#FFF' : c.primary}
                   />
                   <Text style={[styles.catChipText, { color: active ? '#FFF' : c.text }]}>
-                    {cat.name}
+                    {tCat(cat.id)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -204,7 +204,7 @@ export default function ServicesScreen() {
             {activeCategoryName}
           </Text>
           <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
-            {filtered.length} available
+            {t('services_available_count', { n: filtered.length })}
           </Text>
         </View>
 
@@ -214,12 +214,12 @@ export default function ServicesScreen() {
             <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
               <Feather name="search" size={32} color={c.primary} />
             </View>
-            <Text style={[styles.emptyTitle, { color: c.text }]}>No Services Found</Text>
+            <Text style={[styles.emptyTitle, { color: c.text }]}>{t('services_no_results_title')}</Text>
             <Text style={[styles.emptySub, { color: c.mutedForeground }]}>
               {query.length > 0
-                ? `No services match "${query}".`
-                : 'No services in this category yet.'}{' '}
-              Try a custom quote.
+                ? t('services_no_results_query', { query })
+                : t('services_no_results_category')}{' '}
+              {t('services_try_custom_quote')}
             </Text>
             <TouchableOpacity
               style={[styles.emptyBtn, { backgroundColor: c.primary }]}

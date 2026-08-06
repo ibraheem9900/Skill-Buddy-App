@@ -1,0 +1,495 @@
+From 9907575f9b4609fc842ea9efaa7b31911bfe96b6 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Wed, 22 Jul 2026 10:07:23 +0000
+Subject: [PATCH] Custom animated tab icons + Service Detail scrolling parallax
+ hero
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bottom navigation — replaced generic icons with custom SVG icons that
+morph when a tab activates, per request:
+- Home: a door that swings open on its hinge
+- Services: a 2x2 grid whose blocks expand outward from center
+- Jobs: a briefcase whose lid flips open
+- Inbox: a chat bubble whose message dots pop in
+- Profile: a face whose eyes open from closed to a full circle
+All built with react-native-svg + reanimated (useAnimatedProps),
+wrapped in the existing AnimatedTabIcon for the scale-bounce + sliding
+active-pill background from the previous pass.
+
+Service Detail screen — fixed the sticky hero image bug and gave it a
+proper professional treatment:
+- Root cause: the hero image lived in a View OUTSIDE the ScrollView,
+  so it never moved while the body scrolled beneath it. Moved it
+  inside the ScrollView as the first item so it scrolls away
+  naturally with the rest of the content.
+- Added a subtle parallax + zoom-on-pull-down effect on the hero via
+  useAnimatedScrollHandler/useAnimatedStyle.
+- Added a floating header bar (back + bookmark, always accessible)
+  that's transparent over the image and fades to a solid surface
+  color with the service title once scrolled past the hero — matches
+  the polished collapsing-header pattern used by Airbnb/Uber-style
+  detail screens.
+
+Full typecheck (skillbuddy + libs): zero errors.
+
+Still outstanding from the live-testing round: an exhaustive header
+styling pass across every remaining screen, and verification of
+directional back/forward navigation animations app-wide.
+---
+ artifacts/skillbuddy/app/(tabs)/_layout.tsx   |  41 +----
+ artifacts/skillbuddy/app/service/[id].tsx     | 150 ++++++++++++-----
+ .../components/AnimatedTabIcons.tsx           | 157 ++++++++++++++++++
+ 3 files changed, 272 insertions(+), 76 deletions(-)
+ create mode 100644 artifacts/skillbuddy/components/AnimatedTabIcons.tsx
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/_layout.tsx b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+index dcef3d2..e0f9902 100644
+--- a/artifacts/skillbuddy/app/(tabs)/_layout.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+@@ -9,6 +9,7 @@ import { SymbolView } from 'expo-symbols';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useTheme } from '@/context/ThemeContext';
+ import AnimatedTabIcon from '@/components/AnimatedTabIcon';
++import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
+ 
+ function NativeTabLayout() {
+   return (
+@@ -79,13 +80,7 @@ function ClassicTabLayout() {
+           title: 'Home',
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+-              {(col) =>
+-                isIOS ? (
+-                  <SymbolView name="house" tintColor={col} size={22} />
+-                ) : (
+-                  <Feather name="home" size={22} color={col} />
+-                )
+-              }
++              {(col) => <DoorTabIcon focused={focused} color={col} size={22} />}
+             </AnimatedTabIcon>
+           ),
+         }}
+@@ -96,13 +91,7 @@ function ClassicTabLayout() {
+           title: 'Services',
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+-              {(col) =>
+-                isIOS ? (
+-                  <SymbolView name="square.grid.2x2" tintColor={col} size={22} />
+-                ) : (
+-                  <MaterialCommunityIcons name="view-grid-outline" size={22} color={col} />
+-                )
+-              }
++              {(col) => <GridBlocksTabIcon focused={focused} color={col} size={22} />}
+             </AnimatedTabIcon>
+           ),
+         }}
+@@ -113,13 +102,7 @@ function ClassicTabLayout() {
+           title: 'Jobs',
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+-              {(col) =>
+-                isIOS ? (
+-                  <SymbolView name="briefcase" tintColor={col} size={22} />
+-                ) : (
+-                  <Feather name="briefcase" size={22} color={col} />
+-                )
+-              }
++              {(col) => <BriefcaseTabIcon focused={focused} color={col} size={22} />}
+             </AnimatedTabIcon>
+           ),
+         }}
+@@ -130,13 +113,7 @@ function ClassicTabLayout() {
+           title: 'Inbox',
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+-              {(col) =>
+-                isIOS ? (
+-                  <SymbolView name="bubble.left" tintColor={col} size={22} />
+-                ) : (
+-                  <Feather name="message-circle" size={22} color={col} />
+-                )
+-              }
++              {(col) => <ChatPopTabIcon focused={focused} color={col} size={22} />}
+             </AnimatedTabIcon>
+           ),
+         }}
+@@ -147,13 +124,7 @@ function ClassicTabLayout() {
+           title: 'Profile',
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+-              {(col) =>
+-                isIOS ? (
+-                  <SymbolView name="person" tintColor={col} size={22} />
+-                ) : (
+-                  <Feather name="user" size={22} color={col} />
+-                )
+-              }
++              {(col) => <EyesTabIcon focused={focused} color={col} size={22} />}
+             </AnimatedTabIcon>
+           ),
+         }}
+diff --git a/artifacts/skillbuddy/app/service/[id].tsx b/artifacts/skillbuddy/app/service/[id].tsx
+index 5092f03..95cd88a 100644
+--- a/artifacts/skillbuddy/app/service/[id].tsx
++++ b/artifacts/skillbuddy/app/service/[id].tsx
+@@ -12,7 +12,14 @@ import { Image } from 'expo-image';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useLocalSearchParams, useRouter } from 'expo-router';
+ import { Feather, MaterialIcons } from '@expo/vector-icons';
+-import Animated, { FadeIn } from 'react-native-reanimated';
++import Animated, {
++  FadeIn,
++  useSharedValue,
++  useAnimatedScrollHandler,
++  useAnimatedStyle,
++  interpolate,
++  Extrapolation,
++} from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
+ import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
+ import { getServiceById } from '@/lib/serviceLookup';
+@@ -47,6 +54,32 @@ export default function ServiceDetailScreen() {
+   const images = [service.image, ...(service.images ?? [])].filter(Boolean).slice(0, 5);
+ 
+   const bookmarked = isBookmarked(service.id);
++  const scrollY = useSharedValue(0);
++
++  const scrollHandler = useAnimatedScrollHandler({
++    onScroll: (event) => {
++      scrollY.value = event.contentOffset.y;
++    },
++  });
++
++  // Hero image: subtle parallax (slower scroll-away) + zoom on pull-down bounce.
++  const heroStyle = useAnimatedStyle(() => {
++    const y = scrollY.value;
++    const scale = y < 0 ? 1 - y / 300 : 1;
++    const translateY = y < 0 ? 0 : -y * 0.4;
++    return { transform: [{ scale }, { translateY }] };
++  });
++
++  // Floating header bar: transparent-over-image at top, fades to a solid
++  // surface once the hero has scrolled mostly out of view.
++  const floatingHeaderStyle = useAnimatedStyle(() => ({
++    backgroundColor: c.surface,
++    opacity: interpolate(scrollY.value, [180, 260], [0, 1], Extrapolation.CLAMP),
++  }));
++
++  const floatingTitleStyle = useAnimatedStyle(() => ({
++    opacity: interpolate(scrollY.value, [200, 260], [0, 1], Extrapolation.CLAMP),
++  }));
+ 
+   if (screenLoading) {
+     return (
+@@ -58,52 +91,63 @@ export default function ServiceDetailScreen() {
+ 
+   return (
+     <View style={[styles.root, { backgroundColor: c.surface }]}>
+-      {/* Hero */}
+-      <View style={{ height: 300 }}>
+-        <Image source={{ uri: images[selectedImage] }} style={styles.heroImage} contentFit="cover" />
+-        {/* Back / Bookmark */}
+-        <View style={[styles.heroOverlay, { top: insets.top + 8 }]}>
+-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+-            <Feather name="arrow-left" size={20} color="#1A1A1A" />
+-          </TouchableOpacity>
+-          <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(service)}>
+-            <MaterialIcons
+-              name={bookmarked ? 'bookmark' : 'bookmark-border'}
+-              size={22}
+-              color={bookmarked ? c.primary : '#1A1A1A'}
+-            />
+-          </TouchableOpacity>
+-        </View>
+-        {/* Thumbnail strip */}
+-        {images.length > 1 && (
+-          <FlatList
+-            data={images}
+-            keyExtractor={(_, i) => String(i)}
+-            horizontal
+-            showsHorizontalScrollIndicator={false}
+-            style={styles.thumbStrip}
+-            contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
+-            renderItem={({ item, index }) => (
+-              <TouchableOpacity onPress={() => setSelectedImage(index)} activeOpacity={0.8}>
+-                <Image
+-                  source={{ uri: item }}
+-                  style={[
+-                    styles.thumb,
+-                    index === selectedImage && { borderWidth: 2, borderColor: c.primary },
+-                  ]}
+-                  contentFit="cover"
+-                />
+-              </TouchableOpacity>
+-            )}
++      {/* Floating header — transparent over the hero image, fades to a solid
++          surface with the title once the hero has scrolled past. Back and
++          bookmark stay accessible throughout. */}
++      <Animated.View style={[styles.floatingHeader, { top: 0, paddingTop: insets.top + 8 }, floatingHeaderStyle]} />
++      <View style={[styles.floatingHeaderRow, { top: insets.top + 8 }]}>
++        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
++          <Feather name="arrow-left" size={20} color="#1A1A1A" />
++        </TouchableOpacity>
++        <Animated.Text style={[styles.floatingTitle, { color: c.text }, floatingTitleStyle]} numberOfLines={1}>
++          {service.title}
++        </Animated.Text>
++        <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(service)}>
++          <MaterialIcons
++            name={bookmarked ? 'bookmark' : 'bookmark-border'}
++            size={22}
++            color={bookmarked ? c.primary : '#1A1A1A'}
+           />
+-        )}
++        </TouchableOpacity>
+       </View>
+ 
+-      <ScrollView
++      <Animated.ScrollView
+         style={styles.body}
+         showsVerticalScrollIndicator={false}
+         contentContainerStyle={{ paddingBottom: 120 }}
++        onScroll={scrollHandler}
++        scrollEventThrottle={16}
+       >
++        {/* Hero — scrolls away naturally with the rest of the content, with
++            a subtle parallax/zoom effect instead of staying stuck in place. */}
++        <View style={{ height: 300, overflow: 'hidden' }}>
++          <Animated.View style={heroStyle}>
++            <Image source={{ uri: images[selectedImage] }} style={styles.heroImage} contentFit="cover" />
++          </Animated.View>
++          {/* Thumbnail strip */}
++          {images.length > 1 && (
++            <FlatList
++              data={images}
++              keyExtractor={(_, i) => String(i)}
++              horizontal
++              showsHorizontalScrollIndicator={false}
++              style={styles.thumbStrip}
++              contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
++              renderItem={({ item, index }) => (
++                <TouchableOpacity onPress={() => setSelectedImage(index)} activeOpacity={0.8}>
++                  <Image
++                    source={{ uri: item }}
++                    style={[
++                      styles.thumb,
++                      index === selectedImage && { borderWidth: 2, borderColor: c.primary },
++                    ]}
++                    contentFit="cover"
++                  />
++                </TouchableOpacity>
++              )}
++            />
++          )}
++        </View>
+         {/* Title row */}
+         <View style={styles.titleRow}>
+           <View style={{ flex: 1 }}>
+@@ -224,7 +268,7 @@ export default function ServiceDetailScreen() {
+             ))}
+           </Animated.View>
+         )}
+-      </ScrollView>
++      </Animated.ScrollView>
+ 
+       {/* Bottom Bar */}
+       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, backgroundColor: c.surface, borderTopColor: c.border }]}>
+@@ -245,6 +289,30 @@ export default function ServiceDetailScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   heroImage: { width: '100%', height: 300 },
++  floatingHeader: {
++    position: 'absolute',
++    left: 0,
++    right: 0,
++    height: 90,
++    zIndex: 10,
++  },
++  floatingHeaderRow: {
++    position: 'absolute',
++    left: 0,
++    right: 0,
++    zIndex: 11,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++    paddingHorizontal: 16,
++  },
++  floatingTitle: {
++    flex: 1,
++    marginHorizontal: 10,
++    fontFamily: 'Inter_700Bold',
++    fontSize: 16,
++    textAlign: 'center',
++  },
+   heroOverlay: {
+     position: 'absolute',
+     left: 0,
+diff --git a/artifacts/skillbuddy/components/AnimatedTabIcons.tsx b/artifacts/skillbuddy/components/AnimatedTabIcons.tsx
+new file mode 100644
+index 0000000..cabdc15
+--- /dev/null
++++ b/artifacts/skillbuddy/components/AnimatedTabIcons.tsx
+@@ -0,0 +1,157 @@
++import React, { useEffect } from 'react';
++import Svg, { G, Rect, Circle, Ellipse, Path } from 'react-native-svg';
++import Animated, {
++  useSharedValue,
++  useAnimatedProps,
++  withTiming,
++  withSpring,
++  Easing,
++} from 'react-native-reanimated';
++
++const AnimatedG = Animated.createAnimatedComponent(G);
++const AnimatedRect = Animated.createAnimatedComponent(Rect);
++const AnimatedCircle = Animated.createAnimatedComponent(Circle);
++const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse);
++
++interface IconProps {
++  focused: boolean;
++  color: string;
++  size?: number;
++}
++
++/** Home — a door that swings open on its hinge when the tab is active. */
++export function DoorTabIcon({ focused, color, size = 22 }: IconProps) {
++  const progress = useSharedValue(focused ? 1 : 0);
++  useEffect(() => {
++    progress.value = withSpring(focused ? 1 : 0, { damping: 12, stiffness: 140 });
++  }, [focused]);
++
++  const doorProps = useAnimatedProps(() => ({
++    transform: [{ scaleX: 1 - progress.value * 0.72 }],
++  }));
++
++  return (
++    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
++      {/* frame */}
++      <Rect x={3} y={2.5} width={18} height={19} rx={1.5} stroke={color} strokeWidth={1.6} fill="none" opacity={0.55} />
++      {/* door panel — hinge at left edge (x=4.5) */}
++      <AnimatedG origin="4.5, 12" animatedProps={doorProps}>
++        <Rect x={4.5} y={3.5} width={14.5} height={17} rx={1} fill={color} opacity={0.9} />
++        <Circle cx={16.5} cy={12} r={0.9} fill="#FFF" opacity={0.9} />
++      </AnimatedG>
++    </Svg>
++  );
++}
++
++/** Services — a 2x2 grid whose blocks expand outward from the center when active. */
++export function GridBlocksTabIcon({ focused, color, size = 22 }: IconProps) {
++  const progress = useSharedValue(focused ? 1 : 0);
++  useEffect(() => {
++    progress.value = withSpring(focused ? 1 : 0, { damping: 11, stiffness: 160 });
++  }, [focused]);
++
++  const tl = useAnimatedProps(() => ({
++    transform: [{ translateX: -1.2 * progress.value }, { translateY: -1.2 * progress.value }],
++  }));
++  const tr = useAnimatedProps(() => ({
++    transform: [{ translateX: 1.2 * progress.value }, { translateY: -1.2 * progress.value }],
++  }));
++  const bl = useAnimatedProps(() => ({
++    transform: [{ translateX: -1.2 * progress.value }, { translateY: 1.2 * progress.value }],
++  }));
++  const br = useAnimatedProps(() => ({
++    transform: [{ translateX: 1.2 * progress.value }, { translateY: 1.2 * progress.value }],
++  }));
++
++  return (
++    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
++      <AnimatedRect animatedProps={tl} x={4} y={4} width={7} height={7} rx={1.8} fill={color} opacity={0.9} />
++      <AnimatedRect animatedProps={tr} x={13} y={4} width={7} height={7} rx={1.8} fill={color} opacity={0.9} />
++      <AnimatedRect animatedProps={bl} x={4} y={13} width={7} height={7} rx={1.8} fill={color} opacity={0.9} />
++      <AnimatedRect animatedProps={br} x={13} y={13} width={7} height={7} rx={1.8} fill={color} opacity={0.9} />
++    </Svg>
++  );
++}
++
++/** Jobs — a briefcase whose lid flips open on activation. */
++export function BriefcaseTabIcon({ focused, color, size = 22 }: IconProps) {
++  const progress = useSharedValue(focused ? 1 : 0);
++  useEffect(() => {
++    progress.value = withSpring(focused ? 1 : 0, { damping: 12, stiffness: 150 });
++  }, [focused]);
++
++  const lidProps = useAnimatedProps(() => ({
++    transform: [{ translateY: -progress.value * 2.2 }, { scaleY: 1 - progress.value * 0.35 }],
++  }));
++
++  return (
++    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
++      {/* handle */}
++      <Rect x={9} y={3} width={6} height={3.4} rx={1} stroke={color} strokeWidth={1.6} fill="none" opacity={0.8} />
++      {/* body */}
++      <Rect x={3} y={8.5} width={18} height={12} rx={2} fill={color} opacity={0.85} />
++      {/* lid — hinge at bottom edge of the flap */}
++      <AnimatedG origin="12, 10" animatedProps={lidProps}>
++        <Rect x={3} y={7.5} width={18} height={4.5} rx={1.5} fill={color} />
++      </AnimatedG>
++    </Svg>
++  );
++}
++
++/** Inbox — a chat bubble with a message dot that pops in when active. */
++export function ChatPopTabIcon({ focused, color, size = 22 }: IconProps) {
++  const progress = useSharedValue(focused ? 1 : 0);
++  useEffect(() => {
++    progress.value = withSpring(focused ? 1 : 0, { damping: 9, stiffness: 200 });
++  }, [focused]);
++
++  const dotProps = useAnimatedProps(() => ({
++    transform: [{ scale: progress.value }],
++    opacity: progress.value,
++  }));
++
++  return (
++    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
++      <Path
++        d="M4 5.5C4 4.12 5.12 3 6.5 3h11C18.88 3 20 4.12 20 5.5v8c0 1.38-1.12 2.5-2.5 2.5H9l-4 4v-4h-.5C3.12 16 2 14.88 2 13.5"
++        stroke={color}
++        strokeWidth={1.7}
++        fill="none"
++        opacity={0.85}
++      />
++      <AnimatedCircle animatedProps={dotProps} cx={8} cy={8.5} r={1.15} fill={color} />
++      <AnimatedCircle animatedProps={dotProps} cx={12} cy={8.5} r={1.15} fill={color} />
++      <AnimatedCircle animatedProps={dotProps} cx={16} cy={8.5} r={1.15} fill={color} />
++    </Svg>
++  );
++}
++
++/** Profile — a face whose eyes open (scale from a closed line to a full circle). */
++export function EyesTabIcon({ focused, color, size = 22 }: IconProps) {
++  const progress = useSharedValue(focused ? 1 : 0);
++  useEffect(() => {
++    progress.value = withTiming(focused ? 1 : 0, { duration: 260, easing: Easing.out(Easing.ease) });
++  }, [focused]);
++
++  const eyeProps = useAnimatedProps(() => ({
++    ry: 0.25 + progress.value * 1.05,
++  }));
++
++  return (
++    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
++      {/* head/shoulders (person silhouette) */}
++      <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={1.7} fill="none" opacity={0.9} />
++      <Path
++        d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7"
++        stroke={color}
++        strokeWidth={1.7}
++        strokeLinecap="round"
++        fill="none"
++        opacity={0.9}
++      />
++      {/* eyes — closed line that opens into a full ellipse when active */}
++      <AnimatedEllipse animatedProps={eyeProps} cx={10} cy={7.6} rx={1.1} fill={color} />
++      <AnimatedEllipse animatedProps={eyeProps} cx={14} cy={7.6} rx={1.1} fill={color} />
++    </Svg>
++  );
++}
+-- 
+2.43.0
+

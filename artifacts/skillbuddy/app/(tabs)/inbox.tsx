@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CHAT_THREADS } from '@/data/mockData';
 import EmptyState from '@/components/EmptyState';
 
@@ -12,12 +13,13 @@ export default function InboxScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <Text style={[styles.title, { color: c.text }]}>Messages</Text>
+        <Text style={[styles.title, { color: c.text }]}>{t('inbox_messages')}</Text>
         <TouchableOpacity style={[styles.headerBtn, { backgroundColor: c.primaryLight }]}>
           <Feather name="edit" size={18} color={c.primary} />
         </TouchableOpacity>
@@ -31,8 +33,8 @@ export default function InboxScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="message-circle"
-            title="No Conversations"
-            subtitle="Your chats with service providers will appear here."
+            title={t('inbox_no_conversations')}
+            subtitle={t('inbox_no_conversations_sub')}
           />
         }
         renderItem={({ item, index }) => (

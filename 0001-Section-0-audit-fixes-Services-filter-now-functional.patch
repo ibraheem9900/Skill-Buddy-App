@@ -1,0 +1,600 @@
+From bd714530cad211203d23ca7078cb2095d1289240 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Tue, 21 Jul 2026 22:09:40 +0000
+Subject: [PATCH] Section 0 audit fixes + Services filter now functional
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Section 0 — critical persisting issues:
+- White-screen flicker root cause: Stack navigator's contentStyle had no
+  explicit background, so the default white scene container showed
+  through during transitions. Fixed with contentStyle: { backgroundColor }
+  driven by the active theme.
+- Bottom nav had zero tap feedback. Added AnimatedTabIcon (scale-bounce
+  + sliding active-pill background via reanimated) wired into all 5 tabs.
+- BrandedLoader (the branded full-screen logo loader) was defined but
+  never actually used anywhere in the app — confirmed via search. Wired
+  it into Service Detail and the Bidding Dashboard as a brief loading
+  state on screen entry, alongside the existing skeleton loaders for
+  content lists (the two patterns now coexist as specified).
+- Verified: hardcoded 'Alex Johnson' greeting — none found anywhere in
+  the codebase (already fixed in a prior pass). Logo size/left-alignment
+  on Home — already correct (42px, left-aligned in a space-between row).
+
+Section 2 — Services: found and fixed a real functional gap
+- The filter bottom sheet's Apply button did nothing but close the sheet
+  () — selected filters were never
+  communicated back to the Services list.
+- Added FilterContext (shared state) so Apply now actually pushes
+  category/price-range/rating selections back to the Services tab,
+  which applies them live in its existing filter logic. Filter sheet
+  also now opens pre-populated with the currently active filters, and
+  the filter button shows an active-filter-count badge for visible
+  confirmation it registered.
+- Confirmed already correct, no changes needed: Services tab is a
+  single continuous screen (search+filter+categories+list), service
+  cards show '€price · pts' together, empty state has both 'Get a
+  Custom Quote' and 'Start Live Chat'.
+
+Full workspace typecheck: zero errors across all 9 projects.
+---
+ artifacts/skillbuddy/app/(tabs)/_layout.tsx   | 86 ++++++++++++-------
+ artifacts/skillbuddy/app/(tabs)/services.tsx  | 39 ++++++++-
+ artifacts/skillbuddy/app/_layout.tsx          | 14 ++-
+ artifacts/skillbuddy/app/filter.tsx           | 30 +++++--
+ artifacts/skillbuddy/app/job/[id].tsx         | 15 ++++
+ artifacts/skillbuddy/app/service/[id].tsx     | 17 +++-
+ .../skillbuddy/components/AnimatedTabIcon.tsx | 66 ++++++++++++++
+ .../skillbuddy/context/FilterContext.tsx      | 57 ++++++++++++
+ 8 files changed, 279 insertions(+), 45 deletions(-)
+ create mode 100644 artifacts/skillbuddy/components/AnimatedTabIcon.tsx
+ create mode 100644 artifacts/skillbuddy/context/FilterContext.tsx
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/_layout.tsx b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+index 2e74a2a..dcef3d2 100644
+--- a/artifacts/skillbuddy/app/(tabs)/_layout.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+@@ -8,6 +8,7 @@ import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
+ import { SymbolView } from 'expo-symbols';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useTheme } from '@/context/ThemeContext';
++import AnimatedTabIcon from '@/components/AnimatedTabIcon';
+ 
+ function NativeTabLayout() {
+   return (
+@@ -76,60 +77,85 @@ function ClassicTabLayout() {
+         name="index"
+         options={{
+           title: 'Home',
+-          tabBarIcon: ({ color }) =>
+-            isIOS ? (
+-              <SymbolView name="house" tintColor={color} size={22} />
+-            ) : (
+-              <Feather name="home" size={22} color={color} />
+-            ),
++          tabBarIcon: ({ color, focused }) => (
++            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
++              {(col) =>
++                isIOS ? (
++                  <SymbolView name="house" tintColor={col} size={22} />
++                ) : (
++                  <Feather name="home" size={22} color={col} />
++                )
++              }
++            </AnimatedTabIcon>
++          ),
+         }}
+       />
+       <Tabs.Screen
+         name="services"
+         options={{
+           title: 'Services',
+-          tabBarIcon: ({ color }) =>
+-            isIOS ? (
+-              <SymbolView name="square.grid.2x2" tintColor={color} size={22} />
+-            ) : (
+-              <MaterialCommunityIcons name="view-grid-outline" size={22} color={color} />
+-            ),
++          tabBarIcon: ({ color, focused }) => (
++            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
++              {(col) =>
++                isIOS ? (
++                  <SymbolView name="square.grid.2x2" tintColor={col} size={22} />
++                ) : (
++                  <MaterialCommunityIcons name="view-grid-outline" size={22} color={col} />
++                )
++              }
++            </AnimatedTabIcon>
++          ),
+         }}
+       />
+       <Tabs.Screen
+         name="jobs"
+         options={{
+           title: 'Jobs',
+-          tabBarIcon: ({ color }) =>
+-            isIOS ? (
+-              <SymbolView name="briefcase" tintColor={color} size={22} />
+-            ) : (
+-              <Feather name="briefcase" size={22} color={color} />
+-            ),
++          tabBarIcon: ({ color, focused }) => (
++            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
++              {(col) =>
++                isIOS ? (
++                  <SymbolView name="briefcase" tintColor={col} size={22} />
++                ) : (
++                  <Feather name="briefcase" size={22} color={col} />
++                )
++              }
++            </AnimatedTabIcon>
++          ),
+         }}
+       />
+       <Tabs.Screen
+         name="inbox"
+         options={{
+           title: 'Inbox',
+-          tabBarIcon: ({ color }) =>
+-            isIOS ? (
+-              <SymbolView name="bubble.left" tintColor={color} size={22} />
+-            ) : (
+-              <Feather name="message-circle" size={22} color={color} />
+-            ),
++          tabBarIcon: ({ color, focused }) => (
++            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
++              {(col) =>
++                isIOS ? (
++                  <SymbolView name="bubble.left" tintColor={col} size={22} />
++                ) : (
++                  <Feather name="message-circle" size={22} color={col} />
++                )
++              }
++            </AnimatedTabIcon>
++          ),
+         }}
+       />
+       <Tabs.Screen
+         name="profile"
+         options={{
+           title: 'Profile',
+-          tabBarIcon: ({ color }) =>
+-            isIOS ? (
+-              <SymbolView name="person" tintColor={color} size={22} />
+-            ) : (
+-              <Feather name="user" size={22} color={color} />
+-            ),
++          tabBarIcon: ({ color, focused }) => (
++            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
++              {(col) =>
++                isIOS ? (
++                  <SymbolView name="person" tintColor={col} size={22} />
++                ) : (
++                  <Feather name="user" size={22} color={col} />
++                )
++              }
++            </AnimatedTabIcon>
++          ),
+         }}
+       />
+     </Tabs>
+diff --git a/artifacts/skillbuddy/app/(tabs)/services.tsx b/artifacts/skillbuddy/app/(tabs)/services.tsx
+index 001b8f2..a33dd67 100644
+--- a/artifacts/skillbuddy/app/(tabs)/services.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/services.tsx
+@@ -4,7 +4,7 @@
+  * No navigation away from this screen; the bottom tab bar stays visible throughout.
+  * Tapping an individual service card goes to /service/[id].
+  */
+-import React, { useMemo, useRef, useState } from 'react';
++import React, { useEffect, useMemo, useRef, useState } from 'react';
+ import {
+   FlatList,
+   Keyboard,
+@@ -22,6 +22,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
+ import { CATEGORIES, SERVICES } from '@/data/mockData';
++import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
+ import ServiceCard from '@/components/ServiceCard';
+ 
+ const ALL_ID = '__all__';
+@@ -34,10 +35,19 @@ export default function ServicesScreen() {
+ 
+   const [query, setQuery] = useState('');
+   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
++  const { filters, activeCount } = useServiceFilters();
+ 
+   const TAB_H = Platform.OS === 'web' ? 84 : 60;
+ 
+-  // Live-filter services by selected category AND search query — updates on every keystroke
++  // The filter bottom sheet's category selection stays in sync with the
++  // on-screen category row — whichever was set most recently wins.
++  useEffect(() => {
++    if (filters.categoryId) setSelectedCatId(filters.categoryId);
++  }, [filters.categoryId]);
++
++  // Live-filter services by category, search query, AND the bottom-sheet
++  // filters (price range, minimum rating) — the Apply button now genuinely
++  // changes what's shown here instead of just closing the sheet.
+   const filtered = useMemo(() => {
+     const q = query.trim().toLowerCase();
+     return SERVICES.filter((s) => {
+@@ -47,9 +57,11 @@ export default function ServicesScreen() {
+         s.title.toLowerCase().includes(q) ||
+         s.category.toLowerCase().includes(q) ||
+         s.provider.name.toLowerCase().includes(q);
+-      return matchCat && matchQ;
++      const matchPrice = s.price >= filters.minPrice && s.price <= filters.maxPrice;
++      const matchRating = !filters.minRating || s.rating >= filters.minRating;
++      return matchCat && matchQ && matchPrice && matchRating;
+     });
+-  }, [query, selectedCatId]);
++  }, [query, selectedCatId, filters]);
+ 
+   const handleCategoryPress = (id: string) => {
+     setSelectedCatId((prev) => (prev === id ? ALL_ID : id));
+@@ -103,6 +115,11 @@ export default function ServicesScreen() {
+             activeOpacity={0.8}
+           >
+             <Feather name="sliders" size={16} color={c.primary} />
++            {activeCount > 0 && (
++              <View style={[styles.filterBadge, { backgroundColor: c.destructive, borderColor: c.surface }]}>
++                <Text style={styles.filterBadgeText}>{activeCount}</Text>
++              </View>
++            )}
+           </TouchableOpacity>
+         </View>
+       </View>
+@@ -289,7 +306,21 @@ const styles = StyleSheet.create({
+     borderRadius: 12,
+     alignItems: 'center',
+     justifyContent: 'center',
++    position: 'relative',
++  },
++  filterBadge: {
++    position: 'absolute',
++    top: -4,
++    right: -4,
++    minWidth: 16,
++    height: 16,
++    borderRadius: 8,
++    borderWidth: 1.5,
++    alignItems: 'center',
++    justifyContent: 'center',
++    paddingHorizontal: 3,
+   },
++  filterBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 9, color: '#FFF' },
+ 
+   // ── Category chips ──────────────────────────────────────────────────────────
+   catSection: { paddingTop: 20 },
+diff --git a/artifacts/skillbuddy/app/_layout.tsx b/artifacts/skillbuddy/app/_layout.tsx
+index d4f4739..bce0ff0 100644
+--- a/artifacts/skillbuddy/app/_layout.tsx
++++ b/artifacts/skillbuddy/app/_layout.tsx
+@@ -15,8 +15,9 @@ import { Stack, useRouter, useSegments } from 'expo-router';
+ import * as SplashScreen from 'expo-splash-screen';
+ import { AuthProvider } from '@/context/AuthContext';
+ import { BookmarkProvider } from '@/context/BookmarkContext';
+-import { ThemeProvider } from '@/context/ThemeContext';
++import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+ import { RoleProvider } from '@/context/RoleContext';
++import { FilterProvider } from '@/context/FilterContext';
+ 
+ SplashScreen.preventAutoHideAsync();
+ const queryClient = new QueryClient();
+@@ -36,10 +37,17 @@ function AuthGate() {
+ }
+ 
+ function RootLayoutNav() {
++  const { colors: c } = useTheme();
+   return (
+     <>
+       <AuthGate />
+-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
++      <Stack
++        screenOptions={{
++          headerShown: false,
++          animation: 'slide_from_right',
++          contentStyle: { backgroundColor: c.background },
++        }}
++      >
+         <Stack.Screen name="(tabs)" />
+         <Stack.Screen name="(auth)" />
+         <Stack.Screen
+@@ -108,6 +116,7 @@ export default function RootLayout() {
+           <QueryClientProvider client={queryClient}>
+             <AuthProvider>
+               <RoleProvider>
++              <FilterProvider>
+               <BookmarkProvider>
+                 <GestureHandlerRootView style={{ flex: 1 }}>
+                   <KeyboardProvider>
+@@ -115,6 +124,7 @@ export default function RootLayout() {
+                   </KeyboardProvider>
+                 </GestureHandlerRootView>
+               </BookmarkProvider>
++              </FilterProvider>
+               </RoleProvider>
+             </AuthProvider>
+           </QueryClientProvider>
+diff --git a/artifacts/skillbuddy/app/filter.tsx b/artifacts/skillbuddy/app/filter.tsx
+index ae80b65..62c59d7 100644
+--- a/artifacts/skillbuddy/app/filter.tsx
++++ b/artifacts/skillbuddy/app/filter.tsx
+@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
+ import { Feather, MaterialIcons } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
+ import { CATEGORIES } from '@/data/mockData';
++import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
+ 
+ const { height: SCREEN_H } = Dimensions.get('window');
+ const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
+@@ -47,11 +48,13 @@ export default function FilterScreen() {
+   const { colors: c } = useTheme();
+ 
+   // ── Filter state ──────────────────────────────────────────────────────────
+-  const [selectedCat, setSelectedCat] = useState('All');
+-  const [selectedRating, setSelectedRating] = useState<number | null>(null);
+-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+-  const [minPrice, setMinPrice] = useState(20);
+-  const [maxPrice, setMaxPrice] = useState(200);
++  const { filters, setFilters, resetFilters: resetContextFilters } = useServiceFilters();
++  const initialCatName = CATEGORIES.find((cat) => cat.id === filters.categoryId)?.name ?? 'All';
++  const [selectedCat, setSelectedCat] = useState(initialCatName);
++  const [selectedRating, setSelectedRating] = useState<number | null>(filters.minRating);
++  const [selectedDate, setSelectedDate] = useState<string | null>(filters.date);
++  const [minPrice, setMinPrice] = useState(filters.minPrice);
++  const [maxPrice, setMaxPrice] = useState(filters.maxPrice);
+ 
+   const catTabs = ['All', ...CATEGORIES.slice(0, 6).map((cat) => cat.name)];
+ 
+@@ -81,11 +84,22 @@ export default function FilterScreen() {
+     setSelectedCat('All');
+     setSelectedRating(null);
+     setSelectedDate(null);
+-    setMinPrice(20);
+-    setMaxPrice(200);
++    setMinPrice(DEFAULT_FILTERS.minPrice);
++    setMaxPrice(DEFAULT_FILTERS.maxPrice);
++    resetContextFilters();
+   };
+ 
+-  const applyFilters = () => dismiss();
++  const applyFilters = () => {
++    const categoryId = selectedCat === 'All' ? null : CATEGORIES.find((cat) => cat.name === selectedCat)?.id ?? null;
++    setFilters({
++      categoryId,
++      minPrice,
++      maxPrice,
++      minRating: selectedRating,
++      date: selectedDate,
++    });
++    dismiss();
++  };
+ 
+   return (
+     <View style={styles.root}>
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+index cd3b104..da94ada 100644
+--- a/artifacts/skillbuddy/app/job/[id].tsx
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -11,6 +11,7 @@ import { calculateProviderScore } from '@/lib/scoring';
+ import CountdownTimer from '@/components/CountdownTimer';
+ import BidCard from '@/components/BidCard';
+ import EmptyState from '@/components/EmptyState';
++import BrandedLoader from '@/components/BrandedLoader';
+ import type { Bid, BidProvider } from '@/types';
+ 
+ type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
+@@ -40,6 +41,12 @@ export default function BiddingDashboardScreen() {
+   const [showAll, setShowAll] = useState(false);
+   const [sortMode, setSortMode] = useState<SortMode>('recommended');
+   const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
++  const [screenLoading, setScreenLoading] = useState(true);
++
++  useEffect(() => {
++    const t = setTimeout(() => setScreenLoading(false), 400);
++    return () => clearTimeout(t);
++  }, []);
+ 
+   // Simulate live bids trickling in while the dashboard is open.
+   useEffect(() => {
+@@ -54,6 +61,14 @@ export default function BiddingDashboardScreen() {
+     return () => clearInterval(interval);
+   }, [job, expired]);
+ 
++  if (screenLoading) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <BrandedLoader size={44} />
++      </View>
++    );
++  }
++
+   if (!job) {
+     return (
+       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+diff --git a/artifacts/skillbuddy/app/service/[id].tsx b/artifacts/skillbuddy/app/service/[id].tsx
+index 62c15b5..5092f03 100644
+--- a/artifacts/skillbuddy/app/service/[id].tsx
++++ b/artifacts/skillbuddy/app/service/[id].tsx
+@@ -1,4 +1,4 @@
+-import React, { useState } from 'react';
++import React, { useEffect, useState } from 'react';
+ import {
+   Dimensions,
+   FlatList,
+@@ -17,6 +17,7 @@ import { useTheme } from '@/context/ThemeContext';
+ import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
+ import { getServiceById } from '@/lib/serviceLookup';
+ import RatingStars from '@/components/RatingStars';
++import BrandedLoader from '@/components/BrandedLoader';
+ import { useBookmarks } from '@/context/BookmarkContext';
+ 
+ const W = Dimensions.get('window').width;
+@@ -36,11 +37,25 @@ export default function ServiceDetailScreen() {
+ 
+   const [activeTab, setActiveTab] = useState<Tab>('About');
+   const [selectedImage, setSelectedImage] = useState(0);
++  const [screenLoading, setScreenLoading] = useState(true);
++
++  useEffect(() => {
++    const t = setTimeout(() => setScreenLoading(false), 400);
++    return () => clearTimeout(t);
++  }, []);
+ 
+   const images = [service.image, ...(service.images ?? [])].filter(Boolean).slice(0, 5);
+ 
+   const bookmarked = isBookmarked(service.id);
+ 
++  if (screenLoading) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.surface }]}>
++        <BrandedLoader size={44} />
++      </View>
++    );
++  }
++
+   return (
+     <View style={[styles.root, { backgroundColor: c.surface }]}>
+       {/* Hero */}
+diff --git a/artifacts/skillbuddy/components/AnimatedTabIcon.tsx b/artifacts/skillbuddy/components/AnimatedTabIcon.tsx
+new file mode 100644
+index 0000000..63e415b
+--- /dev/null
++++ b/artifacts/skillbuddy/components/AnimatedTabIcon.tsx
+@@ -0,0 +1,66 @@
++import React, { useEffect } from 'react';
++import { View } from 'react-native';
++import Animated, {
++  useAnimatedStyle,
++  useSharedValue,
++  withSpring,
++  withTiming,
++} from 'react-native-reanimated';
++
++interface Props {
++  focused: boolean;
++  color: string;
++  activeColor: string;
++  children: (color: string) => React.ReactNode;
++}
++
++/**
++ * Wraps a tab bar icon with a satisfying scale-bounce on activation and a
++ * smooth sliding "pill" background behind the active icon, so switching
++ * tabs feels tactile instead of an instant flat swap.
++ */
++export default function AnimatedTabIcon({ focused, color, activeColor, children }: Props) {
++  const scale = useSharedValue(focused ? 1 : 0.94);
++  const pillOpacity = useSharedValue(focused ? 1 : 0);
++  const pillScale = useSharedValue(focused ? 1 : 0.6);
++
++  useEffect(() => {
++    scale.value = withSpring(focused ? 1.08 : 0.94, { damping: 12, stiffness: 180 });
++    pillOpacity.value = withTiming(focused ? 1 : 0, { duration: 200 });
++    pillScale.value = withSpring(focused ? 1 : 0.6, { damping: 14, stiffness: 200 });
++    if (focused) {
++      // settle back to 1 after the bounce
++      const t = setTimeout(() => {
++        scale.value = withSpring(1, { damping: 12, stiffness: 180 });
++      }, 120);
++      return () => clearTimeout(t);
++    }
++  }, [focused]);
++
++  const iconStyle = useAnimatedStyle(() => ({
++    transform: [{ scale: scale.value }],
++  }));
++
++  const pillStyle = useAnimatedStyle(() => ({
++    opacity: pillOpacity.value,
++    transform: [{ scale: pillScale.value }],
++  }));
++
++  return (
++    <View style={{ width: 40, height: 32, alignItems: 'center', justifyContent: 'center' }}>
++      <Animated.View
++        style={[
++          {
++            position: 'absolute',
++            width: 40,
++            height: 28,
++            borderRadius: 14,
++            backgroundColor: `${activeColor}1A`,
++          },
++          pillStyle,
++        ]}
++      />
++      <Animated.View style={iconStyle}>{children(color)}</Animated.View>
++    </View>
++  );
++}
+diff --git a/artifacts/skillbuddy/context/FilterContext.tsx b/artifacts/skillbuddy/context/FilterContext.tsx
+new file mode 100644
+index 0000000..243e8a7
+--- /dev/null
++++ b/artifacts/skillbuddy/context/FilterContext.tsx
+@@ -0,0 +1,57 @@
++import React, { createContext, useContext, useState, useCallback } from 'react';
++
++export interface ServiceFilters {
++  categoryId: string | null; // null = All
++  minPrice: number;
++  maxPrice: number;
++  minRating: number | null;
++  date: string | null;
++}
++
++export const DEFAULT_FILTERS: ServiceFilters = {
++  categoryId: null,
++  minPrice: 20,
++  maxPrice: 200,
++  minRating: null,
++  date: null,
++};
++
++interface FilterContextType {
++  filters: ServiceFilters;
++  setFilters: (f: ServiceFilters) => void;
++  resetFilters: () => void;
++  activeCount: number;
++}
++
++const FilterContext = createContext<FilterContextType>({
++  filters: DEFAULT_FILTERS,
++  setFilters: () => {},
++  resetFilters: () => {},
++  activeCount: 0,
++});
++
++function countActive(f: ServiceFilters): number {
++  let n = 0;
++  if (f.categoryId) n++;
++  if (f.minPrice !== DEFAULT_FILTERS.minPrice || f.maxPrice !== DEFAULT_FILTERS.maxPrice) n++;
++  if (f.minRating) n++;
++  if (f.date) n++;
++  return n;
++}
++
++export function FilterProvider({ children }: { children: React.ReactNode }) {
++  const [filters, setFiltersState] = useState<ServiceFilters>(DEFAULT_FILTERS);
++
++  const setFilters = useCallback((f: ServiceFilters) => setFiltersState(f), []);
++  const resetFilters = useCallback(() => setFiltersState(DEFAULT_FILTERS), []);
++
++  return (
++    <FilterContext.Provider value={{ filters, setFilters, resetFilters, activeCount: countActive(filters) }}>
++      {children}
++    </FilterContext.Provider>
++  );
++}
++
++export function useServiceFilters() {
++  return useContext(FilterContext);
++}
+-- 
+2.43.0
+

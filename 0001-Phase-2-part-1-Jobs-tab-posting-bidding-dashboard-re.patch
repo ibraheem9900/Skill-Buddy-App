@@ -1,0 +1,1748 @@
+From 8abd42b942c2f4d119a47e93b64461b4b93cf2af Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Sun, 19 Jul 2026 22:01:24 +0000
+Subject: [PATCH] =?UTF-8?q?Phase=202=20(part=201):=20Jobs=20tab=20?=
+ =?UTF-8?q?=E2=80=94=20posting,=20bidding=20dashboard,=20recommendation=20?=
+ =?UTF-8?q?scoring?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Job & Bid types, RoleContext for Client/Pilot view switching
+- calculateProviderScore(): real weighted scoring engine (distance, rating,
+  badge tier, credibility, response time) per the spec's exact bands
+- Post a Job form: title, description w/ word counter, category picker,
+  date/time, hours stepper, photo upload (up to 5), live budget calc,
+  Urgent/Regular toggle with validation
+- Client Bidding Dashboard: live countdown, simulated live bids, Top 3
+  Recommended (real computed scores), View All Offers with sort/filter,
+  No Bids Found state w/ restart + convert-to-regular, Cancel Job,
+  pre-assignment chat
+- Provider Bidding view: Client Snapshot, job detail, Submit/Modify/Cancel
+  bid with +/- quick price adjustments, match-score preview
+
+Jobs tab list is role-aware: Client sees own posted jobs + Post button,
+Provider sees Available/My Bids/Active Jobs filtered feed.
+---
+ artifacts/skillbuddy/app/(tabs)/jobs.tsx      | 155 ++++++--
+ artifacts/skillbuddy/app/_layout.tsx          |   3 +
+ artifacts/skillbuddy/app/job/[id].tsx         | 265 +++++++++++++
+ artifacts/skillbuddy/app/job/[id]/bid.tsx     | 270 ++++++++++++++
+ artifacts/skillbuddy/app/job/post.tsx         | 347 ++++++++++++++++++
+ artifacts/skillbuddy/components/BidCard.tsx   |  85 +++++
+ .../skillbuddy/components/CountdownTimer.tsx  |  91 +++++
+ artifacts/skillbuddy/components/JobCard.tsx   |  76 ++++
+ artifacts/skillbuddy/context/RoleContext.tsx  |  53 +++
+ artifacts/skillbuddy/data/mockData.ts         | 105 +++++-
+ artifacts/skillbuddy/lib/scoring.ts           |  80 ++++
+ artifacts/skillbuddy/types/index.ts           |  41 +++
+ 12 files changed, 1533 insertions(+), 38 deletions(-)
+ create mode 100644 artifacts/skillbuddy/app/job/[id].tsx
+ create mode 100644 artifacts/skillbuddy/app/job/[id]/bid.tsx
+ create mode 100644 artifacts/skillbuddy/app/job/post.tsx
+ create mode 100644 artifacts/skillbuddy/components/BidCard.tsx
+ create mode 100644 artifacts/skillbuddy/components/CountdownTimer.tsx
+ create mode 100644 artifacts/skillbuddy/components/JobCard.tsx
+ create mode 100644 artifacts/skillbuddy/context/RoleContext.tsx
+ create mode 100644 artifacts/skillbuddy/lib/scoring.ts
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/jobs.tsx b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+index be4fd04..30f94df 100644
+--- a/artifacts/skillbuddy/app/(tabs)/jobs.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+@@ -1,32 +1,123 @@
+-import React from 'react';
+-import { Platform, StyleSheet, Text, View } from 'react-native';
++import React, { useMemo, useState } from 'react';
++import { FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+-import { MaterialCommunityIcons } from '@expo/vector-icons';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
++import { useRole } from '@/context/RoleContext';
++import { CURRENT_USER, MOCK_JOBS, MOCK_BIDS } from '@/data/mockData';
++import JobCard from '@/components/JobCard';
++import EmptyState from '@/components/EmptyState';
++import type { Job } from '@/types';
++
++type ProviderFilter = 'available' | 'myBids' | 'active';
+ 
+ export default function JobsScreen() {
+   const insets = useSafeAreaInsets();
++  const router = useRouter();
+   const { colors: c } = useTheme();
++  const { activeRole, toggleRole } = useRole();
+   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
++  const [providerFilter, setProviderFilter] = useState<ProviderFilter>('available');
++
++  const myJobs = useMemo(
++    () => MOCK_JOBS.filter((j) => j.clientId === CURRENT_USER.id).sort((a, b) => b.biddingEndsAt - a.biddingEndsAt),
++    []
++  );
++
++  const myBidJobIds = useMemo(() => new Set(MOCK_BIDS.map((b) => b.jobId)), []);
++
++  const providerJobs = useMemo(() => {
++    if (providerFilter === 'available') return MOCK_JOBS.filter((j) => j.status === 'bidding');
++    if (providerFilter === 'myBids') return MOCK_JOBS.filter((j) => myBidJobIds.has(j.id));
++    return MOCK_JOBS.filter((j) => j.status === 'assigned' || j.status === 'in_progress');
++  }, [providerFilter, myBidJobIds]);
++
++  const data: Job[] = activeRole === 'CLIENT' ? myJobs : providerJobs;
++
++  const openJob = (job: Job) => {
++    if (activeRole === 'CLIENT') {
++      router.push(`/job/${job.id}` as any);
++    } else {
++      router.push(`/job/${job.id}/bid` as any);
++    }
++  };
+ 
+   return (
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+-        <Text style={[styles.title, { color: c.text }]}>Jobs</Text>
+-      </View>
+-
+-      <View style={[styles.body, { paddingBottom: TAB_HEIGHT + insets.bottom + 20 }]}>
+-        <Animated.View entering={FadeInDown.delay(80).duration(380)} style={styles.centreWrap}>
+-          <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
+-            <MaterialCommunityIcons name="briefcase-outline" size={48} color={c.primary} />
+-          </View>
+-          <Text style={[styles.heading, { color: c.text }]}>Jobs — Coming Soon</Text>
+-          <Text style={[styles.sub, { color: c.mutedForeground }]}>
+-            Post jobs, receive bids from verified experts, and manage your work orders — all in one place. Launching in Phase 2.
++        <View>
++          <Text style={[styles.title, { color: c.text }]}>Jobs</Text>
++          <Text style={[styles.roleSub, { color: c.mutedForeground }]}>
++            {activeRole === 'CLIENT' ? 'Client view' : 'SkillBuddy Pilot view'}
+           </Text>
+-        </Animated.View>
++        </View>
++        <View style={styles.headerActions}>
++          <TouchableOpacity
++            style={[styles.roleToggle, { backgroundColor: c.muted }]}
++            onPress={toggleRole}
++          >
++            <Feather name="repeat" size={14} color={c.text} />
++            <Text style={[styles.roleToggleText, { color: c.text }]}>
++              {activeRole === 'CLIENT' ? 'Switch to Pilot' : 'Switch to Client'}
++            </Text>
++          </TouchableOpacity>
++          {activeRole === 'CLIENT' && (
++            <TouchableOpacity
++              style={[styles.postBtn, { backgroundColor: c.primary }]}
++              onPress={() => router.push('/job/post' as any)}
++            >
++              <Feather name="plus" size={16} color="#FFF" />
++              <Text style={styles.postBtnText}>Post a Job</Text>
++            </TouchableOpacity>
++          )}
++        </View>
+       </View>
++
++      {activeRole === 'PROVIDER' && (
++        <View style={[styles.filterRow, { borderBottomColor: c.border }]}>
++          {(['available', 'myBids', 'active'] as ProviderFilter[]).map((f) => (
++            <TouchableOpacity
++              key={f}
++              style={[
++                styles.filterChip,
++                { backgroundColor: providerFilter === f ? c.primary : c.muted },
++              ]}
++              onPress={() => setProviderFilter(f)}
++            >
++              <Text style={[styles.filterText, { color: providerFilter === f ? '#FFF' : c.mutedForeground }]}>
++                {f === 'available' ? 'Available' : f === 'myBids' ? 'My Bids' : 'Active Jobs'}
++              </Text>
++            </TouchableOpacity>
++          ))}
++        </View>
++      )}
++
++      <FlatList
++        data={data}
++        keyExtractor={(j) => j.id}
++        contentContainerStyle={{ padding: 20, paddingBottom: TAB_HEIGHT + insets.bottom + 20, flexGrow: 1 }}
++        showsVerticalScrollIndicator={false}
++        ListEmptyComponent={
++          <EmptyState
++            icon="briefcase"
++            title={activeRole === 'CLIENT' ? 'No Jobs Posted Yet' : 'No Jobs Here Yet'}
++            subtitle={
++              activeRole === 'CLIENT'
++                ? 'Post a job and get bids from verified SkillBuddy Pilots near you.'
++                : 'Check back soon — new jobs matching your skills will appear here.'
++            }
++            actionLabel={activeRole === 'CLIENT' ? 'Post a Job' : undefined}
++            onAction={activeRole === 'CLIENT' ? () => router.push('/job/post' as any) : undefined}
++          />
++        }
++        renderItem={({ item, index }) => (
++          <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
++            <JobCard job={item} onPress={() => openJob(item)} />
++          </Animated.View>
++        )}
++      />
+     </View>
+   );
+ }
+@@ -36,29 +127,19 @@ const styles = StyleSheet.create({
+   header: {
+     paddingHorizontal: 20,
+     paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
+     borderBottomWidth: 1,
+   },
+   title: { fontFamily: 'Inter_700Bold', fontSize: 22 },
+-  body: {
+-    flex: 1,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    paddingHorizontal: 32,
+-  },
+-  centreWrap: { alignItems: 'center', gap: 16 },
+-  iconCircle: {
+-    width: 96,
+-    height: 96,
+-    borderRadius: 48,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    marginBottom: 8,
+-  },
+-  heading: { fontFamily: 'Inter_700Bold', fontSize: 22, textAlign: 'center' },
+-  sub: {
+-    fontFamily: 'Inter_400Regular',
+-    fontSize: 14,
+-    textAlign: 'center',
+-    lineHeight: 22,
+-  },
++  roleSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
++  roleToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
++  roleToggleText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
++  postBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
++  postBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
++  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1 },
++  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
++  filterText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+ });
+diff --git a/artifacts/skillbuddy/app/_layout.tsx b/artifacts/skillbuddy/app/_layout.tsx
+index b56c693..d4f4739 100644
+--- a/artifacts/skillbuddy/app/_layout.tsx
++++ b/artifacts/skillbuddy/app/_layout.tsx
+@@ -16,6 +16,7 @@ import * as SplashScreen from 'expo-splash-screen';
+ import { AuthProvider } from '@/context/AuthContext';
+ import { BookmarkProvider } from '@/context/BookmarkContext';
+ import { ThemeProvider } from '@/context/ThemeContext';
++import { RoleProvider } from '@/context/RoleContext';
+ 
+ SplashScreen.preventAutoHideAsync();
+ const queryClient = new QueryClient();
+@@ -106,6 +107,7 @@ export default function RootLayout() {
+         <ThemeProvider>
+           <QueryClientProvider client={queryClient}>
+             <AuthProvider>
++              <RoleProvider>
+               <BookmarkProvider>
+                 <GestureHandlerRootView style={{ flex: 1 }}>
+                   <KeyboardProvider>
+@@ -113,6 +115,7 @@ export default function RootLayout() {
+                   </KeyboardProvider>
+                 </GestureHandlerRootView>
+               </BookmarkProvider>
++              </RoleProvider>
+             </AuthProvider>
+           </QueryClientProvider>
+         </ThemeProvider>
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+new file mode 100644
+index 0000000..0d34d58
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -0,0 +1,265 @@
++import React, { useEffect, useMemo, useRef, useState } from 'react';
++import { Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import Animated, { FadeInDown } from 'react-native-reanimated';
++import { useTheme } from '@/context/ThemeContext';
++import { BID_PROVIDERS, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
++import { calculateProviderScore } from '@/lib/scoring';
++import CountdownTimer from '@/components/CountdownTimer';
++import BidCard from '@/components/BidCard';
++import EmptyState from '@/components/EmptyState';
++import type { Bid, BidProvider } from '@/types';
++
++type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
++
++function makeMockBid(jobId: string, provider: BidProvider): Bid {
++  const basePrice = 40 + Math.round(Math.random() * 40);
++  return {
++    id: `bid_${jobId}_${provider.id}_${Date.now()}`,
++    jobId,
++    provider,
++    price: basePrice,
++    eta: `${15 + Math.round(Math.random() * 45)} min`,
++    createdAt: Date.now(),
++    score: calculateProviderScore(provider).total,
++  };
++}
++
++export default function BiddingDashboardScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const [bids, setBids] = useState<Bid[]>(() => MOCK_BIDS.filter((b) => b.jobId === id));
++  const [expired, setExpired] = useState(job ? job.biddingEndsAt <= Date.now() : false);
++  const [showAll, setShowAll] = useState(false);
++  const [sortMode, setSortMode] = useState<SortMode>('recommended');
++  const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
++
++  // Simulate live bids trickling in while the dashboard is open.
++  useEffect(() => {
++    if (!job || expired || job.status !== 'bidding') return;
++    const interval = setInterval(() => {
++      const remainingProviders = BID_PROVIDERS.filter((p) => !spawnedProviderIds.current.has(p.id));
++      if (remainingProviders.length === 0) return;
++      const next = remainingProviders[Math.floor(Math.random() * remainingProviders.length)];
++      spawnedProviderIds.current.add(next.id);
++      setBids((prev) => [...prev, makeMockBid(job.id, next)]);
++    }, 6000);
++    return () => clearInterval(interval);
++  }, [job, expired]);
++
++  if (!job) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <EmptyState icon="alert-circle" title="Job not found" />
++      </View>
++    );
++  }
++
++  const sortedByScore = [...bids].sort((a, b) => b.score - a.score);
++  const top3 = sortedByScore.slice(0, 3);
++
++  const sortedForAll = useMemo(() => {
++    const arr = [...bids];
++    switch (sortMode) {
++      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
++      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
++      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
++      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
++      default: return arr.sort((a, b) => b.score - a.score);
++    }
++  }, [bids, sortMode]);
++
++  const restartTimer = () => {
++    job.biddingEndsAt = Date.now() + job.biddingDurationMs;
++    setExpired(false);
++  };
++
++  const convertToRegular = () => {
++    job.urgency = 'regular';
++    job.biddingDurationMs = 3 * 60 * 60 * 1000;
++    job.biddingEndsAt = Date.now() + job.biddingDurationMs;
++    setExpired(false);
++  };
++
++  const cancelJob = () => {
++    Alert.alert('Cancel Job', 'Are you sure? No cancellation fee applies at this stage.', [
++      { text: 'Keep Job', style: 'cancel' },
++      {
++        text: 'Cancel Job',
++        style: 'destructive',
++        onPress: () => {
++          job.status = 'cancelled';
++          router.back();
++        },
++      },
++    ]);
++  };
++
++  const acceptBid = (bid: Bid) => {
++    Alert.alert('Accept this bid?', `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`, [
++      { text: 'Cancel', style: 'cancel' },
++      {
++        text: 'Accept',
++        onPress: () => {
++          job.status = 'assigned';
++          job.assignedProviderId = bid.provider.id;
++          router.back();
++        },
++      },
++    ]);
++  };
++
++  const openChat = (provider: BidProvider) => {
++    router.push(`/chat/${provider.id}` as any);
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
++          <Feather name="arrow-left" size={22} color={c.text} />
++        </TouchableOpacity>
++        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
++        <TouchableOpacity onPress={cancelJob} style={styles.backBtn}>
++          <Feather name="x-circle" size={20} color={c.destructive} />
++        </TouchableOpacity>
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        {job.status === 'bidding' && (
++          <>
++            <CountdownTimer endsAt={job.biddingEndsAt} urgency={job.urgency} onExpire={() => setExpired(true)} />
++
++            {!expired && (
++              <TouchableOpacity style={[styles.restartBtn, { borderColor: c.border }]} onPress={restartTimer}>
++                <Feather name="refresh-cw" size={14} color={c.text} />
++                <Text style={[styles.restartText, { color: c.text }]}>Restart Timer</Text>
++              </TouchableOpacity>
++            )}
++
++            {expired && bids.length === 0 ? (
++              <View style={[styles.noBidsCard, { backgroundColor: c.card, borderColor: c.border }]}>
++                <Feather name="inbox" size={32} color={c.mutedForeground} />
++                <Text style={[styles.noBidsTitle, { color: c.text }]}>No Bids Found</Text>
++                <Text style={[styles.noBidsSub, { color: c.mutedForeground }]}>
++                  No SkillBuddy Pilots bid within the window. Try restarting the timer{job.urgency === 'urgent' ? ', or convert this to a Regular request for a longer window.' : '.'}
++                </Text>
++                <View style={styles.noBidsActions}>
++                  <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.primary }]} onPress={restartTimer}>
++                    <Text style={styles.restartFullText}>Restart Timer</Text>
++                  </TouchableOpacity>
++                  {job.urgency === 'urgent' && (
++                    <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.muted }]} onPress={convertToRegular}>
++                      <Text style={[styles.restartFullText, { color: c.text }]}>Convert to Regular</Text>
++                    </TouchableOpacity>
++                  )}
++                </View>
++              </View>
++            ) : (
++              <>
++                {top3.length > 0 && (
++                  <>
++                    <View style={styles.sectionHeaderRow}>
++                      <Text style={[styles.sectionTitle, { color: c.text }]}>Recommended SkillBuddies</Text>
++                      <TouchableOpacity onPress={() => setShowAll(true)}>
++                        <Text style={[styles.viewAll, { color: c.primary }]}>View All Offers ({bids.length})</Text>
++                      </TouchableOpacity>
++                    </View>
++                    {top3.map((bid, i) => (
++                      <Animated.View key={bid.id} entering={FadeInDown.delay(i * 80).duration(350)}>
++                        <BidCard
++                          bid={bid}
++                          rank={i + 1}
++                          onViewProfile={() => {}}
++                          onChat={() => openChat(bid.provider)}
++                          onAccept={() => acceptBid(bid)}
++                        />
++                      </Animated.View>
++                    ))}
++                  </>
++                )}
++
++                {showAll && (
++                  <View style={{ marginTop: 8 }}>
++                    <View style={styles.sectionHeaderRow}>
++                      <Text style={[styles.sectionTitle, { color: c.text }]}>All Offers</Text>
++                    </View>
++                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
++                      {([
++                        ['recommended', 'Best Match'],
++                        ['lowPrice', 'Lowest Price'],
++                        ['highRating', 'Highest Rated'],
++                        ['distance', 'Nearest'],
++                        ['badge', 'Badge Tier'],
++                      ] as [SortMode, string][]).map(([mode, label]) => (
++                        <TouchableOpacity
++                          key={mode}
++                          style={[styles.sortChip, { backgroundColor: sortMode === mode ? c.primary : c.muted, marginRight: 8 }]}
++                          onPress={() => setSortMode(mode)}
++                        >
++                          <Text style={[styles.sortChipText, { color: sortMode === mode ? '#FFF' : c.text }]}>{label}</Text>
++                        </TouchableOpacity>
++                      ))}
++                    </ScrollView>
++                    {sortedForAll.map((bid) => (
++                      <BidCard
++                        key={bid.id}
++                        bid={bid}
++                        onViewProfile={() => {}}
++                        onChat={() => openChat(bid.provider)}
++                        onAccept={() => acceptBid(bid)}
++                      />
++                    ))}
++                  </View>
++                )}
++              </>
++            )}
++          </>
++        )}
++
++        {job.status !== 'bidding' && (
++          <View style={[styles.statusCard, { backgroundColor: c.primaryLight }]}>
++            <Feather name="check-circle" size={28} color={c.primary} />
++            <Text style={[styles.statusText, { color: c.primary }]}>
++              {job.status === 'assigned' ? 'Job assigned' : job.status === 'cancelled' ? 'Job cancelled' : 'Job in progress'}
++            </Text>
++          </View>
++        )}
++
++        <TouchableOpacity style={[styles.cancelBtn, { borderColor: c.border }]} onPress={cancelJob}>
++          <Text style={[styles.cancelText, { color: c.destructive }]}>Cancel Job</Text>
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  backBtn: { padding: 4 },
++  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Inter_700Bold', fontSize: 16, marginHorizontal: 8 },
++  restartBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingVertical: 10, marginTop: 10 },
++  restartText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  noBidsCard: { borderWidth: 1, borderRadius: 16, padding: 20, alignItems: 'center', gap: 8, marginTop: 20 },
++  noBidsTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
++  noBidsSub: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19 },
++  noBidsActions: { flexDirection: 'row', gap: 10, marginTop: 10, width: '100%' },
++  restartBtnFull: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10 },
++  restartFullText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 },
++  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
++  viewAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  sortChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
++  sortChipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  statusCard: { alignItems: 'center', gap: 8, borderRadius: 16, padding: 24, marginTop: 10 },
++  statusText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  cancelBtn: { marginTop: 24, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
++  cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id]/bid.tsx b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+new file mode 100644
+index 0000000..1cf8d69
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+@@ -0,0 +1,270 @@
++import React, { useMemo, useState } from 'react';
++import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { CURRENT_USER, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
++import { calculateProviderScore } from '@/lib/scoring';
++import CountdownTimer from '@/components/CountdownTimer';
++import EmptyState from '@/components/EmptyState';
++import type { Bid, BidProvider } from '@/types';
++
++// The mock-logged-in provider identity (used when submitting a bid as a Pilot).
++const ME_AS_PROVIDER: BidProvider = {
++  id: 'me-provider',
++  name: CURRENT_USER.name,
++  rating: 4.7,
++  reviewCount: 58,
++  jobsDone: 41,
++  badge: 2,
++  credibility: 90,
++  specialty: 'General Services',
++  location: 'Riga, Latvia',
++  isOnline: true,
++  distanceKm: 3.1,
++  responseTimeMin: 9,
++};
++
++export default function ProviderJobBidScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
++  const existingBid = useMemo(
++    () => MOCK_BIDS.find((b) => b.jobId === id && b.provider.id === ME_AS_PROVIDER.id),
++    [id]
++  );
++
++  const [price, setPrice] = useState(existingBid ? String(existingBid.price) : String(job?.expectedPrice ?? ''));
++  const [eta, setEta] = useState(existingBid?.eta ?? '30 min');
++  const [submitted, setSubmitted] = useState(!!existingBid);
++
++  if (!job) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <EmptyState icon="alert-circle" title="Job not found" />
++      </View>
++    );
++  }
++
++  const myScore = calculateProviderScore(ME_AS_PROVIDER);
++
++  const submitBid = () => {
++    const priceNum = parseFloat(price);
++    if (!priceNum || priceNum <= 0) {
++      Alert.alert('Invalid price', 'Please enter a valid bid amount.');
++      return;
++    }
++    const bid: Bid = {
++      id: existingBid?.id ?? `bid_${job.id}_me_${Date.now()}`,
++      jobId: job.id,
++      provider: ME_AS_PROVIDER,
++      price: priceNum,
++      eta,
++      createdAt: Date.now(),
++      score: myScore.total,
++    };
++    const idx = MOCK_BIDS.findIndex((b) => b.id === bid.id);
++    if (idx >= 0) MOCK_BIDS[idx] = bid;
++    else MOCK_BIDS.push(bid);
++    setSubmitted(true);
++  };
++
++  const cancelBid = () => {
++    Alert.alert('Cancel Bid', 'Are you sure you want to withdraw your bid?', [
++      { text: 'Keep Bid', style: 'cancel' },
++      {
++        text: 'Cancel Bid',
++        style: 'destructive',
++        onPress: () => {
++          const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
++          if (idx >= 0) MOCK_BIDS.splice(idx, 1);
++          setSubmitted(false);
++        },
++      },
++    ]);
++  };
++
++  const adjustPrice = (delta: number) => {
++    const current = parseFloat(price) || 0;
++    setPrice(String(Math.max(1, current + delta)));
++  };
++
++  const accent = job.urgency === 'urgent' ? c.urgent : c.success;
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
++          <Feather name="arrow-left" size={22} color={c.text} />
++        </TouchableOpacity>
++        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>Job Details</Text>
++        <View style={{ width: 22 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        {/* Urgency + countdown */}
++        <View style={[styles.urgencyBadge, { borderColor: accent }]}>
++          <Feather name={job.urgency === 'urgent' ? 'zap' : 'clock'} size={14} color={accent} />
++          <Text style={[styles.urgencyBadgeText, { color: accent }]}>{job.urgency === 'urgent' ? 'Urgent Job' : 'Regular Job'}</Text>
++        </View>
++        {job.status === 'bidding' && <CountdownTimer endsAt={job.biddingEndsAt} urgency={job.urgency} />}
++
++        {/* Client Snapshot */}
++        <View style={[styles.clientCard, { backgroundColor: c.card, borderColor: c.border }]}>
++          <View style={[styles.clientAvatar, { backgroundColor: c.primaryLight }]}>
++            <Text style={[styles.clientAvatarText, { color: c.primary }]}>{job.clientName.charAt(0)}</Text>
++          </View>
++          <View style={{ flex: 1 }}>
++            <Text style={[styles.clientName, { color: c.text }]}>{job.clientName}</Text>
++            <Text style={[styles.clientMeta, { color: c.mutedForeground }]}>{job.location}</Text>
++          </View>
++          <View style={styles.clientStats}>
++            <View style={styles.clientStatItem}>
++              <MaterialCommunityIcons name="star" size={13} color={c.rating} />
++              <Text style={[styles.clientStatText, { color: c.text }]}>4.8</Text>
++            </View>
++            <Text style={[styles.clientStatSub, { color: c.mutedForeground }]}>12 jobs posted</Text>
++          </View>
++        </View>
++
++        {/* Job details */}
++        <Text style={[styles.jobTitle, { color: c.text }]}>{job.title}</Text>
++        <Text style={[styles.jobDescription, { color: c.mutedForeground }]}>{job.description}</Text>
++
++        <View style={styles.detailGrid}>
++          <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
++            <Feather name="tag" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.text }]}>{job.category}</Text>
++          </View>
++          <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
++            <Feather name="calendar" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.text }]}>{job.date}, {job.time}</Text>
++          </View>
++          <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
++            <Feather name="clock" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.text }]}>{job.expectedHours} hrs expected</Text>
++          </View>
++          <View style={[styles.detailItem, { backgroundColor: c.muted }]}>
++            <Feather name="dollar-sign" size={14} color={c.mutedForeground} />
++            <Text style={[styles.detailText, { color: c.text }]}>€{job.expectedPrice} budget</Text>
++          </View>
++        </View>
++
++        {job.photos.length > 0 && (
++          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 14 }}>
++            {job.photos.map((uri) => (
++              <Image key={uri} source={{ uri }} style={styles.jobPhoto} />
++            ))}
++          </ScrollView>
++        )}
++
++        {/* My score preview */}
++        <View style={[styles.scoreCard, { backgroundColor: c.primaryLight }]}>
++          <Text style={[styles.scoreLabel, { color: c.primary }]}>Your match score for this job</Text>
++          <Text style={[styles.scoreValue, { color: c.primary }]}>{myScore.total}/100</Text>
++        </View>
++
++        {/* Submit / Modify bid */}
++        {job.status === 'bidding' ? (
++          <>
++            <Text style={[styles.label, { color: c.text }]}>{submitted ? 'Modify Your Bid' : 'Submit Your Bid'}</Text>
++
++            <Text style={[styles.sublabel, { color: c.mutedForeground }]}>Offered Price (€)</Text>
++            <View style={styles.priceRow}>
++              {[-10, -5, 5, 10].map((delta) => (
++                <TouchableOpacity
++                  key={delta}
++                  style={[styles.adjustBtn, { backgroundColor: c.muted }]}
++                  onPress={() => adjustPrice(delta)}
++                >
++                  <Text style={[styles.adjustText, { color: c.text }]}>{delta > 0 ? `+${delta}` : delta}</Text>
++                </TouchableOpacity>
++              ))}
++            </View>
++            <TextInput
++              style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: c.border }]}
++              value={price}
++              onChangeText={setPrice}
++              keyboardType="numeric"
++              placeholder="Enter your price"
++              placeholderTextColor={c.mutedForeground}
++            />
++
++            <Text style={[styles.sublabel, { color: c.mutedForeground, marginTop: 14 }]}>Expected Time of Arrival</Text>
++            <View style={styles.chipRow}>
++              {['15 min', '30 min', '45 min', '1 hr'].map((e) => (
++                <TouchableOpacity
++                  key={e}
++                  style={[styles.chip, { backgroundColor: eta === e ? c.primary : c.muted }]}
++                  onPress={() => setEta(e)}
++                >
++                  <Text style={[styles.chipText, { color: eta === e ? '#FFF' : c.text }]}>{e}</Text>
++                </TouchableOpacity>
++              ))}
++            </View>
++
++            <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={submitBid}>
++              <Text style={styles.submitText}>{submitted ? 'Update Bid' : 'Submit Bid'}</Text>
++            </TouchableOpacity>
++
++            {submitted && (
++              <TouchableOpacity style={[styles.cancelBidBtn, { borderColor: c.border }]} onPress={cancelBid}>
++                <Text style={[styles.cancelBidText, { color: c.destructive }]}>Cancel Bid</Text>
++              </TouchableOpacity>
++            )}
++          </>
++        ) : (
++          <View style={[styles.closedCard, { backgroundColor: c.muted }]}>
++            <Text style={[styles.closedText, { color: c.mutedForeground }]}>Bidding has closed for this job.</Text>
++          </View>
++        )}
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  backBtn: { padding: 4 },
++  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Inter_700Bold', fontSize: 16, marginHorizontal: 8 },
++  urgencyBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 12 },
++  urgencyBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
++  clientCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 16 },
++  clientAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
++  clientAvatarText: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  clientName: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  clientMeta: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  clientStats: { alignItems: 'flex-end' },
++  clientStatItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
++  clientStatText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  clientStatSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  jobTitle: { fontFamily: 'Inter_700Bold', fontSize: 19, marginTop: 18 },
++  jobDescription: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 21, marginTop: 8 },
++  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
++  detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
++  detailText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  jobPhoto: { width: 100, height: 100, borderRadius: 12, marginRight: 10 },
++  scoreCard: { borderRadius: 14, padding: 14, marginTop: 16, alignItems: 'center' },
++  scoreLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  scoreValue: { fontFamily: 'Inter_700Bold', fontSize: 22, marginTop: 2 },
++  label: { fontFamily: 'Inter_700Bold', fontSize: 16, marginTop: 24, marginBottom: 4 },
++  sublabel: { fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 8 },
++  priceRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
++  adjustBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
++  adjustText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
++  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
++  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
++  chipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  submitBtn: { marginTop: 22, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  submitText: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
++  cancelBidBtn: { marginTop: 12, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
++  cancelBidText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  closedCard: { borderRadius: 14, padding: 20, alignItems: 'center', marginTop: 20 },
++  closedText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++});
+diff --git a/artifacts/skillbuddy/app/job/post.tsx b/artifacts/skillbuddy/app/job/post.tsx
+new file mode 100644
+index 0000000..0d360f7
+--- /dev/null
++++ b/artifacts/skillbuddy/app/job/post.tsx
+@@ -0,0 +1,347 @@
++import React, { useState } from 'react';
++import {
++  Image,
++  ScrollView,
++  StyleSheet,
++  Text,
++  TextInput,
++  TouchableOpacity,
++  View,
++} from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import * as ImagePicker from 'expo-image-picker';
++import { useTheme } from '@/context/ThemeContext';
++import { CATEGORIES, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
++import type { Job, JobUrgency } from '@/types';
++
++const TIME_SLOTS = ['9:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '5:00 PM', '7:00 PM'];
++const DATE_OPTIONS = ['Today', 'Tomorrow', 'This Weekend', 'Pick a date'];
++
++export default function PostJobScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const [title, setTitle] = useState('');
++  const [description, setDescription] = useState('');
++  const [categoryId, setCategoryId] = useState<string | null>(null);
++  const [date, setDate] = useState('Today');
++  const [time, setTime] = useState('11:00 AM');
++  const [hours, setHours] = useState(2);
++  const [hourlyRate, setHourlyRate] = useState('20');
++  const [photos, setPhotos] = useState<string[]>([]);
++  const [urgency, setUrgency] = useState<JobUrgency>('regular');
++  const [errors, setErrors] = useState<Record<string, string>>({});
++
++  const wordCount = description.trim().length ? description.trim().split(/\s+/).length : 0;
++  const rateNum = parseFloat(hourlyRate) || 0;
++  const total = rateNum * hours;
++
++  const category = CATEGORIES.find((cat) => cat.id === categoryId);
++
++  const pickImage = async () => {
++    if (photos.length >= 5) return;
++    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
++    if (!permission.granted) return;
++    const result = await ImagePicker.launchImageLibraryAsync({
++      mediaTypes: ImagePicker.MediaTypeOptions.Images,
++      quality: 0.7,
++    });
++    if (!result.canceled && result.assets?.[0]) {
++      setPhotos((prev) => [...prev, result.assets[0].uri].slice(0, 5));
++    }
++  };
++
++  const removePhoto = (uri: string) => setPhotos((prev) => prev.filter((p) => p !== uri));
++
++  const validate = () => {
++    const next: Record<string, string> = {};
++    if (!title.trim()) next.title = 'Job title is required.';
++    if (!description.trim()) next.description = 'Description is required.';
++    else if (wordCount > 500) next.description = 'Description must be 500 words or fewer.';
++    if (!categoryId) next.category = 'Please select a category.';
++    if (!hourlyRate || rateNum <= 0) next.rate = 'Enter a valid hourly rate.';
++    if (hours <= 0) next.hours = 'Expected hours must be at least 1.';
++    setErrors(next);
++    return Object.keys(next).length === 0;
++  };
++
++  const handleSubmit = () => {
++    if (!validate()) return;
++
++    const durationMs = urgency === 'urgent' ? 30 * 60 * 1000 : 3 * 60 * 60 * 1000;
++    const newJob: Job = {
++      id: `j${Date.now()}`,
++      clientId: CURRENT_USER.id,
++      clientName: CURRENT_USER.name,
++      title: title.trim(),
++      description: description.trim(),
++      categoryId: categoryId!,
++      category: category?.name ?? '',
++      date,
++      time,
++      expectedHours: hours,
++      hourlyRate: rateNum,
++      expectedPrice: Math.round(total),
++      photos,
++      urgency,
++      status: 'bidding',
++      biddingEndsAt: Date.now() + durationMs,
++      biddingDurationMs: durationMs,
++      location: 'Riga, Latvia',
++    };
++    MOCK_JOBS.unshift(newJob);
++    router.replace(`/job/${newJob.id}` as any);
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
++          <Feather name="arrow-left" size={22} color={c.text} />
++        </TouchableOpacity>
++        <Text style={[styles.headerTitle, { color: c.text }]}>Post a Job</Text>
++        <View style={{ width: 22 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
++        {/* Title */}
++        <Text style={[styles.label, { color: c.text }]}>Job Title</Text>
++        <TextInput
++          style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: errors.title ? c.destructive : c.border }]}
++          placeholder="e.g. Deep clean my apartment"
++          placeholderTextColor={c.mutedForeground}
++          value={title}
++          onChangeText={setTitle}
++        />
++        {errors.title && <Text style={[styles.error, { color: c.destructive }]}>{errors.title}</Text>}
++
++        {/* Description */}
++        <View style={styles.labelRow}>
++          <Text style={[styles.label, { color: c.text }]}>Description</Text>
++          <Text style={[styles.counter, { color: wordCount > 500 ? c.destructive : c.mutedForeground }]}>
++            {wordCount}/500 words
++          </Text>
++        </View>
++        <TextInput
++          style={[styles.textArea, { backgroundColor: c.input, color: c.text, borderColor: errors.description ? c.destructive : c.border }]}
++          placeholder="Describe what you need done, any special instructions, and access details."
++          placeholderTextColor={c.mutedForeground}
++          value={description}
++          onChangeText={setDescription}
++          multiline
++          numberOfLines={5}
++          textAlignVertical="top"
++        />
++        {errors.description && <Text style={[styles.error, { color: c.destructive }]}>{errors.description}</Text>}
++
++        {/* Category */}
++        <Text style={[styles.label, { color: c.text }]}>Category</Text>
++        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
++          {CATEGORIES.map((cat) => (
++            <TouchableOpacity
++              key={cat.id}
++              style={[
++                styles.categoryChip,
++                {
++                  backgroundColor: categoryId === cat.id ? c.primary : c.muted,
++                  borderColor: categoryId === cat.id ? c.primary : c.border,
++                },
++              ]}
++              onPress={() => setCategoryId(cat.id)}
++            >
++              <MaterialCommunityIcons
++                name={cat.iconName as any}
++                size={16}
++                color={categoryId === cat.id ? '#FFF' : c.text}
++              />
++              <Text style={[styles.categoryText, { color: categoryId === cat.id ? '#FFF' : c.text }]}>
++                {cat.name}
++              </Text>
++            </TouchableOpacity>
++          ))}
++        </ScrollView>
++        {errors.category && <Text style={[styles.error, { color: c.destructive }]}>{errors.category}</Text>}
++
++        {/* Date */}
++        <Text style={[styles.label, { color: c.text }]}>Date Needed</Text>
++        <View style={styles.chipWrapRow}>
++          {DATE_OPTIONS.map((d) => (
++            <TouchableOpacity
++              key={d}
++              style={[styles.chip, { backgroundColor: date === d ? c.primary : c.muted }]}
++              onPress={() => setDate(d)}
++            >
++              <Text style={[styles.chipText, { color: date === d ? '#FFF' : c.text }]}>{d}</Text>
++            </TouchableOpacity>
++          ))}
++        </View>
++
++        {/* Time */}
++        <Text style={[styles.label, { color: c.text }]}>Time</Text>
++        <View style={styles.chipWrapRow}>
++          {TIME_SLOTS.map((t) => (
++            <TouchableOpacity
++              key={t}
++              style={[styles.chip, { backgroundColor: time === t ? c.primary : c.muted }]}
++              onPress={() => setTime(t)}
++            >
++              <Text style={[styles.chipText, { color: time === t ? '#FFF' : c.text }]}>{t}</Text>
++            </TouchableOpacity>
++          ))}
++        </View>
++
++        {/* Expected hours */}
++        <Text style={[styles.label, { color: c.text }]}>Expected Hours of Work</Text>
++        <View style={[styles.stepper, { backgroundColor: c.input, borderColor: errors.hours ? c.destructive : c.border }]}>
++          <TouchableOpacity
++            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
++            onPress={() => setHours((h) => Math.max(1, h - 1))}
++          >
++            <Feather name="minus" size={16} color={c.text} />
++          </TouchableOpacity>
++          <Text style={[styles.stepperValue, { color: c.text }]}>{hours} hr{hours !== 1 ? 's' : ''}</Text>
++          <TouchableOpacity
++            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
++            onPress={() => setHours((h) => Math.min(24, h + 1))}
++          >
++            <Feather name="plus" size={16} color={c.text} />
++          </TouchableOpacity>
++        </View>
++        {errors.hours && <Text style={[styles.error, { color: c.destructive }]}>{errors.hours}</Text>}
++
++        {/* Photo upload */}
++        <Text style={[styles.label, { color: c.text }]}>Photos (up to 5)</Text>
++        <View style={styles.photoRow}>
++          {photos.map((uri) => (
++            <View key={uri} style={styles.photoThumbWrap}>
++              <Image source={{ uri }} style={styles.photoThumb} />
++              <TouchableOpacity
++                style={[styles.photoRemove, { backgroundColor: c.destructive }]}
++                onPress={() => removePhoto(uri)}
++              >
++                <Feather name="x" size={12} color="#FFF" />
++              </TouchableOpacity>
++            </View>
++          ))}
++          {photos.length < 5 && (
++            <TouchableOpacity
++              style={[styles.photoAdd, { backgroundColor: c.muted, borderColor: c.border }]}
++              onPress={pickImage}
++            >
++              <Feather name="camera" size={20} color={c.mutedForeground} />
++            </TouchableOpacity>
++          )}
++        </View>
++
++        {/* Expected price */}
++        <Text style={[styles.label, { color: c.text }]}>Hourly Rate (€)</Text>
++        <TextInput
++          style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: errors.rate ? c.destructive : c.border }]}
++          placeholder="20"
++          placeholderTextColor={c.mutedForeground}
++          value={hourlyRate}
++          onChangeText={setHourlyRate}
++          keyboardType="numeric"
++        />
++        {errors.rate && <Text style={[styles.error, { color: c.destructive }]}>{errors.rate}</Text>}
++
++        <View style={[styles.totalCard, { backgroundColor: c.primaryLight }]}>
++          <Text style={[styles.totalLabel, { color: c.primary }]}>Expected Budget</Text>
++          <Text style={[styles.totalValue, { color: c.primary }]}>€{total.toFixed(0)}</Text>
++          <Text style={[styles.totalSub, { color: c.primary }]}>
++            {hours} hr{hours !== 1 ? 's' : ''} × €{rateNum || 0}/hr — shown to bidders as your budget
++          </Text>
++        </View>
++
++        {/* Urgency toggle */}
++        <Text style={[styles.label, { color: c.text }]}>Request Type</Text>
++        <View style={styles.urgencyRow}>
++          <TouchableOpacity
++            style={[
++              styles.urgencyOption,
++              {
++                backgroundColor: urgency === 'urgent' ? c.urgentLight : c.muted,
++                borderColor: urgency === 'urgent' ? c.urgent : c.border,
++              },
++            ]}
++            onPress={() => setUrgency('urgent')}
++          >
++            <Feather name="zap" size={20} color={urgency === 'urgent' ? c.urgent : c.mutedForeground} />
++            <Text style={[styles.urgencyTitle, { color: urgency === 'urgent' ? c.urgent : c.text }]}>Urgent</Text>
++            <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>
++              Need this within 12 hours — 30-minute live bidding window
++            </Text>
++          </TouchableOpacity>
++          <TouchableOpacity
++            style={[
++              styles.urgencyOption,
++              {
++                backgroundColor: urgency === 'regular' ? c.successLight : c.muted,
++                borderColor: urgency === 'regular' ? c.success : c.border,
++              },
++            ]}
++            onPress={() => setUrgency('regular')}
++          >
++            <Feather name="clock" size={20} color={urgency === 'regular' ? c.success : c.mutedForeground} />
++            <Text style={[styles.urgencyTitle, { color: urgency === 'regular' ? c.success : c.text }]}>Regular</Text>
++            <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>
++              Need this within 72 hours — 3-hour bidding window
++            </Text>
++          </TouchableOpacity>
++        </View>
++
++        <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={handleSubmit}>
++          <Text style={styles.submitText}>Post Job & Start Bidding</Text>
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: {
++    paddingHorizontal: 20,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++    borderBottomWidth: 1,
++  },
++  backBtn: { padding: 4 },
++  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  scroll: { padding: 20, paddingBottom: 60, gap: 6 },
++  label: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginTop: 16, marginBottom: 8 },
++  labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
++  counter: { fontFamily: 'Inter_400Regular', fontSize: 11, marginBottom: 8 },
++  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  textArea: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14, minHeight: 110 },
++  error: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 4 },
++  categoryRow: { gap: 8, paddingRight: 8 },
++  categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
++  categoryText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
++  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
++  chipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 12, padding: 8 },
++  stepperBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
++  stepperValue: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
++  photoThumbWrap: { width: 72, height: 72, borderRadius: 12, position: 'relative' },
++  photoThumb: { width: 72, height: 72, borderRadius: 12 },
++  photoRemove: { position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
++  photoAdd: { width: 72, height: 72, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
++  totalCard: { borderRadius: 14, padding: 16, marginTop: 16, alignItems: 'center', gap: 2 },
++  totalLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  totalValue: { fontFamily: 'Inter_700Bold', fontSize: 28 },
++  totalSub: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center' },
++  urgencyRow: { flexDirection: 'row', gap: 10 },
++  urgencyOption: { flex: 1, borderWidth: 1.5, borderRadius: 14, padding: 14, alignItems: 'center', gap: 6 },
++  urgencyTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 },
++  urgencyDesc: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center', lineHeight: 15 },
++  submitBtn: { marginTop: 28, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  submitText: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/components/BidCard.tsx b/artifacts/skillbuddy/components/BidCard.tsx
+new file mode 100644
+index 0000000..06ca4af
+--- /dev/null
++++ b/artifacts/skillbuddy/components/BidCard.tsx
+@@ -0,0 +1,85 @@
++import React from 'react';
++import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import type { Bid } from '@/types';
++
++interface Props {
++  bid: Bid;
++  rank?: number; // 1-3 for "Recommended" badge
++  onViewProfile: () => void;
++  onChat: () => void;
++  onAccept: () => void;
++}
++
++export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: Props) {
++  const { colors: c } = useTheme();
++  const { provider } = bid;
++
++  return (
++    <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++      {rank && (
++        <View style={[styles.rankBadge, { backgroundColor: c.primary }]}>
++          <MaterialCommunityIcons name="star" size={11} color="#FFF" />
++          <Text style={styles.rankText}>#{rank} Recommended · {bid.score}/100</Text>
++        </View>
++      )}
++
++      <View style={styles.topRow}>
++        <View style={[styles.avatar, { backgroundColor: c.primaryLight }]}>
++          <Text style={[styles.avatarText, { color: c.primary }]}>{provider.name.charAt(0)}</Text>
++        </View>
++        <View style={{ flex: 1 }}>
++          <Text style={[styles.name, { color: c.text }]}>{provider.name}</Text>
++          <View style={styles.metaRow}>
++            <Feather name="star" size={12} color={c.rating} />
++            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.rating?.toFixed(1)}</Text>
++            <View style={[styles.badgeDot, { backgroundColor: c.mutedForeground }]} />
++            <MaterialCommunityIcons name="shield-check-outline" size={13} color={c.mutedForeground} />
++            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.badge} badge</Text>
++            <View style={[styles.badgeDot, { backgroundColor: c.mutedForeground }]} />
++            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.distanceKm}km away</Text>
++          </View>
++        </View>
++        <View style={styles.priceWrap}>
++          <Text style={[styles.price, { color: c.primary }]}>€{bid.price}</Text>
++          <Text style={[styles.eta, { color: c.mutedForeground }]}>ETA {bid.eta}</Text>
++        </View>
++      </View>
++
++      <View style={styles.actionsRow}>
++        <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border }]} onPress={onViewProfile}>
++          <Text style={[styles.actionText, { color: c.text }]}>View Profile</Text>
++        </TouchableOpacity>
++        <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border }]} onPress={onChat}>
++          <Feather name="message-circle" size={14} color={c.text} />
++          <Text style={[styles.actionText, { color: c.text }]}>Chat</Text>
++        </TouchableOpacity>
++        <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: c.primary }]} onPress={onAccept}>
++          <Text style={styles.acceptText}>Accept Bid</Text>
++        </TouchableOpacity>
++      </View>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  card: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 12, marginBottom: 12 },
++  rankBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginBottom: -2 },
++  rankText: { fontFamily: 'Inter_600SemiBold', fontSize: 10, color: '#FFF' },
++  topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
++  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
++  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 17 },
++  name: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginBottom: 2 },
++  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
++  metaText: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  badgeDot: { width: 2.5, height: 2.5, borderRadius: 1.25 },
++  priceWrap: { alignItems: 'flex-end' },
++  price: { fontFamily: 'Inter_700Bold', fontSize: 17 },
++  eta: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  actionsRow: { flexDirection: 'row', gap: 8 },
++  actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, flex: 1, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
++  actionText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  acceptBtn: { flex: 1.2, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 10 },
++  acceptText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/components/CountdownTimer.tsx b/artifacts/skillbuddy/components/CountdownTimer.tsx
+new file mode 100644
+index 0000000..ba3d4fa
+--- /dev/null
++++ b/artifacts/skillbuddy/components/CountdownTimer.tsx
+@@ -0,0 +1,91 @@
++import React, { useEffect, useState } from 'react';
++import { StyleSheet, Text, View } from 'react-native';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++
++interface Props {
++  endsAt: number; // epoch ms
++  urgency: 'urgent' | 'regular';
++  onExpire?: () => void;
++  compact?: boolean;
++}
++
++function formatRemaining(ms: number): string {
++  if (ms <= 0) return '00:00';
++  const totalSeconds = Math.floor(ms / 1000);
++  const h = Math.floor(totalSeconds / 3600);
++  const m = Math.floor((totalSeconds % 3600) / 60);
++  const s = totalSeconds % 60;
++  if (h > 0) {
++    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
++  }
++  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
++}
++
++export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: Props) {
++  const { colors: c } = useTheme();
++  const [remaining, setRemaining] = useState(endsAt - Date.now());
++  const expiredFired = React.useRef(false);
++
++  useEffect(() => {
++    const interval = setInterval(() => {
++      const diff = endsAt - Date.now();
++      setRemaining(diff);
++      if (diff <= 0 && !expiredFired.current) {
++        expiredFired.current = true;
++        onExpire?.();
++      }
++    }, 1000);
++    return () => clearInterval(interval);
++  }, [endsAt, onExpire]);
++
++  const accent = urgency === 'urgent' ? c.urgent : c.success;
++  const accentLight = urgency === 'urgent' ? c.urgentLight : c.successLight;
++  const expired = remaining <= 0;
++
++  if (compact) {
++    return (
++      <View style={[styles.compactWrap, { backgroundColor: accentLight }]}>
++        <Feather name="clock" size={12} color={accent} />
++        <Text style={[styles.compactText, { color: accent }]}>
++          {expired ? 'Expired' : formatRemaining(remaining)}
++        </Text>
++      </View>
++    );
++  }
++
++  return (
++    <View style={[styles.wrap, { backgroundColor: accentLight, borderColor: accent }]}>
++      <Feather name={urgency === 'urgent' ? 'zap' : 'clock'} size={16} color={accent} />
++      <Text style={[styles.label, { color: accent }]}>
++        {urgency === 'urgent' ? 'Urgent — bidding closes in' : 'Bidding window closes in'}
++      </Text>
++      <Text style={[styles.time, { color: accent }]}>
++        {expired ? 'Expired' : formatRemaining(remaining)}
++      </Text>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  wrap: {
++    borderRadius: 16,
++    borderWidth: 1,
++    paddingVertical: 14,
++    paddingHorizontal: 16,
++    alignItems: 'center',
++    gap: 4,
++  },
++  label: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  time: { fontFamily: 'Inter_700Bold', fontSize: 24 },
++  compactWrap: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 4,
++    paddingHorizontal: 8,
++    paddingVertical: 4,
++    borderRadius: 8,
++    alignSelf: 'flex-start',
++  },
++  compactText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++});
+diff --git a/artifacts/skillbuddy/components/JobCard.tsx b/artifacts/skillbuddy/components/JobCard.tsx
+new file mode 100644
+index 0000000..a728e21
+--- /dev/null
++++ b/artifacts/skillbuddy/components/JobCard.tsx
+@@ -0,0 +1,76 @@
++import React from 'react';
++import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import type { Job } from '@/types';
++import CountdownTimer from './CountdownTimer';
++
++interface Props {
++  job: Job;
++  onPress: () => void;
++}
++
++const STATUS_LABEL: Record<Job['status'], string> = {
++  bidding: 'Bidding Open',
++  assigned: 'Assigned',
++  in_progress: 'In Progress',
++  completed: 'Completed',
++  cancelled: 'Cancelled',
++  expired: 'Expired',
++};
++
++export default function JobCard({ job, onPress }: Props) {
++  const { colors: c } = useTheme();
++  const accent = job.urgency === 'urgent' ? c.urgent : c.success;
++  const accentLight = job.urgency === 'urgent' ? c.urgentLight : c.successLight;
++  const isBidding = job.status === 'bidding';
++
++  return (
++    <TouchableOpacity
++      style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
++      onPress={onPress}
++      activeOpacity={0.8}
++    >
++      <View style={styles.topRow}>
++        <View style={[styles.urgencyChip, { backgroundColor: accentLight }]}>
++          <Feather name={job.urgency === 'urgent' ? 'zap' : 'clock'} size={11} color={accent} />
++          <Text style={[styles.urgencyText, { color: accent }]}>
++            {job.urgency === 'urgent' ? 'Urgent' : 'Regular'}
++          </Text>
++        </View>
++        <View style={[styles.statusChip, { backgroundColor: c.muted }]}>
++          <Text style={[styles.statusText, { color: c.mutedForeground }]}>{STATUS_LABEL[job.status]}</Text>
++        </View>
++      </View>
++
++      <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
++
++      <View style={styles.metaRow}>
++        <MaterialCommunityIcons name="tag-outline" size={13} color={c.mutedForeground} />
++        <Text style={[styles.metaText, { color: c.mutedForeground }]}>{job.category}</Text>
++        <View style={[styles.dot, { backgroundColor: c.mutedForeground }]} />
++        <Text style={[styles.metaText, { color: c.mutedForeground }]}>€{job.expectedPrice}</Text>
++      </View>
++
++      {isBidding ? (
++        <CountdownTimer endsAt={job.biddingEndsAt} urgency={job.urgency} compact />
++      ) : (
++        <Text style={[styles.dateText, { color: c.mutedForeground }]}>{job.date} · {job.time}</Text>
++      )}
++    </TouchableOpacity>
++  );
++}
++
++const styles = StyleSheet.create({
++  card: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 8, marginBottom: 12 },
++  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
++  urgencyChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
++  urgencyText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++  statusChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
++  statusText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
++  title: { fontFamily: 'Inter_700Bold', fontSize: 16 },
++  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
++  metaText: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++  dot: { width: 3, height: 3, borderRadius: 1.5 },
++  dateText: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++});
+diff --git a/artifacts/skillbuddy/context/RoleContext.tsx b/artifacts/skillbuddy/context/RoleContext.tsx
+new file mode 100644
+index 0000000..4a7c9d2
+--- /dev/null
++++ b/artifacts/skillbuddy/context/RoleContext.tsx
+@@ -0,0 +1,53 @@
++import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
++import AsyncStorage from '@react-native-async-storage/async-storage';
++
++export type ActiveRole = 'CLIENT' | 'PROVIDER';
++
++interface RoleContextType {
++  activeRole: ActiveRole;
++  isBothRoles: boolean; // whether the mock user is registered as both client & provider
++  setActiveRole: (role: ActiveRole) => void;
++  toggleRole: () => void;
++}
++
++const ROLE_KEY = 'sb_active_role';
++
++const RoleContext = createContext<RoleContextType>({
++  activeRole: 'CLIENT',
++  isBothRoles: true,
++  setActiveRole: () => {},
++  toggleRole: () => {},
++});
++
++export function RoleProvider({ children }: { children: React.ReactNode }) {
++  const [activeRole, setActiveRoleState] = useState<ActiveRole>('CLIENT');
++
++  useEffect(() => {
++    AsyncStorage.getItem(ROLE_KEY).then((saved) => {
++      if (saved === 'CLIENT' || saved === 'PROVIDER') setActiveRoleState(saved);
++    });
++  }, []);
++
++  const setActiveRole = useCallback((role: ActiveRole) => {
++    setActiveRoleState(role);
++    AsyncStorage.setItem(ROLE_KEY, role);
++  }, []);
++
++  const toggleRole = useCallback(() => {
++    setActiveRoleState((prev) => {
++      const next = prev === 'CLIENT' ? 'PROVIDER' : 'CLIENT';
++      AsyncStorage.setItem(ROLE_KEY, next);
++      return next;
++    });
++  }, []);
++
++  return (
++    <RoleContext.Provider value={{ activeRole, isBothRoles: true, setActiveRole, toggleRole }}>
++      {children}
++    </RoleContext.Provider>
++  );
++}
++
++export function useRole() {
++  return useContext(RoleContext);
++}
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index bbd0d16..e508cb0 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -1,4 +1,5 @@
+-import type { Category, Service, Offer, Notification, ChatThread, Booking, Review } from '@/types';
++import type { Category, Service, Offer, Notification, ChatThread, Booking, Review, Job, Bid, BidProvider } from '@/types';
++import { calculateProviderScore } from '@/lib/scoring';
+ 
+ // ─── Current User (mock) ──────────────────────────────────────────────────────
+ export interface MockUser {
+@@ -449,6 +450,108 @@ export const MOCK_BOOKINGS: Booking[] = [
+   },
+ ];
+ 
++// ─── Bidding Providers (Phase 2 — Jobs & Bidding) ─────────────────────────────
++// Extended provider pool with the fields the scoring engine needs:
++// distanceKm, responseTimeMin, plus rating/badge/credibility already on Provider.
++export const BID_PROVIDERS: BidProvider[] = [
++  { id: 'bp1', name: 'Jenny Wilson',   rating: 4.9, reviewCount: 365, jobsDone: 142, badge: 3, credibility: 97, specialty: 'Home Cleaning',  location: 'Riga, Latvia', isOnline: true,  distanceKm: 1.5, responseTimeMin: 4 },
++  { id: 'bp2', name: 'Wade Warren',    rating: 4.6, reviewCount: 210, jobsDone: 89,  badge: 2, credibility: 92, specialty: 'Ironing & Laundry', location: 'Riga, Latvia', isOnline: false, distanceKm: 4.2, responseTimeMin: 12 },
++  { id: 'bp3', name: 'Esther Howard',  rating: 4.4, reviewCount: 178, jobsDone: 67,  badge: 1, credibility: 88, specialty: 'Repairing',       location: 'Riga, Latvia', isOnline: true,  distanceKm: 7.8, responseTimeMin: 22 },
++  { id: 'bp4', name: 'Marcus Lee',     rating: 5.0, reviewCount: 320, jobsDone: 210, badge: 3, credibility: 99, specialty: 'Photography',      location: 'Riga, Latvia', isOnline: true,  distanceKm: 0.8, responseTimeMin: 3 },
++  { id: 'bp5', name: 'Dianne Russell', rating: 3.8, reviewCount: 45,  jobsDone: 22,  badge: 1, credibility: 78, specialty: 'Plumbing',        location: 'Riga, Latvia', isOnline: true,  distanceKm: 12.4, responseTimeMin: 45 },
++  { id: 'bp6', name: 'Cody Fisher',    rating: 4.2, reviewCount: 96,  jobsDone: 34,  badge: 1, credibility: 82, specialty: 'Shifting',        location: 'Riga, Latvia', isOnline: false, distanceKm: 6.1, responseTimeMin: 18 },
++  { id: 'bp7', name: 'Leslie Alexander', rating: 4.9, reviewCount: 401, jobsDone: 156, badge: 3, credibility: 96, specialty: 'Painting',      location: 'Riga, Latvia', isOnline: true,  distanceKm: 2.3, responseTimeMin: 7 },
++  { id: 'bp8', name: 'Guy Hawkins',    rating: 3.2, reviewCount: 18,  jobsDone: 6,   badge: 0, credibility: 62, specialty: 'Cleaning',        location: 'Riga, Latvia', isOnline: true,  distanceKm: 15.0, responseTimeMin: 90 },
++];
++
++// ─── Mock Jobs (Phase 2) ───────────────────────────────────────────────────────
++const now = Date.now();
++
++export const MOCK_JOBS: Job[] = [
++  {
++    id: 'j1',
++    clientId: CURRENT_USER.id,
++    clientName: CURRENT_USER.name,
++    title: 'Deep clean my 2-bedroom apartment',
++    description: 'Need a thorough clean before guests arrive — kitchen, bathrooms, floors, and windows. Please bring your own cleaning supplies.',
++    categoryId: '1',
++    category: 'Cleaning',
++    date: 'Today',
++    time: '4:00 PM',
++    expectedHours: 3,
++    hourlyRate: 20,
++    expectedPrice: 60,
++    photos: [],
++    urgency: 'urgent',
++    status: 'bidding',
++    biddingEndsAt: now + 30 * 60 * 1000,
++    biddingDurationMs: 30 * 60 * 1000,
++    location: 'Riga, Latvia',
++  },
++  {
++    id: 'j2',
++    clientId: CURRENT_USER.id,
++    clientName: CURRENT_USER.name,
++    title: 'Fix leaking kitchen pipe',
++    description: 'Pipe under the kitchen sink has been leaking for two days. Needs inspection and repair, possibly a part replacement.',
++    categoryId: '3',
++    category: 'Plumbing',
++    date: 'Tomorrow',
++    time: '10:00 AM',
++    expectedHours: 2,
++    hourlyRate: 25,
++    expectedPrice: 50,
++    photos: [],
++    urgency: 'regular',
++    status: 'bidding',
++    biddingEndsAt: now + 3 * 60 * 60 * 1000,
++    biddingDurationMs: 3 * 60 * 60 * 1000,
++    location: 'Riga, Latvia',
++  },
++  {
++    id: 'j3',
++    clientId: CURRENT_USER.id,
++    clientName: CURRENT_USER.name,
++    title: 'Repaint living room walls',
++    description: 'Single accent wall plus touch-ups on the rest of the living room. Paint will be provided by us (sage green).',
++    categoryId: '5',
++    category: 'Painting',
++    date: 'Jan 28, 2026',
++    time: '9:00 AM',
++    expectedHours: 5,
++    hourlyRate: 18,
++    expectedPrice: 90,
++    photos: [],
++    urgency: 'regular',
++    status: 'assigned',
++    biddingEndsAt: now - 60 * 60 * 1000,
++    biddingDurationMs: 3 * 60 * 60 * 1000,
++    location: 'Riga, Latvia',
++    assignedProviderId: 'bp7',
++  },
++];
++
++// ─── Mock Bids — generated with real scoring, not a hardcoded order ──────────
++function makeBid(id: string, jobId: string, provider: BidProvider, price: number, eta: string, minutesAgo: number): Bid {
++  return {
++    id,
++    jobId,
++    provider,
++    price,
++    eta,
++    createdAt: now - minutesAgo * 60 * 1000,
++    score: calculateProviderScore(provider).total,
++  };
++}
++
++export const MOCK_BIDS: Bid[] = [
++  makeBid('bid1', 'j1', BID_PROVIDERS[0], 65, '25 min', 8),
++  makeBid('bid2', 'j1', BID_PROVIDERS[7], 50, '40 min', 5),
++  makeBid('bid3', 'j1', BID_PROVIDERS[4], 55, '35 min', 3),
++  makeBid('bid4', 'j2', BID_PROVIDERS[4], 55, '1 hr', 20),
++  makeBid('bid5', 'j2', BID_PROVIDERS[2], 60, '45 min', 10),
++];
++
+ export const MOCK_REVIEWS: Review[] = [
+   {
+     id: 'r1',
+diff --git a/artifacts/skillbuddy/lib/scoring.ts b/artifacts/skillbuddy/lib/scoring.ts
+new file mode 100644
+index 0000000..f13903d
+--- /dev/null
++++ b/artifacts/skillbuddy/lib/scoring.ts
+@@ -0,0 +1,80 @@
++import type { BidProvider, Job } from '@/types';
++
++/**
++ * Recommendation Scoring Engine (Module 4D)
++ *
++ * Computes a 0–100 score for a provider bidding on a job, from 5 weighted
++ * criteria: distance, star rating, badge tier, credibility %, response time.
++ * This is real, deterministic scoring logic — not a random or hardcoded sort.
++ */
++
++function scoreDistance(distanceKm: number): number {
++  if (distanceKm <= 2) return 25;
++  if (distanceKm <= 5) return 20;
++  if (distanceKm <= 10) return 15;
++  return 10;
++}
++
++function scoreRating(rating: number): number {
++  if (rating >= 4.8) return 20;
++  if (rating >= 4.5) return 17;
++  if (rating >= 4.0) return 15;
++  if (rating >= 3.4) return 10;
++  return 5;
++}
++
++function scoreBadge(badge: number): number {
++  // badge: 3 = 100+ jobs, 2 = 50-99, 1 = 10-49, 0 = 0-9
++  if (badge >= 3) return 15;
++  if (badge === 2) return 14;
++  if (badge === 1) return 13;
++  return 10;
++}
++
++function scoreCredibility(credibility: number): number {
++  if (credibility >= 95) return 25;
++  if (credibility >= 90) return 20;
++  if (credibility >= 85) return 15;
++  if (credibility >= 80) return 13;
++  if (credibility >= 75) return 10;
++  if (credibility >= 60) return 5;
++  return 0;
++}
++
++function scoreResponseTime(minutes: number): number {
++  if (minutes <= 5) return 15;
++  if (minutes <= 15) return 13;
++  if (minutes <= 30) return 12;
++  if (minutes <= 60) return 10;
++  return 8;
++}
++
++export interface ScoreBreakdown {
++  distance: number;
++  rating: number;
++  badge: number;
++  credibility: number;
++  responseTime: number;
++  total: number;
++}
++
++export function calculateProviderScore(provider: BidProvider, _job?: Job): ScoreBreakdown {
++  const distance = scoreDistance(provider.distanceKm);
++  const rating = scoreRating(provider.rating ?? 0);
++  const badge = scoreBadge(provider.badge ?? 0);
++  const credibility = scoreCredibility(provider.credibility ?? 0);
++  const responseTime = scoreResponseTime(provider.responseTimeMin);
++
++  return {
++    distance,
++    rating,
++    badge,
++    credibility,
++    responseTime,
++    total: distance + rating + badge + credibility + responseTime,
++  };
++}
++
++export function scoreOnly(provider: BidProvider, job?: Job): number {
++  return calculateProviderScore(provider, job).total;
++}
+diff --git a/artifacts/skillbuddy/types/index.ts b/artifacts/skillbuddy/types/index.ts
+index 1a54f2b..0c16a17 100644
+--- a/artifacts/skillbuddy/types/index.ts
++++ b/artifacts/skillbuddy/types/index.ts
+@@ -152,3 +152,44 @@ export interface Review {
+   comment: string;
+   date: string;
+ }
++
++// ─── Jobs & Bidding (Phase 2) ──────────────────────────────────────────────────
++export type JobUrgency = 'urgent' | 'regular';
++export type JobStatus = 'bidding' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'expired';
++
++export interface Job {
++  id: string;
++  clientId: string;
++  clientName: string;
++  title: string;
++  description: string;
++  categoryId: string;
++  category: string;
++  date: string;
++  time: string;
++  expectedHours: number;
++  hourlyRate: number;
++  expectedPrice: number;
++  photos: string[];
++  urgency: JobUrgency;
++  status: JobStatus;
++  biddingEndsAt: number;
++  biddingDurationMs: number;
++  location: string;
++  assignedProviderId?: string;
++}
++
++export interface BidProvider extends Provider {
++  distanceKm: number;
++  responseTimeMin: number;
++}
++
++export interface Bid {
++  id: string;
++  jobId: string;
++  provider: BidProvider;
++  price: number;
++  eta: string;
++  createdAt: number;
++  score: number;
++}
+-- 
+2.43.0
+

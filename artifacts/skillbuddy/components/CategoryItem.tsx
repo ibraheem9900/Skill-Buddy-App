@@ -4,6 +4,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import type { Category } from '@/types';
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
@@ -16,6 +17,7 @@ interface Props {
 export default function CategoryItem({ category, size = 'md' }: Props) {
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { tCat } = useLanguage();
   const scale = useSharedValue(1);
   const iconSize = size === 'sm' ? 24 : 28;
   const circleSize = size === 'sm' ? 56 : 64;
@@ -39,7 +41,7 @@ export default function CategoryItem({ category, size = 'md' }: Props) {
         <MaterialCommunityIcons name={category.iconName as any} size={iconSize} color={c.primary} />
       </Animated.View>
       <Text style={[styles.label, { color: c.text }, size === 'sm' && styles.labelSm]} numberOfLines={1}>
-        {category.name.length > 7 ? category.name.substring(0, 6) + '..' : category.name}
+        {tCat(category.id)}
       </Text>
     </AnimatedTouchable>
   );

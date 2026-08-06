@@ -1,0 +1,1407 @@
+From 43ad610e630d14e9d3dcb995df756cae5f4890da Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Wed, 29 Jul 2026 20:36:48 +0000
+Subject: [PATCH] Ticketing System, Blogs module, rating->scoring fix,
+ suspension gate, 5-job limit (Part A verify + Part B1/B3/B5)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Part A re-verification fixes:
+- Post a Job now enforces the spec's 5-simultaneous-active-jobs limit
+  per client, with a clear message when the limit is hit (was entirely
+  unenforced before).
+- Fixed a real data-modeling gap: the current user's own Pilot rating
+  (used in scoring, suspension, and job cancellation penalties) was
+  three disconnected hardcoded 4.7 values across bid.tsx,
+  professional.tsx, and track.tsx — none of which fed into each other.
+  Consolidated onto a single CURRENT_USER.providerRating field that
+  calculateProviderScore, the professional-info screen, and the
+  cancellation flow all now read/write consistently.
+
+Part B1 — Ratings & Review System:
+- Completing a job (client Approves) now genuinely applies +0.1 to the
+  provider's rating, capped at 5.0.
+- Provider cancellation now applies -0.5 to CURRENT_USER.providerRating
+  specifically (not an unrelated BID_PROVIDERS entry, which was the
+  previous bug), and sets a real providerSuspendedUntil timestamp.
+- New SuspensionGate component: renders a full-screen, non-dismissible
+  suspension notice (28-day countdown) in place of the entire provider
+  dashboard when the rating check trips — not just an alert popup as
+  before. Client-side access remains available with a 'Switch to
+  Client View' escape hatch, per spec.
+
+Part B3 — Ticketing System:
+- Ticket type + data store with mock-incrementing IDs in the exact
+  SB-TKT-YYYY-NNNNNN format.
+- Raise a Ticket flow: category selection (all 8 spec categories) ->
+  detail form with optional photo attachments -> submission with a
+  generated ticket ID shown to the user.
+- My Tickets list (status badges: Open/In Review/Waiting/Resolved/
+  Closed) and a full ticket detail screen with a status stepper —
+  no delete action exists anywhere, view-only per spec.
+- The Dispute path in the Review screen now auto-generates a real
+  ticket (job ID, category, date, amount pre-filled) instead of just
+  showing a generic 'ticket created' message.
+- 'Get Help' button added to completed/approved/closed jobs in the
+  tracking screen, routing into Raise a Ticket pre-linked to that job.
+
+Part B5 — Blogs:
+- Full mock content: 6 posts across all required categories with
+  real multi-paragraph body text (not placeholder lorem ipsum).
+- Blog Listing screen: search, category pills, featured carousel.
+- Blog Detail screen: hero image, full body, native Share sheet,
+  Related Articles (same category).
+- Compact 'From the Blog' teaser added to Home (3-card horizontal
+  row) without disrupting existing Dashboard sections, plus a Blog
+  entry point from the Profile menu.
+
+Full workspace typecheck: zero errors.
+
+Not covered in this pass (follow-up): Notifications System extension
+(per-screen bell badge audit, non-dismissible critical notifications,
+full trigger simulation for every listed event), FAQs re-verification
+against the newer category list, and the remaining Part A2/A3 items
+(job edit before/after tracking, bid-disappears-on-selection).
+---
+ artifacts/skillbuddy/app/(tabs)/_layout.tsx   |   8 +-
+ artifacts/skillbuddy/app/(tabs)/index.tsx     |  29 ++++
+ artifacts/skillbuddy/app/(tabs)/profile.tsx   |   4 +
+ artifacts/skillbuddy/app/blog/[id].tsx        |  95 +++++++++++
+ artifacts/skillbuddy/app/blog/index.tsx       | 131 ++++++++++++++
+ artifacts/skillbuddy/app/job/[id]/bid.tsx     |  35 ++--
+ artifacts/skillbuddy/app/job/[id]/review.tsx  |  24 ++-
+ artifacts/skillbuddy/app/job/[id]/track.tsx   |  35 ++--
+ artifacts/skillbuddy/app/job/post.tsx         |  15 ++
+ .../skillbuddy/app/profile/professional.tsx   |  31 ++--
+ .../skillbuddy/app/profile/raise-ticket.tsx   | 161 ++++++++++++++++++
+ artifacts/skillbuddy/app/profile/tickets.tsx  |  84 +++++++++
+ .../skillbuddy/app/profile/tickets/[id].tsx   | 103 +++++++++++
+ .../skillbuddy/components/SuspensionGate.tsx  |  65 +++++++
+ artifacts/skillbuddy/data/blogData.ts         | 116 +++++++++++++
+ artifacts/skillbuddy/data/mockData.ts         |   3 +
+ artifacts/skillbuddy/data/ticketStore.ts      |  74 ++++++++
+ artifacts/skillbuddy/types/index.ts           |  33 ++++
+ 18 files changed, 1000 insertions(+), 46 deletions(-)
+ create mode 100644 artifacts/skillbuddy/app/blog/[id].tsx
+ create mode 100644 artifacts/skillbuddy/app/blog/index.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/raise-ticket.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/tickets.tsx
+ create mode 100644 artifacts/skillbuddy/app/profile/tickets/[id].tsx
+ create mode 100644 artifacts/skillbuddy/components/SuspensionGate.tsx
+ create mode 100644 artifacts/skillbuddy/data/blogData.ts
+ create mode 100644 artifacts/skillbuddy/data/ticketStore.ts
+
+diff --git a/artifacts/skillbuddy/app/(tabs)/_layout.tsx b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+index f1910ef..56b2f84 100644
+--- a/artifacts/skillbuddy/app/(tabs)/_layout.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+@@ -9,6 +9,7 @@ import { SymbolView } from 'expo-symbols';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useTheme } from '@/context/ThemeContext';
+ import { useLanguage } from '@/context/LanguageContext';
++import SuspensionGate from '@/components/SuspensionGate';
+ import AnimatedTabIcon from '@/components/AnimatedTabIcon';
+ import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
+ 
+@@ -136,6 +137,9 @@ function ClassicTabLayout() {
+ }
+ 
+ export default function TabLayout() {
+-  if (isLiquidGlassAvailable()) return <NativeTabLayout />;
+-  return <ClassicTabLayout />;
++  return (
++    <SuspensionGate>
++      {isLiquidGlassAvailable() ? <NativeTabLayout /> : <ClassicTabLayout />}
++    </SuspensionGate>
++  );
+ }
+diff --git a/artifacts/skillbuddy/app/(tabs)/index.tsx b/artifacts/skillbuddy/app/(tabs)/index.tsx
+index c42ecdb..deca7a7 100644
+--- a/artifacts/skillbuddy/app/(tabs)/index.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/index.tsx
+@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
+ import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
++import { Image } from 'expo-image';
++import { BLOG_POSTS } from '@/data/blogData';
+ import { useLanguage } from '@/context/LanguageContext';
+ import {
+   CATEGORIES,
+@@ -357,6 +359,28 @@ export default function HomeScreen() {
+           </View>
+         </Animated.View>
+ 
++        {/* From the Blog — compact teaser, links to full Blog listing */}
++        <Animated.View entering={FadeInDown.delay(170).duration(380)} style={styles.section}>
++          <View style={styles.sectionHeader}>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>From the Blog</Text>
++            <TouchableOpacity onPress={() => router.push('/blog' as any)}>
++              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
++            </TouchableOpacity>
++          </View>
++          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
++            {BLOG_POSTS.slice(0, 3).map((post) => (
++              <TouchableOpacity
++                key={post.id}
++                style={[styles.blogTeaserCard, { backgroundColor: c.card, borderColor: c.border }]}
++                onPress={() => router.push(`/blog/${post.id}` as any)}
++              >
++                <Image source={{ uri: post.image }} style={styles.blogTeaserImage} contentFit="cover" />
++                <Text style={[styles.blogTeaserTitle, { color: c.text }]} numberOfLines={2}>{post.title}</Text>
++              </TouchableOpacity>
++            ))}
++          </ScrollView>
++        </Animated.View>
++
+         {/* Invite Friends */}
+         <Animated.View entering={FadeInDown.delay(180).duration(380)} style={{ paddingHorizontal: 16, marginTop: 16 }}>
+           <View style={[styles.inviteCard, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
+@@ -565,6 +589,11 @@ const styles = StyleSheet.create({
+   badgeFill: { height: '100%', borderRadius: 3 },
+   badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
+ 
++  // ── Blog teaser ──────────────────────────────────────────────────────────
++  blogTeaserCard: { width: 160, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
++  blogTeaserImage: { width: '100%', height: 90 },
++  blogTeaserTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, lineHeight: 16, padding: 10 },
++
+   // ── Invite card ───────────────────────────────────────────────────────────
+   inviteCard: {
+     borderRadius: 16,
+diff --git a/artifacts/skillbuddy/app/(tabs)/profile.tsx b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+index a4f2322..4984d2c 100644
+--- a/artifacts/skillbuddy/app/(tabs)/profile.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+@@ -89,8 +89,10 @@ export default function ProfileScreen() {
+       title: 'Support & Safety',
+       items: [
+         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
++        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
+         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
+         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
++        { icon: 'edit-3', label: 'Blog', route: '/blog' },
+         { icon: 'info', label: t('profile_about'), route: '/profile/legal?type=about' },
+         { icon: 'file', label: t('profile_privacy'), route: '/profile/legal?type=privacy' },
+         { icon: 'shield', label: t('profile_terms'), route: '/profile/legal?type=terms' },
+@@ -135,8 +137,10 @@ export default function ProfileScreen() {
+       title: 'Support & Safety',
+       items: [
+         { icon: 'message-circle', label: t('profile_support'), route: '/chat/support' },
++        { icon: 'file-text', label: 'My Tickets', route: '/profile/tickets' },
+         { icon: 'shield', label: t('profile_safety'), route: '/profile/safety' },
+         { icon: 'book-open', label: t('profile_faqs'), route: '/profile/faqs' },
++        { icon: 'edit-3', label: 'Blog', route: '/blog' },
+       ],
+     },
+     {
+diff --git a/artifacts/skillbuddy/app/blog/[id].tsx b/artifacts/skillbuddy/app/blog/[id].tsx
+new file mode 100644
+index 0000000..cee2492
+--- /dev/null
++++ b/artifacts/skillbuddy/app/blog/[id].tsx
+@@ -0,0 +1,95 @@
++import React, { useMemo } from 'react';
++import { ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { Image } from 'expo-image';
++import { useTheme } from '@/context/ThemeContext';
++import { BLOG_POSTS } from '@/data/blogData';
++import BackButton from '@/components/BackButton';
++
++export default function BlogDetailScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const post = BLOG_POSTS.find((p) => p.id === id);
++  const related = useMemo(
++    () => (post ? BLOG_POSTS.filter((p) => p.category === post.category && p.id !== post.id).slice(0, 3) : []),
++    [post]
++  );
++
++  if (!post) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Article not found.</Text>
++      </View>
++    );
++  }
++
++  const onShare = () => {
++    Share.share({
++      title: post.title,
++      message: `${post.title} — SkillBuddy Blog\n${post.excerpt}`,
++    });
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <TouchableOpacity onPress={onShare}>
++          <Feather name="share-2" size={20} color={c.text} />
++        </TouchableOpacity>
++      </View>
++
++      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        <Image source={{ uri: post.image }} style={styles.hero} contentFit="cover" />
++        <View style={{ padding: 20 }}>
++          <Text style={[styles.category, { color: c.primary }]}>{post.category}</Text>
++          <Text style={[styles.title, { color: c.text }]}>{post.title}</Text>
++          <Text style={[styles.meta, { color: c.mutedForeground }]}>{post.author} · {post.date} · {post.readTime}</Text>
++
++          {post.body.map((para, i) => (
++            <Text key={i} style={[styles.paragraph, { color: c.text }]}>{para}</Text>
++          ))}
++
++          {related.length > 0 && (
++            <>
++              <Text style={[styles.relatedTitle, { color: c.text }]}>Related Articles</Text>
++              {related.map((r) => (
++                <TouchableOpacity
++                  key={r.id}
++                  style={[styles.relatedCard, { backgroundColor: c.card, borderColor: c.border }]}
++                  onPress={() => router.push(`/blog/${r.id}` as any)}
++                >
++                  <Image source={{ uri: r.image }} style={styles.relatedImage} contentFit="cover" />
++                  <View style={{ flex: 1, padding: 10 }}>
++                    <Text style={[styles.relatedCardTitle, { color: c.text }]} numberOfLines={2}>{r.title}</Text>
++                    <Text style={[styles.relatedMeta, { color: c.mutedForeground }]}>{r.readTime}</Text>
++                  </View>
++                </TouchableOpacity>
++              ))}
++            </>
++          )}
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
++  hero: { width: '100%', height: 240 },
++  category: { fontFamily: 'Manrope_700Bold', fontSize: 12, marginBottom: 6 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 22, lineHeight: 30, marginBottom: 8 },
++  meta: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginBottom: 18 },
++  paragraph: { fontFamily: 'Manrope_400Regular', fontSize: 15, lineHeight: 24, marginBottom: 16 },
++  relatedTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, marginTop: 12, marginBottom: 12 },
++  relatedCard: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
++  relatedImage: { width: 72, height: 72 },
++  relatedCardTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, lineHeight: 17 },
++  relatedMeta: { fontFamily: 'Manrope_400Regular', fontSize: 10, marginTop: 4 },
++});
+diff --git a/artifacts/skillbuddy/app/blog/index.tsx b/artifacts/skillbuddy/app/blog/index.tsx
+new file mode 100644
+index 0000000..2b2915b
+--- /dev/null
++++ b/artifacts/skillbuddy/app/blog/index.tsx
+@@ -0,0 +1,131 @@
++import React, { useMemo, useState } from 'react';
++import { FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { Image } from 'expo-image';
++import { useTheme } from '@/context/ThemeContext';
++import { BLOG_CATEGORIES, BLOG_POSTS } from '@/data/blogData';
++import BackButton from '@/components/BackButton';
++
++export default function BlogsScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const [query, setQuery] = useState('');
++  const [category, setCategory] = useState<string | null>(null);
++
++  const featured = BLOG_POSTS.slice(0, 3);
++
++  const filtered = useMemo(() => {
++    const q = query.trim().toLowerCase();
++    return BLOG_POSTS.filter((p) => {
++      const matchesCat = !category || p.category === category;
++      const matchesQ = !q || p.title.toLowerCase().includes(q) || p.excerpt.toLowerCase().includes(q);
++      return matchesCat && matchesQ;
++    });
++  }, [query, category]);
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Blog</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <FlatList
++        data={filtered}
++        keyExtractor={(p) => p.id}
++        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
++        showsVerticalScrollIndicator={false}
++        ListHeaderComponent={
++          <View style={{ marginBottom: 8 }}>
++            <View style={[styles.searchBar, { backgroundColor: c.input }]}>
++              <Feather name="search" size={16} color={c.mutedForeground} />
++              <TextInput
++                style={[styles.searchInput, { color: c.text }]}
++                placeholder="Search articles..."
++                placeholderTextColor={c.mutedForeground}
++                value={query}
++                onChangeText={setQuery}
++              />
++            </View>
++
++            {!query && (
++              <>
++                <Text style={[styles.sectionTitle, { color: c.text }]}>Featured</Text>
++                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }} contentContainerStyle={{ gap: 12 }}>
++                  {featured.map((post) => (
++                    <TouchableOpacity
++                      key={post.id}
++                      style={[styles.featuredCard, { backgroundColor: c.card, borderColor: c.border }]}
++                      onPress={() => router.push(`/blog/${post.id}` as any)}
++                    >
++                      <Image source={{ uri: post.image }} style={styles.featuredImage} contentFit="cover" />
++                      <View style={{ padding: 12 }}>
++                        <Text style={[styles.featuredCategory, { color: c.primary }]}>{post.category}</Text>
++                        <Text style={[styles.featuredTitle, { color: c.text }]} numberOfLines={2}>{post.title}</Text>
++                      </View>
++                    </TouchableOpacity>
++                  ))}
++                </ScrollView>
++              </>
++            )}
++
++            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
++              <TouchableOpacity
++                style={[styles.catChip, { backgroundColor: !category ? c.primary : c.muted }]}
++                onPress={() => setCategory(null)}
++              >
++                <Text style={[styles.catText, { color: !category ? '#FFF' : c.text }]}>All</Text>
++              </TouchableOpacity>
++              {BLOG_CATEGORIES.map((cat) => (
++                <TouchableOpacity
++                  key={cat}
++                  style={[styles.catChip, { backgroundColor: category === cat ? c.primary : c.muted }]}
++                  onPress={() => setCategory(cat)}
++                >
++                  <Text style={[styles.catText, { color: category === cat ? '#FFF' : c.text }]}>{cat}</Text>
++                </TouchableOpacity>
++              ))}
++            </ScrollView>
++          </View>
++        }
++        renderItem={({ item }) => (
++          <TouchableOpacity
++            style={[styles.postCard, { backgroundColor: c.card, borderColor: c.border }]}
++            onPress={() => router.push(`/blog/${item.id}` as any)}
++          >
++            <Image source={{ uri: item.image }} style={styles.postImage} contentFit="cover" />
++            <View style={{ flex: 1, padding: 12 }}>
++              <Text style={[styles.postCategory, { color: c.primary }]}>{item.category}</Text>
++              <Text style={[styles.postTitle, { color: c.text }]} numberOfLines={2}>{item.title}</Text>
++              <Text style={[styles.postMeta, { color: c.mutedForeground }]}>{item.date} · {item.readTime}</Text>
++            </View>
++          </TouchableOpacity>
++        )}
++      />
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16 },
++  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, marginBottom: 10 },
++  featuredCard: { width: 220, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
++  featuredImage: { width: '100%', height: 110 },
++  featuredCategory: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, marginBottom: 3 },
++  featuredTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13, lineHeight: 18 },
++  catChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
++  catText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  postCard: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, marginBottom: 12, overflow: 'hidden' },
++  postImage: { width: 100, height: 100 },
++  postCategory: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, marginBottom: 3 },
++  postTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13, lineHeight: 18 },
++  postMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
++});
+diff --git a/artifacts/skillbuddy/app/job/[id]/bid.tsx b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+index 2659eec..bd9a264 100644
+--- a/artifacts/skillbuddy/app/job/[id]/bid.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+@@ -14,22 +14,27 @@ import { useAppAlert } from '@/context/AlertModalContext';
+ import type { Bid, BidProvider } from '@/types';
+ 
+ // The mock-logged-in provider identity (used when submitting a bid as a Pilot).
+-const ME_AS_PROVIDER: BidProvider = {
+-  id: 'me-provider',
+-  name: CURRENT_USER.name,
+-  rating: 4.7,
+-  reviewCount: 58,
+-  jobsDone: 41,
+-  badge: 2,
+-  credibility: 90,
+-  specialty: 'General Services',
+-  location: 'Riga, Latvia',
+-  isOnline: true,
+-  distanceKm: 3.1,
+-  responseTimeMin: 9,
+-};
++// A function, not a static const, so it always reflects the live
++// CURRENT_USER.providerRating (which cancellations/reviews can change).
++function getMeAsProvider(): BidProvider {
++  return {
++    id: 'me-provider',
++    name: CURRENT_USER.name,
++    rating: CURRENT_USER.providerRating,
++    reviewCount: 58,
++    jobsDone: 41,
++    badge: 2,
++    credibility: 90,
++    specialty: 'General Services',
++    location: 'Riga, Latvia',
++    isOnline: true,
++    distanceKm: 3.1,
++    responseTimeMin: 9,
++  };
++}
+ 
+ export default function ProviderJobBidScreen() {
++  const ME_AS_PROVIDER = getMeAsProvider();
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+@@ -38,7 +43,7 @@ export default function ProviderJobBidScreen() {
+ 
+   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
+   const existingBid = useMemo(
+-    () => MOCK_BIDS.find((b) => b.jobId === id && b.provider.id === ME_AS_PROVIDER.id),
++    () => MOCK_BIDS.find((b) => b.jobId === id && b.provider.id === 'me-provider'),
+     [id]
+   );
+ 
+diff --git a/artifacts/skillbuddy/app/job/[id]/review.tsx b/artifacts/skillbuddy/app/job/[id]/review.tsx
+index 1c79f42..6fb2d67 100644
+--- a/artifacts/skillbuddy/app/job/[id]/review.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/review.tsx
+@@ -6,12 +6,17 @@ import { Feather } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
+ import { useAppAlert } from '@/context/AlertModalContext';
+ import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
++import { createTicket } from '@/data/ticketStore';
+ import BackButton from '@/components/BackButton';
+ 
+ type Path = 'choose' | 'approve' | 'deny' | 'dispute';
+ 
+ const DISPUTE_REASONS = ['Incomplete work', 'Different from description', 'Damage caused', 'No-show', 'Other'];
+ 
++function round1(n: number): number {
++  return Math.round(n * 10) / 10;
++}
++
+ export default function ReviewScreen() {
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const insets = useSafeAreaInsets();
+@@ -39,6 +44,10 @@ export default function ReviewScreen() {
+   const approve = () => {
+     job.status = 'approved';
+     job.clientReview = { rating, comment };
++    const provider = BID_PROVIDERS.find((p) => p.id === job.assignedProviderId);
++    if (provider) {
++      provider.rating = Math.min(5, round1((provider.rating ?? 0) + 0.1));
++    }
+     router.replace(`/(tabs)/jobs` as any);
+     showAlert({ title: 'Review submitted', message: 'Thanks! Payment has been finalized with your Pilot.', icon: 'check-circle' });
+   };
+@@ -61,8 +70,21 @@ export default function ReviewScreen() {
+     }
+     job.status = 'disputed';
+     job.disputeReason = `${disputeReason}: ${comment}`;
++    const ticket = createTicket({
++      category: 'Job Dispute',
++      description: `${disputeReason}: ${comment}`,
++      jobId: job.id,
++      jobCategory: job.category,
++      jobDate: `${job.date}, ${job.time}`,
++      amount: job.assignedPrice,
++      autoGenerated: true,
++    });
+     router.replace('/(tabs)/jobs' as any);
+-    showAlert({ title: 'Support ticket created', message: 'Our support team will review this dispute and get back to you.', icon: 'shield' });
++    showAlert({
++      title: 'Support ticket created',
++      message: `Ticket ${ticket.id} has been created. Our support team will review this dispute and get back to you.`,
++      icon: 'shield',
++    });
+   };
+ 
+   return (
+diff --git a/artifacts/skillbuddy/app/job/[id]/track.tsx b/artifacts/skillbuddy/app/job/[id]/track.tsx
+index 53cefe5..ff0f217 100644
+--- a/artifacts/skillbuddy/app/job/[id]/track.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/track.tsx
+@@ -6,13 +6,17 @@ import { Feather } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
+ import { useRole } from '@/context/RoleContext';
+ import { useAppAlert } from '@/context/AlertModalContext';
+-import { BID_PROVIDERS, MOCK_JOBS } from '@/data/mockData';
++import { BID_PROVIDERS, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
+ import { calculatePayoutBreakdown, CANCELLATION_FEE } from '@/lib/payment';
+ import BackButton from '@/components/BackButton';
+ import type { JobStatus } from '@/types';
+ 
+ const CANCEL_REASONS = ['Schedule conflict', 'Found another provider', 'No longer needed', 'Price disagreement', 'Other'];
+ 
++function round1(n: number): number {
++  return Math.round(n * 10) / 10;
++}
++
+ const STEPS: { status: JobStatus; label: string }[] = [
+   { status: 'task_assigned', label: 'Assigned' },
+   { status: 'arrived', label: 'Arrived' },
+@@ -115,22 +119,16 @@ export default function JobTrackingScreen() {
+   const cancelJob = (reason: string) => {
+     setShowCancelReasons(false);
+     if (isProvider) {
+-      // Provider cancels before job starts: credibility/rating penalty, mock suspension check.
+-      const p = BID_PROVIDERS.find((pv) => pv.id === job.assignedProviderId);
+-      if (p) {
+-        p.credibility = Math.max(0, (p.credibility ?? 0) - 10);
+-        p.rating = Math.max(0, (p.rating ?? 0) - 0.5);
+-      }
++      // Provider cancels before job starts: penalty applies to the current
++      // user's own Pilot stats (CURRENT_USER), not the abstract BID_PROVIDERS
++      // pool — those represent other simulated Pilots, not "me".
++      CURRENT_USER.providerRating = Math.max(0, round1(CURRENT_USER.providerRating - 0.5));
+       job.cancellation = { by: 'provider', reason };
+       job.status = 'bidding';
+       job.assignedProviderId = undefined;
+-      if (p && p.rating! < 4.0) {
+-        showAlert({
+-          title: 'Account Suspended',
+-          message: 'Your rating dropped below 4.0 after this cancellation. Your Pilot account is suspended for 28 days.',
+-          icon: 'alert-triangle',
+-          buttons: [{ text: 'OK', onPress: () => router.replace('/(tabs)/jobs' as any) }],
+-        });
++      if (CURRENT_USER.providerRating < 4.0) {
++        CURRENT_USER.providerSuspendedUntil = Date.now() + 28 * 24 * 60 * 60 * 1000;
++        router.replace('/(tabs)/jobs' as any);
+         return;
+       }
+       showAlert({ title: 'Job cancelled', message: 'The client has been notified and the job has reopened for bidding.', icon: 'info' });
+@@ -280,6 +278,15 @@ export default function JobTrackingScreen() {
+               <Text style={styles.actionText}>Leave a Review</Text>
+             </TouchableOpacity>
+           )}
++          {['completed', 'approved', 'closed'].includes(job.status) && (
++            <TouchableOpacity
++              style={[styles.actionBtnOutline, { borderColor: c.border }]}
++              onPress={() => router.push({ pathname: '/profile/raise-ticket', params: { jobId: job.id } } as any)}
++            >
++              <Feather name="help-circle" size={16} color={c.text} />
++              <Text style={[styles.actionOutlineText, { color: c.text }]}>Get Help</Text>
++            </TouchableOpacity>
++          )}
+           {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (
+             <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: c.border }]} onPress={() => setShowRevision(true)}>
+               <Feather name="edit-3" size={16} color={c.text} />
+diff --git a/artifacts/skillbuddy/app/job/post.tsx b/artifacts/skillbuddy/app/job/post.tsx
+index 1f6aadc..235ff51 100644
+--- a/artifacts/skillbuddy/app/job/post.tsx
++++ b/artifacts/skillbuddy/app/job/post.tsx
+@@ -14,6 +14,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+ import * as ImagePicker from 'expo-image-picker';
+ import { useTheme } from '@/context/ThemeContext';
+ import BackButton from '@/components/BackButton';
++import { useAppAlert } from '@/context/AlertModalContext';
+ import InlineLoader from '@/components/InlineLoader';
+ import { CATEGORIES, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
+ import type { Job, JobUrgency } from '@/types';
+@@ -25,6 +26,7 @@ export default function PostJobScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
+ 
+   const [title, setTitle] = useState('');
+   const [description, setDescription] = useState('');
+@@ -73,6 +75,19 @@ export default function PostJobScreen() {
+ 
+   const handleSubmit = async () => {
+     if (!validate()) return;
++
++    const activeClientJobs = MOCK_JOBS.filter(
++      (j) => j.clientId === CURRENT_USER.id && !['closed', 'cancelled', 'expired', 'approved'].includes(j.status)
++    );
++    if (activeClientJobs.length >= 5) {
++      showAlert({
++        title: 'Job limit reached',
++        message: 'You can have up to 5 active jobs at once. Close or cancel an existing job before posting a new one.',
++        icon: 'alert-circle',
++      });
++      return;
++    }
++
+     setSubmitting(true);
+ 
+     const durationMs = urgency === 'urgent' ? 30 * 60 * 1000 : 3 * 60 * 60 * 1000;
+diff --git a/artifacts/skillbuddy/app/profile/professional.tsx b/artifacts/skillbuddy/app/profile/professional.tsx
+index b6bd9d9..d13810e 100644
+--- a/artifacts/skillbuddy/app/profile/professional.tsx
++++ b/artifacts/skillbuddy/app/profile/professional.tsx
+@@ -9,22 +9,25 @@ import { calculateProviderScore } from '@/lib/scoring';
+ import BackButton from '@/components/BackButton';
+ import type { BidProvider } from '@/types';
+ 
+-const ME_AS_PROVIDER: BidProvider = {
+-  id: 'me-provider',
+-  name: CURRENT_USER.name,
+-  rating: 4.7,
+-  reviewCount: 58,
+-  jobsDone: 41,
+-  badge: 2,
+-  credibility: 90,
+-  specialty: CURRENT_USER.primarySkill,
+-  location: CURRENT_USER.address,
+-  isOnline: true,
+-  distanceKm: 3.1,
+-  responseTimeMin: 9,
+-};
++function getMeAsProvider(): BidProvider {
++  return {
++    id: 'me-provider',
++    name: CURRENT_USER.name,
++    rating: CURRENT_USER.providerRating,
++    reviewCount: 58,
++    jobsDone: 41,
++    badge: 2,
++    credibility: 90,
++    specialty: CURRENT_USER.primarySkill,
++    location: CURRENT_USER.address,
++    isOnline: true,
++    distanceKm: 3.1,
++    responseTimeMin: 9,
++  };
++}
+ 
+ export default function ProfessionalInfoScreen() {
++  const ME_AS_PROVIDER = getMeAsProvider();
+   const insets = useSafeAreaInsets();
+   const { colors: c } = useTheme();
+   const { activeRole } = useRole();
+diff --git a/artifacts/skillbuddy/app/profile/raise-ticket.tsx b/artifacts/skillbuddy/app/profile/raise-ticket.tsx
+new file mode 100644
+index 0000000..1fbe90c
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/raise-ticket.tsx
+@@ -0,0 +1,161 @@
++import React, { useState } from 'react';
++import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import * as ImagePicker from 'expo-image-picker';
++import { useTheme } from '@/context/ThemeContext';
++import { useAppAlert } from '@/context/AlertModalContext';
++import { useRole } from '@/context/RoleContext';
++import { createTicket } from '@/data/ticketStore';
++import BackButton from '@/components/BackButton';
++import InlineLoader from '@/components/InlineLoader';
++import type { TicketCategory } from '@/types';
++
++const CATEGORIES: TicketCategory[] = [
++  'Payment Issue',
++  'Job Dispute',
++  'Cancellation Issue',
++  'No-show',
++  'Misconduct',
++  'Technical Issue',
++  'Account Verification',
++  'Other',
++];
++
++const CATEGORY_ICONS: Record<TicketCategory, keyof typeof Feather.glyphMap> = {
++  'Payment Issue': 'credit-card',
++  'Job Dispute': 'briefcase',
++  'Cancellation Issue': 'x-circle',
++  'No-show': 'user-x',
++  'Misconduct': 'alert-triangle',
++  'Technical Issue': 'tool',
++  'Account Verification': 'shield',
++  'Other': 'help-circle',
++};
++
++export default function RaiseTicketScreen() {
++  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
++  const { activeRole } = useRole();
++
++  const [category, setCategory] = useState<TicketCategory | null>(null);
++  const [description, setDescription] = useState('');
++  const [photos, setPhotos] = useState<string[]>([]);
++  const [submitting, setSubmitting] = useState(false);
++
++  const pickImage = async () => {
++    if (photos.length >= 3) return;
++    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
++    if (!permission.granted) return;
++    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
++    if (!result.canceled && result.assets?.[0]) {
++      setPhotos((prev) => [...prev, result.assets[0].uri].slice(0, 3));
++    }
++  };
++
++  const submit = async () => {
++    if (!category) {
++      showAlert({ title: 'Select a category', message: 'Please choose an issue type first.', icon: 'alert-circle' });
++      return;
++    }
++    if (!description.trim()) {
++      showAlert({ title: 'Description required', message: 'Please describe the issue.', icon: 'alert-circle' });
++      return;
++    }
++    setSubmitting(true);
++    await new Promise((r) => setTimeout(r, 500));
++    const ticket = createTicket({
++      category,
++      description: description.trim(),
++      attachments: photos,
++      jobId: jobId as string | undefined,
++      userRole: activeRole,
++    });
++    setSubmitting(false);
++    showAlert({
++      title: 'Ticket Created',
++      message: `Your ticket ${ticket.id} has been submitted. Our support team will follow up soon.`,
++      icon: 'check-circle',
++      buttons: [{ text: 'View My Tickets', onPress: () => router.replace('/profile/tickets' as any) }],
++    });
++  };
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>Raise a Ticket</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        <Text style={[styles.sectionLabel, { color: c.text }]}>What's this about?</Text>
++        <View style={styles.catGrid}>
++          {CATEGORIES.map((cat) => (
++            <TouchableOpacity
++              key={cat}
++              style={[
++                styles.catChip,
++                { backgroundColor: category === cat ? c.primary : c.card, borderColor: category === cat ? c.primary : c.border },
++              ]}
++              onPress={() => setCategory(cat)}
++            >
++              <Feather name={CATEGORY_ICONS[cat]} size={16} color={category === cat ? '#FFF' : c.primary} />
++              <Text style={[styles.catText, { color: category === cat ? '#FFF' : c.text }]}>{cat}</Text>
++            </TouchableOpacity>
++          ))}
++        </View>
++
++        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 20 }]}>Describe the Issue</Text>
++        <TextInput
++          style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
++          value={description}
++          onChangeText={setDescription}
++          placeholder="Tell us what happened..."
++          placeholderTextColor={c.mutedForeground}
++          multiline
++        />
++
++        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>Attachments (optional)</Text>
++        <View style={styles.photoRow}>
++          {photos.map((uri) => (
++            <View key={uri} style={[styles.photoThumb, { backgroundColor: c.muted }]} />
++          ))}
++          {photos.length < 3 && (
++            <TouchableOpacity style={[styles.photoAdd, { backgroundColor: c.muted, borderColor: c.border }]} onPress={pickImage}>
++              <Feather name="camera" size={18} color={c.mutedForeground} />
++            </TouchableOpacity>
++          )}
++        </View>
++
++        <TouchableOpacity
++          style={[styles.submitBtn, { backgroundColor: c.primary, opacity: submitting ? 0.8 : 1 }]}
++          onPress={submit}
++          disabled={submitting}
++        >
++          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>Submit Ticket</Text>}
++        </TouchableOpacity>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 10 },
++  catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
++  catChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
++  catText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  textArea: { borderRadius: 12, padding: 14, minHeight: 110, fontFamily: 'Manrope_400Regular', fontSize: 13 },
++  photoRow: { flexDirection: 'row', gap: 10 },
++  photoThumb: { width: 64, height: 64, borderRadius: 10 },
++  photoAdd: { width: 64, height: 64, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
++  submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
++  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
++});
+diff --git a/artifacts/skillbuddy/app/profile/tickets.tsx b/artifacts/skillbuddy/app/profile/tickets.tsx
+new file mode 100644
+index 0000000..bb8ecb4
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/tickets.tsx
+@@ -0,0 +1,84 @@
++import React from 'react';
++import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { MOCK_TICKETS } from '@/data/ticketStore';
++import BackButton from '@/components/BackButton';
++import EmptyState from '@/components/EmptyState';
++import type { TicketStatus } from '@/types';
++
++const STATUS_COLOR: Record<TicketStatus, 'warning' | 'primary' | 'mutedForeground' | 'success' | 'destructive'> = {
++  Open: 'warning',
++  'In Review': 'primary',
++  Waiting: 'mutedForeground',
++  Resolved: 'success',
++  Closed: 'destructive',
++};
++
++export default function MyTicketsScreen() {
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>My Tickets</Text>
++        <TouchableOpacity onPress={() => router.push('/profile/raise-ticket' as any)}>
++          <Feather name="plus" size={22} color={c.primary} />
++        </TouchableOpacity>
++      </View>
++
++      <FlatList
++        data={MOCK_TICKETS}
++        keyExtractor={(t) => t.id}
++        contentContainerStyle={{ padding: 20, paddingBottom: 40, flexGrow: 1 }}
++        ListEmptyComponent={
++          <EmptyState icon="file-text" title="No tickets yet" subtitle="Tickets you raise with Support will show up here." />
++        }
++        renderItem={({ item }) => {
++          const colorKey = STATUS_COLOR[item.status];
++          return (
++            <TouchableOpacity
++              style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
++              onPress={() => router.push(`/profile/tickets/${item.id}` as any)}
++            >
++              <View style={styles.topRow}>
++                <Text style={[styles.ticketId, { color: c.mutedForeground }]}>{item.id}</Text>
++                <View style={[styles.statusChip, { backgroundColor: c[colorKey] + '22' }]}>
++                  <Text style={[styles.statusText, { color: c[colorKey] }]}>{item.status}</Text>
++                </View>
++              </View>
++              <Text style={[styles.category, { color: c.text }]}>{item.category}</Text>
++              <Text style={[styles.desc, { color: c.mutedForeground }]} numberOfLines={2}>{item.description}</Text>
++              {item.autoGenerated && (
++                <View style={styles.autoTag}>
++                  <Feather name="zap" size={10} color={c.mutedForeground} />
++                  <Text style={[styles.autoTagText, { color: c.mutedForeground }]}>Auto-generated from dispute</Text>
++                </View>
++              )}
++            </TouchableOpacity>
++          );
++        }}
++      />
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  card: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 12 },
++  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
++  ticketId: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
++  statusChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
++  statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
++  category: { fontFamily: 'Manrope_700Bold', fontSize: 14, marginBottom: 4 },
++  desc: { fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 17 },
++  autoTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
++  autoTagText: { fontFamily: 'Manrope_400Regular', fontSize: 10 },
++});
+diff --git a/artifacts/skillbuddy/app/profile/tickets/[id].tsx b/artifacts/skillbuddy/app/profile/tickets/[id].tsx
+new file mode 100644
+index 0000000..b2d2bf8
+--- /dev/null
++++ b/artifacts/skillbuddy/app/profile/tickets/[id].tsx
+@@ -0,0 +1,103 @@
++import React from 'react';
++import { ScrollView, StyleSheet, Text, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++import { MOCK_TICKETS } from '@/data/ticketStore';
++import BackButton from '@/components/BackButton';
++
++const STATUS_STEPS = ['Open', 'In Review', 'Waiting', 'Resolved', 'Closed'] as const;
++
++export default function TicketDetailScreen() {
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const { colors: c } = useTheme();
++
++  const ticket = MOCK_TICKETS.find((t) => t.id === id);
++
++  if (!ticket) {
++    return (
++      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++        <Text style={{ color: c.text, padding: 20 }}>Ticket not found.</Text>
++      </View>
++    );
++  }
++
++  const stepIndex = STATUS_STEPS.indexOf(ticket.status);
++
++  return (
++    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
++      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
++        <BackButton />
++        <Text style={[styles.headerTitle, { color: c.text }]}>{ticket.id}</Text>
++        <View style={{ width: 40 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
++        {/* Status stepper */}
++        <View style={styles.stepper}>
++          {STATUS_STEPS.map((s, i) => (
++            <View key={s} style={styles.stepItem}>
++              <View style={[styles.stepDot, { backgroundColor: i <= stepIndex ? c.primary : c.muted }]} />
++              <Text style={[styles.stepLabel, { color: i <= stepIndex ? c.primary : c.mutedForeground }]}>{s}</Text>
++            </View>
++          ))}
++        </View>
++
++        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
++          <Text style={[styles.category, { color: c.text }]}>{ticket.category}</Text>
++          <Text style={[styles.desc, { color: c.mutedForeground }]}>{ticket.description}</Text>
++
++          {ticket.jobId && (
++            <View style={[styles.fieldBlock, { borderTopColor: c.border }]}>
++              <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Related Job</Text>
++              <Text style={[styles.fieldValue, { color: c.text }]}>
++                {ticket.jobCategory} {ticket.jobDate ? `— ${ticket.jobDate}` : ''}
++              </Text>
++            </View>
++          )}
++          {ticket.amount !== undefined && (
++            <View style={[styles.fieldBlock, { borderTopColor: c.border }]}>
++              <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Amount</Text>
++              <Text style={[styles.fieldValue, { color: c.text }]}>€{ticket.amount.toFixed(2)}</Text>
++            </View>
++          )}
++          <View style={[styles.fieldBlock, { borderTopColor: c.border }]}>
++            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Submitted by</Text>
++            <Text style={[styles.fieldValue, { color: c.text }]}>{ticket.userName} ({ticket.userRole})</Text>
++          </View>
++          <View style={[styles.fieldBlock, { borderTopColor: c.border }]}>
++            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Created</Text>
++            <Text style={[styles.fieldValue, { color: c.text }]}>{new Date(ticket.createdAt).toLocaleDateString()}</Text>
++          </View>
++          {ticket.autoGenerated && (
++            <View style={styles.autoNote}>
++              <Feather name="zap" size={12} color={c.mutedForeground} />
++              <Text style={[styles.autoNoteText, { color: c.mutedForeground }]}>Auto-generated from a job dispute</Text>
++            </View>
++          )}
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  stepper: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
++  stepItem: { alignItems: 'center', flex: 1 },
++  stepDot: { width: 12, height: 12, borderRadius: 6, marginBottom: 6 },
++  stepLabel: { fontFamily: 'Manrope_500Medium', fontSize: 9, textAlign: 'center' },
++  card: { borderWidth: 1, borderRadius: 16, padding: 18 },
++  category: { fontFamily: 'Manrope_700Bold', fontSize: 17, marginBottom: 8 },
++  desc: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 21 },
++  fieldBlock: { borderTopWidth: 1, paddingTop: 12, marginTop: 12 },
++  fieldLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
++  fieldValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 3 },
++  autoNote: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
++  autoNoteText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
++});
+diff --git a/artifacts/skillbuddy/components/SuspensionGate.tsx b/artifacts/skillbuddy/components/SuspensionGate.tsx
+new file mode 100644
+index 0000000..d59aff7
+--- /dev/null
++++ b/artifacts/skillbuddy/components/SuspensionGate.tsx
+@@ -0,0 +1,65 @@
++import React from 'react';
++import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Feather } from '@expo/vector-icons';
++import { CURRENT_USER } from '@/data/mockData';
++import { useRole } from '@/context/RoleContext';
++
++function formatDaysLeft(until: number): number {
++  return Math.max(1, Math.ceil((until - Date.now()) / (24 * 60 * 60 * 1000)));
++}
++
++/**
++ * Renders nothing unless the current user's Pilot account is suspended
++ * (rating dropped below 4.0 after a cancellation) AND they're viewing the
++ * app as a Provider — in that case it renders a full-screen, non-dismissible
++ * notice in place of children, blocking the provider dashboard entirely
++ * until the 28-day suspension has elapsed.
++ */
++export default function SuspensionGate({ children }: { children: React.ReactNode }) {
++  const insets = useSafeAreaInsets();
++  const { activeRole, toggleRole } = useRole();
++
++  const suspendedUntil = CURRENT_USER.providerSuspendedUntil;
++  const isSuspended = !!suspendedUntil && suspendedUntil > Date.now() && activeRole === 'PROVIDER';
++
++  if (!isSuspended) return <>{children}</>;
++
++  const daysLeft = formatDaysLeft(suspendedUntil!);
++
++  return (
++    <View style={[styles.root, { paddingTop: insets.top + 40 }]}>
++      <View style={styles.iconWrap}>
++        <Feather name="alert-triangle" size={40} color="#E85D5D" />
++      </View>
++      <Text style={styles.title}>Pilot Account Suspended</Text>
++      <Text style={styles.message}>
++        Your rating dropped below 4.0 after a job cancellation. Per SkillBuddy policy, your
++        Pilot account is suspended for 28 days from the cancellation date.
++      </Text>
++      <View style={styles.daysCard}>
++        <Text style={styles.daysValue}>{daysLeft}</Text>
++        <Text style={styles.daysLabel}>day{daysLeft !== 1 ? 's' : ''} remaining</Text>
++      </View>
++      <Text style={styles.hint}>
++        You can still use SkillBuddy as a Client during this time.
++      </Text>
++      <TouchableOpacity style={styles.switchBtn} onPress={toggleRole}>
++        <Text style={styles.switchText}>Switch to Client View</Text>
++      </TouchableOpacity>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1, alignItems: 'center', paddingHorizontal: 28, backgroundColor: '#161B19' },
++  iconWrap: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(232,93,93,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#FFF', textAlign: 'center', marginBottom: 12 },
++  message: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 21, marginBottom: 24 },
++  daysCard: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20, paddingVertical: 20, paddingHorizontal: 32, marginBottom: 20 },
++  daysValue: { fontFamily: 'Manrope_700Bold', fontSize: 40, color: '#FFF' },
++  daysLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
++  hint: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.55)', textAlign: 'center', marginBottom: 20 },
++  switchBtn: { backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
++  switchText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#161B19' },
++});
+diff --git a/artifacts/skillbuddy/data/blogData.ts b/artifacts/skillbuddy/data/blogData.ts
+new file mode 100644
+index 0000000..abfe4ba
+--- /dev/null
++++ b/artifacts/skillbuddy/data/blogData.ts
+@@ -0,0 +1,116 @@
++export interface BlogPost {
++  id: string;
++  title: string;
++  category: string;
++  excerpt: string;
++  body: string[];
++  author: string;
++  date: string;
++  readTime: string;
++  image: string;
++}
++
++export const BLOG_CATEGORIES = [
++  'Home Services',
++  'Client Guides',
++  'Provider Growth',
++  'Safety & Trust',
++  'Platform Updates',
++  'Business & Industry',
++];
++
++export const BLOG_POSTS: BlogPost[] = [
++  {
++    id: 'bl1',
++    title: '5 Signs It\'s Time to Hire a Professional House Cleaner',
++    category: 'Home Services',
++    excerpt: 'Juggling work and home life? Here\'s how to know when a professional clean is worth it.',
++    author: 'SkillBuddy Team',
++    date: 'Jan 12, 2026',
++    readTime: '4 min read',
++    image: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800',
++    body: [
++      'Between work, family, and everything in between, keeping a spotless home can feel like a full-time job on top of your actual full-time job. If you\'ve been putting off deep-cleaning the bathroom for the third week running, it might be time to bring in a professional.',
++      'A professional SkillBuddy Pilot doesn\'t just tidy up — they deep clean areas that often get overlooked: baseboards, behind appliances, grout lines, and light fixtures. The difference between a quick surface wipe and a proper deep clean is night and day.',
++      'One of the biggest signs is simply mental load. If cleaning has become a source of stress rather than a task, outsourcing it frees up hours every week for the things that actually matter to you.',
++      'Booking through SkillBuddy also means you know exactly who is coming into your home — every Pilot is verified, rated, and reviewed by real clients before they ever pick up a job.',
++    ],
++  },
++  {
++    id: 'bl2',
++    title: 'How to Write a Job Post That Gets Great Bids',
++    category: 'Client Guides',
++    excerpt: 'The details you include in your job post directly affect the quality of bids you receive.',
++    author: 'SkillBuddy Team',
++    date: 'Jan 8, 2026',
++    readTime: '5 min read',
++    image: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800',
++    body: [
++      'A vague job post gets vague bids. If you want SkillBuddy Pilots to bid accurately and confidently, the details you provide upfront matter enormously.',
++      'Start with a clear, specific title — "Deep clean 2-bedroom apartment" tells a Pilot far more than just "Cleaning needed." Follow with a description that covers scope, any access instructions, and what "done" looks like to you.',
++      'Photos help enormously, especially for jobs like repairs or painting where the scale of the work isn\'t obvious from text alone. A few clear photos can mean the difference between an accurate bid and a lowball offer that gets renegotiated later.',
++      'Finally, be realistic about your budget. Our recommendation algorithm surfaces Pilots based on distance, rating, and credibility — but a wildly underpriced job will attract fewer serious bids regardless of how well it\'s written.',
++    ],
++  },
++  {
++    id: 'bl3',
++    title: 'Growing Your SkillBuddy Pilot Business: A Practical Guide',
++    category: 'Provider Growth',
++    excerpt: 'From your first job to a fully booked calendar — practical tips from top-rated Pilots.',
++    author: 'SkillBuddy Team',
++    date: 'Jan 3, 2026',
++    readTime: '6 min read',
++    image: 'https://images.unsplash.com/photo-1521791136064-7986c2920216?w=800',
++    body: [
++      'Your rating and badge tier directly influence how often you\'re recommended to clients — our scoring system weighs star rating, credibility, response time, and job history. The fastest way to climb is consistency: respond quickly, show up on time, and follow through on what you bid.',
++      'Response time carries more weight than most new Pilots expect. Bidding within the first few minutes of a job going live, especially for Urgent requests, significantly increases your chances of being shortlisted.',
++      'Don\'t underprice just to win jobs early on. A string of low-margin jobs completed well builds the same credibility as higher-priced ones — and once your badge tier climbs, you\'ll naturally command better rates.',
++      'Finally, invest in your profile: a clear photo, a specific primary skill, and certifications where relevant all feed into how clients perceive you before they even see your bid.',
++    ],
++  },
++  {
++    id: 'bl4',
++    title: 'How SkillBuddy Verifies Every Pilot on the Platform',
++    category: 'Safety & Trust',
++    excerpt: 'A look behind the scenes at our documents, credibility, and rating system.',
++    author: 'SkillBuddy Team',
++    date: 'Dec 28, 2025',
++    readTime: '4 min read',
++    image: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=800',
++    body: [
++      'Trust is the foundation of any service marketplace, and SkillBuddy takes verification seriously at every stage. Every Pilot must complete face verification and, where applicable, provide residence permit documentation before they can bid on jobs.',
++      'Beyond onboarding, our credibility score is a living number — it responds to job completion, cancellations, and client reviews in real time. A Pilot who cancels jobs frequently or receives poor reviews will see this reflected immediately in their score and, by extension, in how often they\'re recommended.',
++      'If a Pilot\'s rating drops below 4.0 following a cancellation, their account is automatically suspended for 28 days — a firm but fair policy designed to protect clients without being permanently punitive.',
++    ],
++  },
++  {
++    id: 'bl5',
++    title: 'What\'s New: Live Bidding and Smarter Recommendations',
++    category: 'Platform Updates',
++    excerpt: 'A rundown of the newest features shipped to the SkillBuddy app.',
++    author: 'SkillBuddy Team',
++    date: 'Dec 20, 2025',
++    readTime: '3 min read',
++    image: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800',
++    body: [
++      'We\'ve rolled out a live bidding dashboard for both Urgent and Regular jobs — client-side, you\'ll now see bids arrive in real time as Pilots respond, with our Top 3 Recommended section automatically surfacing the best matches by score.',
++      'On the Pilot side, we\'ve added the ability to modify a submitted bid and quick +/- price adjustment buttons when a client restarts a bidding timer without accepting an offer.',
++      'We\'ve also overhauled the payment flow with clear VAT/fee breakdowns on both the client and Pilot sides, plus support for Pay Later and Instalment plans for eligible, established users.',
++    ],
++  },
++  {
++    id: 'bl6',
++    title: 'The Gig Economy in the Baltics: Where Local Services Are Headed',
++    category: 'Business & Industry',
++    excerpt: 'A look at how on-demand local services are evolving across Latvia, Estonia, and Lithuania.',
++    author: 'SkillBuddy Team',
++    date: 'Dec 14, 2025',
++    readTime: '5 min read',
++    image: 'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800',
++    body: [
++      'The Baltic region has quietly become one of the more interesting testing grounds for local-services marketplaces — high smartphone penetration, dense urban centers, and a strong culture of independent contracting all play a part.',
++      'Unlike larger Western European markets, demand here skews heavily toward flexible, short-notice bookings rather than recurring subscriptions — which is part of why our Urgent/Regular bidding model resonates so strongly with local users.',
++      'As the platform grows across Riga, Tallinn, and Vilnius, we\'re seeing an increasing share of Pilots treating SkillBuddy as a primary income source rather than a side gig — a trend we expect to continue through 2026.',
++    ],
++  },
++];
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index 0c827d5..f9078e2 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -23,6 +23,8 @@ export interface MockUser {
+   secondarySkill: string;
+   maskedCard: string;
+   iban: string;
++  providerRating: number; // single source of truth for the user's own Pilot rating (affects scoring + suspension)
++  providerSuspendedUntil?: number; // epoch ms — set when rating drops below 4.0 after a cancellation
+ }
+ 
+ export const CURRENT_USER: MockUser = {
+@@ -46,6 +48,7 @@ export const CURRENT_USER: MockUser = {
+   secondarySkill: 'Laundry & Ironing',
+   maskedCard: '•••• •••• •••• 4242',
+   iban: 'LV•• XXXX •••• •••• 7821',
++  providerRating: 4.7,
+ };
+ 
+ export interface CreditTransaction {
+diff --git a/artifacts/skillbuddy/data/ticketStore.ts b/artifacts/skillbuddy/data/ticketStore.ts
+new file mode 100644
+index 0000000..b7e509a
+--- /dev/null
++++ b/artifacts/skillbuddy/data/ticketStore.ts
+@@ -0,0 +1,74 @@
++import type { Ticket, TicketCategory } from '@/types';
++import { CURRENT_USER } from '@/data/mockData';
++
++export const MOCK_TICKETS: Ticket[] = [
++  {
++    id: 'SB-TKT-2026-000041',
++    createdAt: Date.now() - 6 * 24 * 60 * 60 * 1000,
++    status: 'Resolved',
++    category: 'Payment Issue',
++    description: 'My card was charged twice for the same booking.',
++    attachments: [],
++    userId: CURRENT_USER.id,
++    userName: CURRENT_USER.name,
++    userRole: 'CLIENT',
++  },
++  {
++    id: 'SB-TKT-2026-000058',
++    createdAt: Date.now() - 2 * 24 * 60 * 60 * 1000,
++    status: 'In Review',
++    category: 'Technical Issue',
++    description: 'The app crashed while uploading photos to a job post.',
++    attachments: [],
++    userId: CURRENT_USER.id,
++    userName: CURRENT_USER.name,
++    userRole: 'CLIENT',
++  },
++];
++
++let ticketCounter = 58;
++
++export function generateTicketId(): string {
++  ticketCounter += 1;
++  const year = new Date().getFullYear();
++  return `SB-TKT-${year}-${String(ticketCounter).padStart(6, '0')}`;
++}
++
++interface CreateTicketInput {
++  category: TicketCategory;
++  description: string;
++  attachments?: string[];
++  jobId?: string;
++  jobCategory?: string;
++  jobDate?: string;
++  assignedProviderName?: string;
++  amount?: number;
++  paymentStatus?: string;
++  transactionId?: string;
++  autoGenerated?: boolean;
++  userRole?: 'CLIENT' | 'PROVIDER';
++}
++
++export function createTicket(input: CreateTicketInput): Ticket {
++  const ticket: Ticket = {
++    id: generateTicketId(),
++    createdAt: Date.now(),
++    status: 'Open',
++    category: input.category,
++    description: input.description,
++    attachments: input.attachments ?? [],
++    userId: CURRENT_USER.id,
++    userName: CURRENT_USER.name,
++    userRole: input.userRole ?? 'CLIENT',
++    jobId: input.jobId,
++    jobCategory: input.jobCategory,
++    jobDate: input.jobDate,
++    assignedProviderName: input.assignedProviderName,
++    amount: input.amount,
++    paymentStatus: input.paymentStatus,
++    transactionId: input.transactionId,
++    autoGenerated: input.autoGenerated,
++  };
++  MOCK_TICKETS.unshift(ticket);
++  return ticket;
++}
+diff --git a/artifacts/skillbuddy/types/index.ts b/artifacts/skillbuddy/types/index.ts
+index 5632265..0020e78 100644
+--- a/artifacts/skillbuddy/types/index.ts
++++ b/artifacts/skillbuddy/types/index.ts
+@@ -153,6 +153,39 @@ export interface Review {
+   date: string;
+ }
+ 
++// ─── Ticketing (Module 10) ─────────────────────────────────────────────────
++export type TicketCategory =
++  | 'Payment Issue'
++  | 'Job Dispute'
++  | 'Cancellation Issue'
++  | 'No-show'
++  | 'Misconduct'
++  | 'Technical Issue'
++  | 'Account Verification'
++  | 'Other';
++
++export type TicketStatus = 'Open' | 'In Review' | 'Waiting' | 'Resolved' | 'Closed';
++
++export interface Ticket {
++  id: string; // SB-TKT-YYYY-NNNNNN
++  createdAt: number;
++  status: TicketStatus;
++  category: TicketCategory;
++  description: string;
++  attachments: string[];
++  userId: string;
++  userName: string;
++  userRole: 'CLIENT' | 'PROVIDER';
++  jobId?: string;
++  jobCategory?: string;
++  jobDate?: string;
++  assignedProviderName?: string;
++  amount?: number;
++  paymentStatus?: string;
++  transactionId?: string;
++  autoGenerated?: boolean;
++}
++
+ // ─── Jobs & Bidding (Phase 2) ──────────────────────────────────────────────────
+ export type JobUrgency = 'urgent' | 'regular';
+ export type JobStatus =
+-- 
+2.43.0
+

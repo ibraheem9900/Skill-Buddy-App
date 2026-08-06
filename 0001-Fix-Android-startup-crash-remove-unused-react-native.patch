@@ -1,0 +1,292 @@
+From f00c1c9384ed98c4806b81cbaeceb0baf83b2a32 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Fri, 24 Jul 2026 21:07:32 +0000
+Subject: [PATCH] Fix Android startup crash: remove unused react-native-maps
+ dependency
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Root cause confirmed by inspection: react-native-maps was only referenced
+in one file, components/ExploreMap.native.tsx — and that file was never
+imported anywhere in the app (dead code, no screen used it). Despite
+being unused in JS, react-native-maps is still a native dependency that
+gets auto-linked into the Android build, and since no Google Maps API
+key was configured in app.json, Google Play Services fails to initialize
+the Maps SDK at app startup, crashing the app before any screen loads
+(not just when a map screen is opened — this matches builds crashing
+immediately on launch).
+
+Rather than setting up a Google Cloud account/API key/billing for a
+feature that isn't actually used, removed the dependency and the
+orphaned file entirely. Lockfile updated (pnpm install: -2 packages).
+
+Requires a new EAS build (native dependency change, not an OTA-eligible
+JS change) —  again
+after applying this patch.
+
+Full typecheck: zero errors.
+---
+ .../components/ExploreMap.native.tsx          | 169 ------------------
+ artifacts/skillbuddy/package.json             |   3 +-
+ pnpm-lock.yaml                                |  27 ---
+ 3 files changed, 1 insertion(+), 198 deletions(-)
+ delete mode 100644 artifacts/skillbuddy/components/ExploreMap.native.tsx
+
+diff --git a/artifacts/skillbuddy/components/ExploreMap.native.tsx b/artifacts/skillbuddy/components/ExploreMap.native.tsx
+deleted file mode 100644
+index df1c3ec..0000000
+--- a/artifacts/skillbuddy/components/ExploreMap.native.tsx
++++ /dev/null
+@@ -1,169 +0,0 @@
+-/**
+- * ExploreMap.native.tsx — real react-native-maps implementation (iOS/Android only).
+- * Metro auto-selects this file on native; ExploreMap.tsx is used on web.
+- */
+-import React, { forwardRef, useEffect } from 'react';
+-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+-import MapView, { Marker, Region } from 'react-native-maps';
+-import Animated, {
+-  useSharedValue,
+-  useAnimatedStyle,
+-  withRepeat,
+-  withTiming,
+-  Easing,
+-} from 'react-native-reanimated';
+-import { Feather } from '@expo/vector-icons';
+-import { useTheme } from '@/context/ThemeContext';
+-
+-export interface ServicePin {
+-  id: string;
+-  coordinate: { latitude: number; longitude: number };
+-}
+-
+-export interface ExploreMapProps {
+-  pins: ServicePin[];
+-  selectedId?: string | null;
+-  onMarkerPress?: (id: string) => void;
+-  onCenterPress?: () => void;
+-  userLocation: { latitude: number; longitude: number };
+-  initialRegion: Region;
+-}
+-
+-// ─── Pulsing user-location marker ────────────────────────────────────────────
+-function UserLocationMarker({ color }: { color: string }) {
+-  const scale = useSharedValue(1);
+-  const opacity = useSharedValue(0.6);
+-
+-  useEffect(() => {
+-    scale.value = withRepeat(
+-      withTiming(2, { duration: 1600, easing: Easing.out(Easing.ease) }),
+-      -1,
+-      false,
+-    );
+-    opacity.value = withRepeat(
+-      withTiming(0, { duration: 1600, easing: Easing.out(Easing.ease) }),
+-      -1,
+-      false,
+-    );
+-  }, []);
+-
+-  const ringStyle = useAnimatedStyle(() => ({
+-    transform: [{ scale: scale.value }],
+-    opacity: opacity.value,
+-  }));
+-
+-  return (
+-    <View style={styles.userWrap}>
+-      <Animated.View style={[styles.userRing, { backgroundColor: color }, ringStyle]} />
+-      <View style={[styles.userDot, { backgroundColor: color }]} />
+-    </View>
+-  );
+-}
+-
+-// ─── Custom circular pin ──────────────────────────────────────────────────────
+-function PinMarker({ selected, color }: { selected: boolean; color: string }) {
+-  return (
+-    <View
+-      style={[
+-        styles.pin,
+-        { borderColor: color },
+-        selected && { width: 34, height: 34, borderRadius: 17, borderWidth: 3 },
+-      ]}
+-    >
+-      <View style={[styles.pinDot, { backgroundColor: color }]} />
+-    </View>
+-  );
+-}
+-
+-// ─── Component ────────────────────────────────────────────────────────────────
+-const ExploreMap = forwardRef<MapView, ExploreMapProps>(
+-  ({ pins, selectedId, onMarkerPress, onCenterPress, userLocation, initialRegion }, ref) => {
+-    const { colors: c } = useTheme();
+-
+-    return (
+-      <View style={StyleSheet.absoluteFillObject}>
+-        <MapView
+-          ref={ref}
+-          style={StyleSheet.absoluteFillObject}
+-          initialRegion={initialRegion}
+-          showsUserLocation={false}
+-          showsMyLocationButton={false}
+-          showsCompass={false}
+-        >
+-          {pins.map((pin) => (
+-            <Marker
+-              key={pin.id}
+-              coordinate={pin.coordinate}
+-              onPress={() => onMarkerPress?.(pin.id)}
+-              tracksViewChanges={false}
+-            >
+-              <PinMarker selected={pin.id === selectedId} color={c.primary} />
+-            </Marker>
+-          ))}
+-
+-          <Marker coordinate={userLocation} tracksViewChanges={false}>
+-            <UserLocationMarker color={c.primary} />
+-          </Marker>
+-        </MapView>
+-
+-        {/* Center-on-location FAB */}
+-        <TouchableOpacity
+-          style={[styles.fab, { backgroundColor: c.card }]}
+-          onPress={onCenterPress}
+-        >
+-          <Feather name="navigation" size={18} color={c.primary} />
+-        </TouchableOpacity>
+-      </View>
+-    );
+-  },
+-);
+-
+-ExploreMap.displayName = 'ExploreMap';
+-export default ExploreMap;
+-
+-const styles = StyleSheet.create({
+-  userWrap: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+-  userRing: {
+-    position: 'absolute',
+-    width: 24,
+-    height: 24,
+-    borderRadius: 12,
+-  },
+-  userDot: {
+-    width: 14,
+-    height: 14,
+-    borderRadius: 7,
+-    borderWidth: 2,
+-    borderColor: '#FFF',
+-  },
+-  pin: {
+-    width: 28,
+-    height: 28,
+-    borderRadius: 14,
+-    backgroundColor: '#FFF',
+-    borderWidth: 2,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    shadowColor: '#000',
+-    shadowOffset: { width: 0, height: 2 },
+-    shadowOpacity: 0.18,
+-    shadowRadius: 4,
+-    elevation: 4,
+-  },
+-  pinDot: { width: 10, height: 10, borderRadius: 5 },
+-  fab: {
+-    position: 'absolute',
+-    bottom: 16,
+-    right: 16,
+-    width: 44,
+-    height: 44,
+-    borderRadius: 22,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    shadowColor: '#000',
+-    shadowOffset: { width: 0, height: 2 },
+-    shadowOpacity: 0.15,
+-    shadowRadius: 6,
+-    elevation: 6,
+-  },
+-});
+diff --git a/artifacts/skillbuddy/package.json b/artifacts/skillbuddy/package.json
+index d10c1a5..f8de3c6 100644
+--- a/artifacts/skillbuddy/package.json
++++ b/artifacts/skillbuddy/package.json
+@@ -57,7 +57,6 @@
+   },
+   "dependencies": {
+     "axios": "^1.18.1",
+-    "expo-secure-store": "^57.0.0",
+-    "react-native-maps": "1.18.0"
++    "expo-secure-store": "^57.0.0"
+   }
+ }
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 7a957d0..22ec2ff 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -408,9 +408,6 @@ importers:
+       expo-secure-store:
+         specifier: ^57.0.0
+         version: 57.0.0(expo@54.0.35)
+-      react-native-maps:
+-        specifier: 1.18.0
+-        version: 1.18.0(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+     devDependencies:
+       '@babel/core':
+         specifier: ^7.25.2
+@@ -2373,9 +2370,6 @@ packages:
+   '@types/express@5.0.6':
+     resolution: {integrity: sha512-sKYVuV7Sv9fbPIt/442koC7+IIwK5olP1KWeD88e/idgoJqDm3JV/YUiPwkoKK92ylff2MGxSz1CSjsXelx0YA==}
+ 
+-  '@types/geojson@7946.0.16':
+-    resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
+-
+   '@types/graceful-fs@4.1.9':
+     resolution: {integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==}
+ 
+@@ -4791,17 +4785,6 @@ packages:
+       react-native: '*'
+       react-native-reanimated: '>=3.0.0'
+ 
+-  react-native-maps@1.18.0:
+-    resolution: {integrity: sha512-S17nYUqeMptgIPaAZuVRo+eRelPreBBYQWw6jsxU7qQ12p+THSfFaqabcNn7fBmsXhT3T27iIl8ek8v1H8BaGw==}
+-    engines: {node: '>=18'}
+-    peerDependencies:
+-      react: '>= 17.0.1'
+-      react-native: '>= 0.64.3'
+-      react-native-web: '>= 0.11'
+-    peerDependenciesMeta:
+-      react-native-web:
+-        optional: true
+-
+   react-native-reanimated@4.1.7:
+     resolution: {integrity: sha512-Q4H6xA3Tn7QL0/E/KjI86I1KK4tcf+ErRE04LH34Etka2oVQhW6oXQ+Q8ZcDCVxiWp5vgbBH6XcH8BOo4w/Rhg==}
+     peerDependencies:
+@@ -8252,8 +8235,6 @@ snapshots:
+       '@types/express-serve-static-core': 5.1.1
+       '@types/serve-static': 2.2.0
+ 
+-  '@types/geojson@7946.0.16': {}
+-
+   '@types/graceful-fs@4.1.9':
+     dependencies:
+       '@types/node': 25.9.4
+@@ -10888,14 +10869,6 @@ snapshots:
+       react-native-is-edge-to-edge: 1.3.1(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+       react-native-reanimated: 4.1.7(react-native-worklets@0.5.1(@babel/core@7.29.7)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+ 
+-  react-native-maps@1.18.0(react-native-web@0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
+-    dependencies:
+-      '@types/geojson': 7946.0.16
+-      react: 19.1.0
+-      react-native: 0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)
+-    optionalDependencies:
+-      react-native-web: 0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+-
+   react-native-reanimated@4.1.7(react-native-worklets@0.5.1(@babel/core@7.29.7)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
+     dependencies:
+       react: 19.1.0
+-- 
+2.43.0
+

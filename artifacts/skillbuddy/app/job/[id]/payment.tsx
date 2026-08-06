@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
 import { calculateOrderBreakdown, canUsePayLater, canUseInstalments, pointsToEuro } from '@/lib/payment';
@@ -11,12 +12,12 @@ import BackButton from '@/components/BackButton';
 import InlineLoader from '@/components/InlineLoader';
 import type { PaymentMethod } from '@/types';
 
-const METHODS: { id: PaymentMethod; label: string; icon: keyof typeof Feather.glyphMap }[] = [
-  { id: 'card', label: 'Card', icon: 'credit-card' },
-  { id: 'apple_pay', label: 'Apple Pay', icon: 'smartphone' },
-  { id: 'google_pay', label: 'Google Pay', icon: 'smartphone' },
-  { id: 'bank_transfer', label: 'Bank Transfer', icon: 'briefcase' },
-  { id: 'credit_points', label: 'Credit Points', icon: 'star' },
+const METHODS: { id: PaymentMethod; labelKey: string; icon: keyof typeof Feather.glyphMap }[] = [
+  { id: 'card', labelKey: 'pay_card', icon: 'credit-card' },
+  { id: 'apple_pay', labelKey: 'pay_apple', icon: 'smartphone' },
+  { id: 'google_pay', labelKey: 'pay_google', icon: 'smartphone' },
+  { id: 'bank_transfer', labelKey: 'pay_bank', icon: 'briefcase' },
+  { id: 'credit_points', labelKey: 'pay_credit', icon: 'star' },
 ];
 
 function formatRemaining(ms: number): string {
@@ -32,6 +33,7 @@ export default function PaymentScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const showAlert = useAppAlert();
 
   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
@@ -53,10 +55,10 @@ export default function PaymentScreen() {
         job.assignedPrice = undefined;
         job.paymentDeadline = undefined;
         showAlert({
-          title: 'Payment window expired',
-          message: 'You didn\'t complete payment in time, so this job has reopened for bidding.',
+          title: t('pay_expired_title'),
+          message: t('pay_expired_msg'),
           icon: 'clock',
-          buttons: [{ text: 'OK', onPress: () => router.replace(`/job/${job.id}` as any) }],
+          buttons: [{ text: t('pay_ok'), onPress: () => router.replace(`/job/${job.id}` as any) }],
         });
       }
     }, 1000);
@@ -66,7 +68,7 @@ export default function PaymentScreen() {
   if (!job || !job.assignedPrice) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <Text style={{ color: c.text, padding: 20 }}>Payment session not found.</Text>
+        <Text style={{ color: c.text, padding: 20 }}>{t('pay_not_found')}</Text>
       </View>
     );
   }
@@ -93,25 +95,25 @@ export default function PaymentScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Payment</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('pay_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <View style={[styles.timerBar, { backgroundColor: expired ? c.urgentLight : c.primaryLight }]}>
         <Feather name="clock" size={14} color={expired ? c.urgent : c.primary} />
         <Text style={[styles.timerText, { color: expired ? c.urgent : c.primary }]}>
-          {expired ? 'Payment window expired' : `Complete payment within ${formatRemaining(remaining)}`}
+          {expired ? t('pay_window_expired') : t('pay_complete_within', { time: formatRemaining(remaining) })}
         </Text>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.sectionTitle, { color: c.text }]}>Order Summary</Text>
+        <Text style={[styles.sectionTitle, { color: c.text }]}>{t('pay_order_summary')}</Text>
         <View style={[styles.summaryCard, { backgroundColor: c.card, borderColor: c.border }]}>
           {[
-            ['Bidding Price', `€${breakdown.bidPrice.toFixed(2)}`],
-            ['Before VAT', `€${breakdown.beforeVat.toFixed(2)}`],
-            ['VAT (24%)', `€${breakdown.vat.toFixed(2)}`],
-            ['Platform Fee', `-€${breakdown.platformFee.toFixed(2)}`],
+            [t('pay_bidding_price'), `€${breakdown.bidPrice.toFixed(2)}`],
+            [t('pay_before_vat'), `€${breakdown.beforeVat.toFixed(2)}`],
+            [t('pay_vat'), `€${breakdown.vat.toFixed(2)}`],
+            [t('pay_platform_fee'), `-€${breakdown.platformFee.toFixed(2)}`],
           ].map(([label, value]) => (
             <View key={label} style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: c.mutedForeground }]}>{label}</Text>
@@ -120,21 +122,21 @@ export default function PaymentScreen() {
           ))}
           {usePoints && (
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: c.success }]}>Credit Points Applied</Text>
+              <Text style={[styles.summaryLabel, { color: c.success }]}>{t('pay_points_applied')}</Text>
               <Text style={[styles.summaryValue, { color: c.success }]}>-€{pointsDiscount.toFixed(2)}</Text>
             </View>
           )}
           <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: c.border }]}>
-            <Text style={[styles.totalLabel, { color: c.text }]}>Total Order Value</Text>
+            <Text style={[styles.totalLabel, { color: c.text }]}>{t('pay_total')}</Text>
             <Text style={[styles.totalValue, { color: c.primary }]}>€{amountDue.toFixed(2)}</Text>
           </View>
         </View>
 
         <View style={[styles.pointsRow, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.pointsLabel, { color: c.text }]}>Use Credit Points</Text>
+            <Text style={[styles.pointsLabel, { color: c.text }]}>{t('pay_use_points')}</Text>
             <Text style={[styles.pointsSub, { color: c.mutedForeground }]}>
-              {CURRENT_USER.creditPoints} pts available (€{pointsValue.toFixed(2)})
+              {t('pay_points_available', { n: CURRENT_USER.creditPoints, v: pointsValue.toFixed(2) })}
             </Text>
           </View>
           <TouchableOpacity
@@ -145,7 +147,7 @@ export default function PaymentScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>Payment Method</Text>
+        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>{t('pay_method')}</Text>
         {METHODS.map((m) => (
           <TouchableOpacity
             key={m.id}
@@ -156,24 +158,24 @@ export default function PaymentScreen() {
             onPress={() => setMethod(m.id)}
           >
             <Feather name={m.icon} size={18} color={method === m.id ? c.primary : c.mutedForeground} />
-            <Text style={[styles.methodLabel, { color: c.text }]}>{m.label}</Text>
+            <Text style={[styles.methodLabel, { color: c.text }]}>{t(m.labelKey as any)}</Text>
             {method === m.id && <Feather name="check-circle" size={18} color={c.primary} />}
           </TouchableOpacity>
         ))}
 
-        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>Payment Plans</Text>
+        <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>{t('pay_plans')}</Text>
         <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border }]}>
           <Feather name="zap" size={16} color={c.primary} />
-          <Text style={[styles.planLabel, { color: c.text }]}>Pay Now</Text>
-          <Text style={[styles.planBadge, { color: c.success }]}>Available</Text>
+          <Text style={[styles.planLabel, { color: c.text }]}>{t('pay_now')}</Text>
+          <Text style={[styles.planBadge, { color: c.success }]}>{t('pay_available')}</Text>
         </View>
         <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border, opacity: payLaterOk ? 1 : 0.55 }]}>
           <Feather name="calendar" size={16} color={payLaterOk ? c.primary : c.mutedForeground} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.planLabel, { color: c.text }]}>Pay Later (up to 30 days)</Text>
+            <Text style={[styles.planLabel, { color: c.text }]}>{t('pay_later')}</Text>
             {!payLaterOk && (
               <Text style={[styles.planDisabled, { color: c.mutedForeground }]}>
-                Not Applicable — requires 20 completed tasks
+                {t('pay_not_applicable_20')}
               </Text>
             )}
           </View>
@@ -181,10 +183,10 @@ export default function PaymentScreen() {
         <View style={[styles.planRow, { backgroundColor: c.card, borderColor: c.border, opacity: instalmentsOk ? 1 : 0.55 }]}>
           <MaterialCommunityIcons name="calendar-multiple" size={16} color={instalmentsOk ? c.primary : c.mutedForeground} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.planLabel, { color: c.text }]}>Pay in Instalments (3 monthly)</Text>
+            <Text style={[styles.planLabel, { color: c.text }]}>{t('pay_instalments')}</Text>
             {!instalmentsOk && (
               <Text style={[styles.planDisabled, { color: c.mutedForeground }]}>
-                Not Applicable — requires 20 completed tasks and a bill over €100
+                {t('pay_not_applicable_100')}
               </Text>
             )}
           </View>
@@ -198,7 +200,7 @@ export default function PaymentScreen() {
           disabled={expired || processing}
         >
           {processing ? <InlineLoader size={20} /> : (
-            <Text style={styles.payText}>Pay €{amountDue.toFixed(2)}</Text>
+            <Text style={styles.payText}>{t('pay_btn', { amount: amountDue.toFixed(2) })}</Text>
           )}
         </TouchableOpacity>
       </View>

@@ -5,8 +5,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import colors from '@/constants/colors';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { SERVICES } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 import { useAppAlert } from '@/context/AlertModalContext';
@@ -34,6 +34,7 @@ const TIME_SLOTS = [
 export default function BookingScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const service = SERVICES.find((s) => s.id === id) ?? SERVICES[0];
@@ -45,10 +46,15 @@ export default function BookingScreen() {
   const handleSubmit = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showAlert({
-      title: 'Booking Confirmed!',
-      message: `Your ${service.title} service is booked for ${DAYS[selectedDay].month} ${DAYS[selectedDay].date} at ${selectedTime}.`,
+      title: t('booking_confirmed_title'),
+      message: t('booking_confirmed_msg', {
+        service: service.title,
+        month: DAYS[selectedDay].month,
+        date: DAYS[selectedDay].date,
+        time: selectedTime,
+      }),
       icon: 'check-circle',
-      buttons: [{ text: 'View Bookings', onPress: () => router.replace('/(tabs)') }],
+      buttons: [{ text: t('booking_view_bookings'), onPress: () => router.replace('/(tabs)') }],
     });
   };
 
@@ -58,8 +64,8 @@ export default function BookingScreen() {
       <View style={[styles.header, { backgroundColor: c.primary }]}>
         <BackButton />
         <View style={styles.headerMid}>
-          <Text style={styles.headerTitle}>Select Service</Text>
-          <Text style={styles.headerSubtitle}>Appointment Time:</Text>
+          <Text style={styles.headerTitle}>{t('booking_select_service')}</Text>
+          <Text style={styles.headerSubtitle}>{t('booking_appointment')}</Text>
         </View>
         <TouchableOpacity>
           <Feather name="more-vertical" size={22} color="#FFF" />
@@ -69,7 +75,7 @@ export default function BookingScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         {/* Day Selector */}
         <Animated.View entering={FadeInDown.delay(50).duration(350)} style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Select Day</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('booking_select_day')}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
             {DAYS.map((d, i) => (
               <TouchableOpacity
@@ -87,7 +93,7 @@ export default function BookingScreen() {
 
         {/* Time Slots */}
         <Animated.View entering={FadeInDown.delay(100).duration(350)} style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: c.text }]}>Select Time</Text>
+          <Text style={[styles.sectionLabel, { color: c.text }]}>{t('booking_select_time')}</Text>
           <View style={styles.timeGrid}>
             {TIME_SLOTS.map((slot) => (
               <TouchableOpacity
@@ -105,7 +111,7 @@ export default function BookingScreen() {
       {/* Submit Button */}
       <View style={[styles.bottomBar, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={handleSubmit}>
-          <Text style={styles.submitText}>Submit</Text>
+          <Text style={styles.submitText}>{t('action_submit')}</Text>
         </TouchableOpacity>
       </View>
     </View>

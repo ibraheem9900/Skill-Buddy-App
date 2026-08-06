@@ -15,6 +15,7 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import BackButton from '@/components/BackButton';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { SERVICES, CATEGORIES, SUBSERVICES } from '@/data/mockData';
 import { getServiceForSubservice } from '@/lib/serviceLookup';
 import ServiceCard from '@/components/ServiceCard';
@@ -68,6 +69,7 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -141,7 +143,7 @@ export default function SearchScreen() {
             value={query}
             onChangeText={handleQueryChange}
             onSubmitEditing={handleSubmit}
-            placeholder="Search services, categories…"
+            placeholder={t('search_placeholder_full')}
             placeholderTextColor={c.mutedForeground}
             returnKeyType="search"
             autoCorrect={false}
@@ -173,9 +175,13 @@ export default function SearchScreen() {
                 <Feather name={kindIcon[s.kind] as any} size={14} color={c.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.suggestLabel, { color: c.text }]} numberOfLines={1}>{s.label}</Text>
+                <Text style={[styles.suggestLabel, { color: c.text }]} numberOfLines={1}>
+                  {s.kind === 'category' ? tCat(s.id.replace('cat_', '')) : s.label}
+                </Text>
                 {s.sublabel && (
-                  <Text style={[styles.suggestSub, { color: c.mutedForeground }]} numberOfLines={1}>{s.sublabel}</Text>
+                  <Text style={[styles.suggestSub, { color: c.mutedForeground }]} numberOfLines={1}>
+                    {s.sublabel === 'Category' ? t('search_category_label') : s.sublabel}
+                  </Text>
                 )}
               </View>
               <Feather name="arrow-up-left" size={14} color={c.mutedForeground} />
@@ -188,7 +194,9 @@ export default function SearchScreen() {
       {showResults && (
         <View style={[styles.resultRow, { borderBottomColor: c.border }]}>
           <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
-            {filtered.length} result{filtered.length !== 1 ? 's' : ''} for{' '}
+            {filtered.length === 1
+              ? t('search_results_count_one', { n: filtered.length })
+              : t('search_results_count', { n: filtered.length })}{' '}
             <Text style={{ color: c.text, fontFamily: 'Manrope_600SemiBold' }}>"{query}"</Text>
           </Text>
         </View>
@@ -200,22 +208,22 @@ export default function SearchScreen() {
           <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
             <Feather name="search" size={36} color={c.primary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: c.text }]}>No Results</Text>
+          <Text style={[styles.emptyTitle, { color: c.text }]}>{t('search_no_results')}</Text>
           <Text style={[styles.emptySub, { color: c.mutedForeground }]}>
-            No services match "{query}". Try a different term or request a custom quote.
+            {t('search_no_results_sub', { query })}
           </Text>
           <TouchableOpacity
             style={[styles.emptyBtn, { backgroundColor: c.primary }]}
             onPress={() => router.push('/quote-request' as any)}
           >
-            <Text style={styles.emptyBtnText}>Get a Custom Quote</Text>
+            <Text style={styles.emptyBtnText}>{t('services_get_custom_quote')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
             onPress={() => router.push('/(tabs)/inbox' as any)}
           >
             <Feather name="message-circle" size={16} color={c.primary} />
-            <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>Start Live Chat</Text>
+            <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>{t('services_start_live_chat')}</Text>
           </TouchableOpacity>
         </View>
       )}

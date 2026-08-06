@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { useRole } from '@/context/RoleContext';
 import { createTicket } from '@/data/ticketStore';
@@ -12,15 +13,15 @@ import BackButton from '@/components/BackButton';
 import InlineLoader from '@/components/InlineLoader';
 import type { TicketCategory } from '@/types';
 
-const CATEGORIES: TicketCategory[] = [
-  'Payment Issue',
-  'Job Dispute',
-  'Cancellation Issue',
-  'No-show',
-  'Misconduct',
-  'Technical Issue',
-  'Account Verification',
-  'Other',
+const CATEGORIES: { key: string; label: TicketCategory }[] = [
+  { key: 'ticket_cat_payment', label: 'Payment Issue' },
+  { key: 'ticket_cat_dispute', label: 'Job Dispute' },
+  { key: 'ticket_cat_cancellation', label: 'Cancellation Issue' },
+  { key: 'ticket_cat_noshow', label: 'No-show' },
+  { key: 'ticket_cat_misconduct', label: 'Misconduct' },
+  { key: 'ticket_cat_technical', label: 'Technical Issue' },
+  { key: 'ticket_cat_verification', label: 'Account Verification' },
+  { key: 'ticket_cat_other', label: 'Other' },
 ];
 
 const CATEGORY_ICONS: Record<TicketCategory, keyof typeof Feather.glyphMap> = {
@@ -39,6 +40,7 @@ export default function RaiseTicketScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const showAlert = useAppAlert();
   const { activeRole } = useRole();
 
@@ -59,11 +61,11 @@ export default function RaiseTicketScreen() {
 
   const submit = async () => {
     if (!category) {
-      showAlert({ title: 'Select a category', message: 'Please choose an issue type first.', icon: 'alert-circle' });
+      showAlert({ title: t('ticket_no_cat_title'), message: t('ticket_no_cat_msg'), icon: 'alert-circle' });
       return;
     }
     if (!description.trim()) {
-      showAlert({ title: 'Description required', message: 'Please describe the issue.', icon: 'alert-circle' });
+      showAlert({ title: t('ticket_no_desc_title'), message: t('ticket_no_desc_msg'), icon: 'alert-circle' });
       return;
     }
     setSubmitting(true);
@@ -77,10 +79,10 @@ export default function RaiseTicketScreen() {
     });
     setSubmitting(false);
     showAlert({
-      title: 'Ticket Created',
-      message: `Your ticket ${ticket.id} has been submitted. Our support team will follow up soon.`,
+      title: t('ticket_created_title'),
+      message: t('ticket_created_msg', { id: ticket.id }),
       icon: 'check-circle',
-      buttons: [{ text: 'View My Tickets', onPress: () => router.replace('/profile/tickets' as any) }],
+      buttons: [{ text: t('ticket_view_mine'), onPress: () => router.replace('/profile/tickets' as any) }],
     });
   };
 
@@ -88,39 +90,42 @@ export default function RaiseTicketScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Raise a Ticket</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('ticket_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.sectionLabel, { color: c.text }]}>What's this about?</Text>
+        <Text style={[styles.sectionLabel, { color: c.text }]}>{t('ticket_about')}</Text>
         <View style={styles.catGrid}>
-          {CATEGORIES.map((cat) => (
-            <TouchableOpacity
-              key={cat}
-              style={[
-                styles.catChip,
-                { backgroundColor: category === cat ? c.primary : c.card, borderColor: category === cat ? c.primary : c.border },
-              ]}
-              onPress={() => setCategory(cat)}
-            >
-              <Feather name={CATEGORY_ICONS[cat]} size={16} color={category === cat ? '#FFF' : c.primary} />
-              <Text style={[styles.catText, { color: category === cat ? '#FFF' : c.text }]}>{cat}</Text>
-            </TouchableOpacity>
-          ))}
+          {CATEGORIES.map((cat) => {
+            const catValue = cat.label;
+            return (
+              <TouchableOpacity
+                key={cat.key}
+                style={[
+                  styles.catChip,
+                  { backgroundColor: category === catValue ? c.primary : c.card, borderColor: category === catValue ? c.primary : c.border },
+                ]}
+                onPress={() => setCategory(catValue)}
+              >
+                <Feather name={CATEGORY_ICONS[catValue]} size={16} color={category === catValue ? '#FFF' : c.primary} />
+                <Text style={[styles.catText, { color: category === catValue ? '#FFF' : c.text }]}>{t(cat.key as any)}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 20 }]}>Describe the Issue</Text>
+        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 20 }]}>{t('ticket_describe')}</Text>
         <TextInput
           style={[styles.textArea, { backgroundColor: c.muted, color: c.text }]}
           value={description}
           onChangeText={setDescription}
-          placeholder="Tell us what happened..."
+          placeholder={t('ticket_placeholder')}
           placeholderTextColor={c.mutedForeground}
           multiline
         />
 
-        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>Attachments (optional)</Text>
+        <Text style={[styles.sectionLabel, { color: c.text, marginTop: 16 }]}>{t('ticket_attachments')}</Text>
         <View style={styles.photoRow}>
           {photos.map((uri) => (
             <View key={uri} style={[styles.photoThumb, { backgroundColor: c.muted }]} />
@@ -137,7 +142,7 @@ export default function RaiseTicketScreen() {
           onPress={submit}
           disabled={submitting}
         >
-          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>Submit Ticket</Text>}
+          {submitting ? <InlineLoader size={20} /> : <Text style={styles.submitText}>{t('ticket_submit')}</Text>}
         </TouchableOpacity>
       </ScrollView>
     </View>

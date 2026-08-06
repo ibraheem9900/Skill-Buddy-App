@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { BLOG_CATEGORIES, BLOG_POSTS } from '@/data/blogData';
 import BackButton from '@/components/BackButton';
 
@@ -12,6 +13,7 @@ export default function BlogsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
 
@@ -30,7 +32,7 @@ export default function BlogsScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Blog</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('blog_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -45,7 +47,7 @@ export default function BlogsScreen() {
               <Feather name="search" size={16} color={c.mutedForeground} />
               <TextInput
                 style={[styles.searchInput, { color: c.text }]}
-                placeholder="Search articles..."
+                placeholder={t('blog_search')}
                 placeholderTextColor={c.mutedForeground}
                 value={query}
                 onChangeText={setQuery}
@@ -54,7 +56,7 @@ export default function BlogsScreen() {
 
             {!query && (
               <>
-                <Text style={[styles.sectionTitle, { color: c.text }]}>Featured</Text>
+                <Text style={[styles.sectionTitle, { color: c.text }]}>{t('blog_featured')}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }} contentContainerStyle={{ gap: 12 }}>
                   {featured.map((post) => (
                     <TouchableOpacity
@@ -78,7 +80,7 @@ export default function BlogsScreen() {
                 style={[styles.catChip, { backgroundColor: !category ? c.primary : c.muted }]}
                 onPress={() => setCategory(null)}
               >
-                <Text style={[styles.catText, { color: !category ? '#FFF' : c.text }]}>All</Text>
+                <Text style={[styles.catText, { color: !category ? '#FFF' : c.text }]}>{t('blog_all')}</Text>
               </TouchableOpacity>
               {BLOG_CATEGORIES.map((cat) => (
                 <TouchableOpacity

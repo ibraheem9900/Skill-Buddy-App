@@ -1,0 +1,2644 @@
+From 9e3e2e02cd69f9ace0b13e462df462a8496e8845 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Thu, 23 Jul 2026 21:39:23 +0000
+Subject: [PATCH] Live-testing fixes round 2: dark-mode crash cascade, welcome
+ banner removed, logo size, guaranteed navigation loader, Manrope font,
+ language system foundation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Dark mode: found and fixed two more screens hardcoded to colors.light
+  regardless of theme (booking/[id].tsx, profile/edit.tsx, chat/[id].tsx)
+  — day/time selectors, message bubbles, input bars, and form fields
+  all now correctly follow the active theme. Also fixed SkeletonCard,
+  which was always rendering light-theme skeleton colors.
+
+- Removed the 'Welcome back, Name' banner entirely from Home per
+  request — the section now leads directly with 'What service do you
+  need today?' promoted to a proper heading.
+
+- Increased the logo size on Home and Profile headers (42px/40px ->
+  54px/52px) for a more prominent, properly-filled brand presence.
+
+- Added NavigationLoaderOverlay: a global route-change listener that
+  now guarantees a brief branded loading state on every single
+  navigation, app-wide, instead of relying on manually wiring a loader
+  into each screen one at a time. Explicitly skips the transparent
+  filter modal so it doesn't defeat that screen's see-through backdrop.
+
+- Swapped the app's font from Inter to Manrope across all ~330
+  occurrences in 45 files (a friendlier, more distinctive geometric
+  sans that suits a services-marketplace brand better than a generic
+  UI font). Requires Scope: all 9 workspace projects
+✓ Lockfile passes supply-chain policies (verified 4m ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+. preinstall$ sh -c 'rm -f package-lock.json yarn.lock; case "$npm_config_user_agent" in pnpm/*) ;; *) echo "Use pnpm instead" >&2; exit 1 ;; esac'
+. preinstall: Done
+[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: esbuild@0.27.3
+
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts. after applying this patch since
+  it's a new font package.
+
+- Added a LanguageContext foundation (5 languages: EN/DE/ET/LV/LT,
+  persisted selection) and wired it into the tab bar labels and Home
+  screen's key strings as a working proof of the system. Translating
+  every remaining string across the app (~40 more screens) is a large
+  follow-up task, tracked separately — not something that fits in this
+  pass alongside everything else.
+
+Full workspace typecheck: zero errors.
+---
+ .../skillbuddy/app/(auth)/forgot-password.tsx |  10 +-
+ artifacts/skillbuddy/app/(auth)/login.tsx     |  22 +--
+ .../skillbuddy/app/(auth)/onboarding.tsx      |  14 +-
+ artifacts/skillbuddy/app/(auth)/signup.tsx    |  20 +--
+ .../skillbuddy/app/(auth)/verify-email.tsx    |  10 +-
+ artifacts/skillbuddy/app/(tabs)/_layout.tsx   |  14 +-
+ artifacts/skillbuddy/app/(tabs)/inbox.tsx     |  14 +-
+ artifacts/skillbuddy/app/(tabs)/index.tsx     |  59 ++++----
+ artifacts/skillbuddy/app/(tabs)/jobs.tsx      |  10 +-
+ artifacts/skillbuddy/app/(tabs)/profile.tsx   |  22 +--
+ artifacts/skillbuddy/app/(tabs)/services.tsx  |  22 +--
+ artifacts/skillbuddy/app/_layout.tsx          |  23 +--
+ artifacts/skillbuddy/app/booking/[id].tsx     |  39 ++---
+ artifacts/skillbuddy/app/categories.tsx       |   6 +-
+ artifacts/skillbuddy/app/category/[id].tsx    |   8 +-
+ artifacts/skillbuddy/app/chat/[id].tsx        |  41 +++---
+ artifacts/skillbuddy/app/chat/support.tsx     |  12 +-
+ artifacts/skillbuddy/app/filter.tsx           |  20 +--
+ artifacts/skillbuddy/app/job/[id].tsx         |  20 +--
+ artifacts/skillbuddy/app/job/[id]/bid.tsx     |  40 +++---
+ artifacts/skillbuddy/app/job/post.tsx         |  30 ++--
+ artifacts/skillbuddy/app/location.tsx         |  14 +-
+ artifacts/skillbuddy/app/notifications.tsx    |  16 +--
+ .../skillbuddy/app/profile/credit-points.tsx  |  18 +--
+ .../skillbuddy/app/profile/documents.tsx      |  10 +-
+ artifacts/skillbuddy/app/profile/edit.tsx     |  35 ++---
+ artifacts/skillbuddy/app/profile/faqs.tsx     |  12 +-
+ artifacts/skillbuddy/app/profile/legal.tsx    |   4 +-
+ .../skillbuddy/app/profile/professional.tsx   |  22 +--
+ artifacts/skillbuddy/app/profile/safety.tsx   |  10 +-
+ artifacts/skillbuddy/app/profile/settings.tsx |  12 +-
+ artifacts/skillbuddy/app/profile/wallet.tsx   |  20 +--
+ artifacts/skillbuddy/app/quote-request.tsx    |  20 +--
+ artifacts/skillbuddy/app/search.tsx           |  18 +--
+ artifacts/skillbuddy/app/service/[id].tsx     |  40 +++---
+ artifacts/skillbuddy/components/BidCard.tsx   |  16 +--
+ .../skillbuddy/components/CategoryItem.tsx    |   2 +-
+ .../skillbuddy/components/CountdownTimer.tsx  |   6 +-
+ .../skillbuddy/components/EmptyState.tsx      |   6 +-
+ .../skillbuddy/components/ExploreMap.tsx      |   4 +-
+ artifacts/skillbuddy/components/JobCard.tsx   |  10 +-
+ .../components/NavigationLoaderOverlay.tsx    |  55 +++++++
+ .../skillbuddy/components/RatingStars.tsx     |   4 +-
+ .../skillbuddy/components/ServiceCard.tsx     |  12 +-
+ .../skillbuddy/components/SkeletonCard.tsx    |  10 +-
+ .../components/SpecialOfferCard.tsx           |  10 +-
+ .../skillbuddy/context/AlertModalContext.tsx  |   6 +-
+ .../skillbuddy/context/LanguageContext.tsx    | 135 ++++++++++++++++++
+ artifacts/skillbuddy/context/ThemeContext.tsx |  75 +++++-----
+ artifacts/skillbuddy/package.json             |   2 +-
+ pnpm-lock.yaml                                |   8 +-
+ 51 files changed, 634 insertions(+), 434 deletions(-)
+ create mode 100644 artifacts/skillbuddy/components/NavigationLoaderOverlay.tsx
+ create mode 100644 artifacts/skillbuddy/context/LanguageContext.tsx
+
+diff --git a/artifacts/skillbuddy/app/(auth)/forgot-password.tsx b/artifacts/skillbuddy/app/(auth)/forgot-password.tsx
+index 3c5b417..c703a45 100644
+--- a/artifacts/skillbuddy/app/(auth)/forgot-password.tsx
++++ b/artifacts/skillbuddy/app/(auth)/forgot-password.tsx
+@@ -79,14 +79,14 @@ const styles = StyleSheet.create({
+   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+   content: { gap: 12 },
+   iconCircle: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 8, alignSelf: 'center' },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 24, color: '#1A1A1A', textAlign: 'center' },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22, marginBottom: 8 },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, color: '#1A1A1A', marginTop: 8 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 24, color: '#1A1A1A', textAlign: 'center' },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22, marginBottom: 8 },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: '#1A1A1A', marginTop: 8 },
+   inputRow: {
+     flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5',
+     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E8E8E8',
+   },
+-  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
++  input: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A' },
+   btn: { borderRadius: 28, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/(auth)/login.tsx b/artifacts/skillbuddy/app/(auth)/login.tsx
+index ddd833f..7a1ce9c 100644
+--- a/artifacts/skillbuddy/app/(auth)/login.tsx
++++ b/artifacts/skillbuddy/app/(auth)/login.tsx
+@@ -154,13 +154,13 @@ const styles = StyleSheet.create({
+   container: { flexGrow: 1, backgroundColor: '#FFF', paddingHorizontal: 24 },
+   logoWrap: { alignItems: 'center', marginBottom: 32 },
+   logoCircle: { width: 72, height: 72, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+-  appName: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#1A1A1A' },
+-  tagline: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#737373', marginTop: 2 },
++  appName: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A' },
++  tagline: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#737373', marginTop: 2 },
+   form: { gap: 0 },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 24, color: '#1A1A1A', marginBottom: 4 },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', marginBottom: 24 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 24, color: '#1A1A1A', marginBottom: 4 },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', marginBottom: 24 },
+   fieldWrap: { marginBottom: 16 },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
+   inputRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -174,17 +174,17 @@ const styles = StyleSheet.create({
+   inputIcon: { marginRight: 10 },
+   input: {
+     flex: 1,
+-    fontFamily: 'Inter_400Regular',
++    fontFamily: 'Manrope_400Regular',
+     fontSize: 14,
+     color: '#1A1A1A',
+   },
+   forgotWrap: { alignSelf: 'flex-end', marginBottom: 20, marginTop: 4 },
+-  forgotText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  forgotText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+   btn: { borderRadius: 28, paddingVertical: 16, alignItems: 'center', marginBottom: 20 },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
+   divLine: { flex: 1, height: 1, backgroundColor: '#E8E8E8' },
+-  divText: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#9E9E9E' },
++  divText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: '#9E9E9E' },
+   socialRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 28 },
+   socialBtn: {
+     width: 52,
+@@ -197,6 +197,6 @@ const styles = StyleSheet.create({
+     backgroundColor: '#FFF',
+   },
+   signupRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+-  signupText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373' },
+-  signupLink: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  signupText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373' },
++  signupLink: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/(auth)/onboarding.tsx b/artifacts/skillbuddy/app/(auth)/onboarding.tsx
+index 0846abd..f747780 100644
+--- a/artifacts/skillbuddy/app/(auth)/onboarding.tsx
++++ b/artifacts/skillbuddy/app/(auth)/onboarding.tsx
+@@ -104,7 +104,7 @@ export default function OnboardingScreen() {
+                 onPress={() => setSelectedLang(lang.code)}
+               >
+                 <Text style={styles.langFlag}>{lang.flag}</Text>
+-                <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Inter_600SemiBold' }]}>
++                <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Manrope_600SemiBold' }]}>
+                   {lang.name}
+                 </Text>
+               </TouchableOpacity>
+@@ -174,10 +174,10 @@ export default function OnboardingScreen() {
+ const styles = StyleSheet.create({
+   screen: { flex: 1, backgroundColor: '#FFF' },
+   skipBtn: { position: 'absolute', top: 60, right: 24, zIndex: 10 },
+-  skipText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: colors.light.primary },
++  skipText: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.light.primary },
+   langContent: { flex: 1, paddingHorizontal: 24, paddingTop: 40 },
+-  langTitle: { fontFamily: 'Inter_700Bold', fontSize: 28, color: '#1A1A1A', marginBottom: 6 },
+-  langSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', marginBottom: 32 },
++  langTitle: { fontFamily: 'Manrope_700Bold', fontSize: 28, color: '#1A1A1A', marginBottom: 6 },
++  langSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', marginBottom: 32 },
+   langList: { gap: 14 },
+   langItem: {
+     flexDirection: 'row',
+@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
+     backgroundColor: '#FAFAFA',
+   },
+   langFlag: { fontSize: 28 },
+-  langName: { fontFamily: 'Inter_500Medium', fontSize: 16, color: '#1A1A1A' },
++  langName: { fontFamily: 'Manrope_500Medium', fontSize: 16, color: '#1A1A1A' },
+   slide: { width, alignItems: 'center', paddingTop: 80, paddingHorizontal: 28 },
+   slideIconWrap: {
+     width: 200,
+@@ -201,8 +201,8 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+     marginBottom: 36,
+   },
+-  slideTitle: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center', lineHeight: 36, marginBottom: 12 },
+-  slideSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
++  slideTitle: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center', lineHeight: 36, marginBottom: 12 },
++  slideSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
+   dotsRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+diff --git a/artifacts/skillbuddy/app/(auth)/signup.tsx b/artifacts/skillbuddy/app/(auth)/signup.tsx
+index 2be2d4a..de54325 100644
+--- a/artifacts/skillbuddy/app/(auth)/signup.tsx
++++ b/artifacts/skillbuddy/app/(auth)/signup.tsx
+@@ -166,11 +166,11 @@ export default function SignupScreen() {
+ 
+ const styles = StyleSheet.create({
+   container: { flexGrow: 1, backgroundColor: '#FFF', paddingHorizontal: 24 },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#1A1A1A', marginBottom: 6 },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#737373', marginBottom: 28, lineHeight: 20 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A', marginBottom: 6 },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#737373', marginBottom: 28, lineHeight: 20 },
+   form: { gap: 0 },
+   fieldWrap: { marginBottom: 16 },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
+   inputRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -182,25 +182,25 @@ const styles = StyleSheet.create({
+     borderColor: '#E8E8E8',
+   },
+   inputIcon: { marginRight: 10 },
+-  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
++  input: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A' },
+   termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 22, marginTop: 4 },
+   checkbox: {
+     width: 20, height: 20, borderRadius: 6, borderWidth: 2,
+     borderColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center',
+   },
+-  termsText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#1A1A1A' },
+-  termsLink: { fontFamily: 'Inter_500Medium' },
++  termsText: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#1A1A1A' },
++  termsLink: { fontFamily: 'Manrope_500Medium' },
+   btn: { borderRadius: 28, paddingVertical: 16, alignItems: 'center', marginBottom: 20 },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
+   divLine: { flex: 1, height: 1, backgroundColor: '#E8E8E8' },
+-  divText: { fontFamily: 'Inter_400Regular', fontSize: 12, color: '#9E9E9E' },
++  divText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: '#9E9E9E' },
+   socialRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 28 },
+   socialBtn: {
+     width: 52, height: 52, borderRadius: 26, borderWidth: 1.5,
+     borderColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center',
+   },
+   loginRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+-  loginText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373' },
+-  loginLink: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  loginText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373' },
++  loginLink: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/(auth)/verify-email.tsx b/artifacts/skillbuddy/app/(auth)/verify-email.tsx
+index 4cf393f..acf359e 100644
+--- a/artifacts/skillbuddy/app/(auth)/verify-email.tsx
++++ b/artifacts/skillbuddy/app/(auth)/verify-email.tsx
+@@ -47,12 +47,12 @@ const styles = StyleSheet.create({
+   back: { marginBottom: 24 },
+   content: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20 },
+   iconCircle: { width: 110, height: 110, borderRadius: 55, alignItems: 'center', justifyContent: 'center' },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center' },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center' },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
+   infoBox: { flexDirection: 'row', gap: 10, backgroundColor: '#E8F5F3', borderRadius: 12, padding: 14, alignItems: 'flex-start' },
+-  infoText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: '#2D7A6E', lineHeight: 20 },
++  infoText: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#2D7A6E', lineHeight: 20 },
+   btn: { width: '100%', borderRadius: 28, paddingVertical: 16, alignItems: 'center' },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+   resendBtn: { paddingVertical: 8 },
+-  resendText: { fontFamily: 'Inter_500Medium', fontSize: 14 },
++  resendText: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/(tabs)/_layout.tsx b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+index e0f9902..f1910ef 100644
+--- a/artifacts/skillbuddy/app/(tabs)/_layout.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/_layout.tsx
+@@ -8,6 +8,7 @@ import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
+ import { SymbolView } from 'expo-symbols';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useTheme } from '@/context/ThemeContext';
++import { useLanguage } from '@/context/LanguageContext';
+ import AnimatedTabIcon from '@/components/AnimatedTabIcon';
+ import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
+ 
+@@ -40,6 +41,7 @@ function NativeTabLayout() {
+ 
+ function ClassicTabLayout() {
+   const { colors: c, theme } = useTheme();
++  const { t } = useLanguage();
+   const insets = useSafeAreaInsets();
+   const isIOS = Platform.OS === 'ios';
+   const isWeb = Platform.OS === 'web';
+@@ -51,7 +53,7 @@ function ClassicTabLayout() {
+         headerShown: false,
+         tabBarActiveTintColor: c.tabBarActive,
+         tabBarInactiveTintColor: c.tabBarInactive,
+-        tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 2 },
++        tabBarLabelStyle: { fontFamily: 'Manrope_500Medium', fontSize: 11, marginBottom: 2 },
+         tabBarStyle: {
+           position: 'absolute',
+           backgroundColor: isIOS ? 'transparent' : c.tabBarBg,
+@@ -77,7 +79,7 @@ function ClassicTabLayout() {
+       <Tabs.Screen
+         name="index"
+         options={{
+-          title: 'Home',
++          title: t('tab_home'),
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+               {(col) => <DoorTabIcon focused={focused} color={col} size={22} />}
+@@ -88,7 +90,7 @@ function ClassicTabLayout() {
+       <Tabs.Screen
+         name="services"
+         options={{
+-          title: 'Services',
++          title: t('tab_services'),
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+               {(col) => <GridBlocksTabIcon focused={focused} color={col} size={22} />}
+@@ -99,7 +101,7 @@ function ClassicTabLayout() {
+       <Tabs.Screen
+         name="jobs"
+         options={{
+-          title: 'Jobs',
++          title: t('tab_jobs'),
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+               {(col) => <BriefcaseTabIcon focused={focused} color={col} size={22} />}
+@@ -110,7 +112,7 @@ function ClassicTabLayout() {
+       <Tabs.Screen
+         name="inbox"
+         options={{
+-          title: 'Inbox',
++          title: t('tab_inbox'),
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+               {(col) => <ChatPopTabIcon focused={focused} color={col} size={22} />}
+@@ -121,7 +123,7 @@ function ClassicTabLayout() {
+       <Tabs.Screen
+         name="profile"
+         options={{
+-          title: 'Profile',
++          title: t('tab_profile'),
+           tabBarIcon: ({ color, focused }) => (
+             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
+               {(col) => <EyesTabIcon focused={focused} color={col} size={22} />}
+diff --git a/artifacts/skillbuddy/app/(tabs)/inbox.tsx b/artifacts/skillbuddy/app/(tabs)/inbox.tsx
+index 5a6d4c7..9fe5c83 100644
+--- a/artifacts/skillbuddy/app/(tabs)/inbox.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/inbox.tsx
+@@ -96,21 +96,21 @@ const styles = StyleSheet.create({
+     justifyContent: 'space-between',
+     borderBottomWidth: 1,
+   },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 22 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 22 },
+   headerBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+   threadItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 14 },
+   avatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 20 },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
+   onlineDot: { position: 'absolute', bottom: 2, right: 2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#27AE60', borderWidth: 2 },
+   threadInfo: { flex: 1 },
+   threadTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
+-  participantName: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+-  threadTime: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++  participantName: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
++  threadTime: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+   jobChip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginBottom: 4 },
+-  jobChipText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
++  jobChipText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
+   threadBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+-  lastMessage: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13 },
++  lastMessage: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 13 },
+   badge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+-  badgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#FFF' },
++  badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: '#FFF' },
+   separator: { height: 1 },
+ });
+diff --git a/artifacts/skillbuddy/app/(tabs)/index.tsx b/artifacts/skillbuddy/app/(tabs)/index.tsx
+index e67fd4c..171e18a 100644
+--- a/artifacts/skillbuddy/app/(tabs)/index.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/index.tsx
+@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
+ import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import { useTheme } from '@/context/ThemeContext';
++import { useLanguage } from '@/context/LanguageContext';
+ import {
+   CATEGORIES,
+   CURRENT_USER,
+@@ -81,6 +82,7 @@ export default function HomeScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { colors: c } = useTheme();
++  const { t } = useLanguage();
+   const [refreshing, setRefreshing] = useState(false);
+   const [offerIdx, setOfferIdx] = useState(0);
+   const [loading, setLoading] = useState(true);
+@@ -108,7 +110,7 @@ export default function HomeScreen() {
+       <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 10 }]}>
+         {/* Logo + notification row */}
+         <View style={styles.logoRow}>
+-          <LogoImage variant="white" height={42} />
++          <LogoImage variant="white" height={54} />
+           <TouchableOpacity
+             style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
+             onPress={() => router.push('/notifications')}
+@@ -137,7 +139,7 @@ export default function HomeScreen() {
+         <Pressable style={styles.searchWrap} onPress={() => router.push('/search')}>
+           <View style={styles.searchBar}>
+             <Feather name="search" size={15} color="#9E9E9E" />
+-            <Text style={styles.searchPlaceholder}>Search for a service…</Text>
++            <Text style={styles.searchPlaceholder}>{t('search_placeholder')}</Text>
+           </View>
+           <TouchableOpacity style={styles.filterBtn} onPress={() => router.push('/filter')}>
+             <Feather name="sliders" size={15} color={c.primary} />
+@@ -159,13 +161,10 @@ export default function HomeScreen() {
+           />
+         }
+       >
+-        {/* Welcome Banner */}
++        {/* Section heading — no "Welcome back, Name" greeting, per request */}
+         <Animated.View entering={FadeInDown.delay(20).duration(380)} style={styles.section}>
+           <Text style={[styles.welcomeText, { color: c.text }]}>
+-            Welcome back, <Text style={[styles.welcomeName, { color: c.primary }]}>{CURRENT_USER.name}</Text>
+-          </Text>
+-          <Text style={[styles.welcomeSub, { color: c.mutedForeground }]}>
+-            What service do you need today?
++            {t('home_heading')}
+           </Text>
+         </Animated.View>
+ 
+@@ -176,7 +175,7 @@ export default function HomeScreen() {
+               <MaterialCommunityIcons name="star-circle-outline" size={22} color={c.primary} />
+             </View>
+             <View style={styles.creditBody}>
+-              <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>Credit Points</Text>
++              <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
+               <Text style={[styles.creditValue, { color: c.text }]}>
+                 {CURRENT_USER.creditPoints.toLocaleString()} pts
+               </Text>
+@@ -211,7 +210,7 @@ export default function HomeScreen() {
+         {/* Special Offers */}
+         <Animated.View entering={FadeInDown.delay(80).duration(380)} style={styles.section}>
+           <View style={styles.sectionHeader}>
+-            <Text style={[styles.sectionTitle, { color: c.text }]}>Special For You</Text>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_special_for_you')}</Text>
+             <TouchableOpacity>
+               <Text style={[styles.seeAll, { color: c.primary }]}>See All</Text>
+             </TouchableOpacity>
+@@ -252,7 +251,7 @@ export default function HomeScreen() {
+         {/* Categories */}
+         <Animated.View entering={FadeInDown.delay(100).duration(380)} style={styles.section}>
+           <View style={styles.sectionHeader}>
+-            <Text style={[styles.sectionTitle, { color: c.text }]}>Categories</Text>
++            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_categories')}</Text>
+             <TouchableOpacity onPress={() => router.push('/categories')}>
+               <Text style={[styles.seeAll, { color: c.primary }]}>See all</Text>
+             </TouchableOpacity>
+@@ -399,7 +398,7 @@ const styles = StyleSheet.create({
+   },
+   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 },
+   locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+-  locationText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  locationText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+   notifBtn: {
+     backgroundColor: 'rgba(255,255,255,0.15)',
+     width: 38,
+@@ -422,7 +421,7 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+     paddingHorizontal: 3,
+   },
+-  notifBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 10, color: '#FFF' },
++  notifBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 10, color: '#FFF' },
+   searchWrap: { flexDirection: 'row', gap: 8 },
+   searchBar: {
+     flex: 1,
+@@ -434,7 +433,7 @@ const styles = StyleSheet.create({
+     paddingHorizontal: 12,
+     paddingVertical: 10,
+   },
+-  searchPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#9E9E9E' },
++  searchPlaceholder: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#9E9E9E' },
+   filterBtn: {
+     backgroundColor: '#FFF',
+     width: 42,
+@@ -444,9 +443,7 @@ const styles = StyleSheet.create({
+   },
+ 
+   // ── Welcome ───────────────────────────────────────────────────────────────
+-  welcomeText: { fontFamily: 'Inter_400Regular', fontSize: 16 },
+-  welcomeName: { fontFamily: 'Inter_700Bold' },
+-  welcomeSub: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 2 },
++  welcomeText: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
+ 
+   // ── Credit Points ─────────────────────────────────────────────────────────
+   creditCard: {
+@@ -470,9 +467,9 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+   },
+   creditBody: { flex: 1 },
+-  creditLabel: { fontFamily: 'Inter_400Regular', fontSize: 11 },
+-  creditValue: { fontFamily: 'Inter_700Bold', fontSize: 20, marginTop: 1 },
+-  creditNote: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
++  creditLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
++  creditValue: { fontFamily: 'Manrope_700Bold', fontSize: 20, marginTop: 1 },
++  creditNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
+ 
+   // ── Quick tiles ───────────────────────────────────────────────────────────
+   quickGrid: {
+@@ -500,7 +497,7 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  quickLabel: { fontFamily: 'Inter_500Medium', fontSize: 11, textAlign: 'center' },
++  quickLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, textAlign: 'center' },
+ 
+   // ── Sections ──────────────────────────────────────────────────────────────
+   section: { marginTop: 20 },
+@@ -511,8 +508,8 @@ const styles = StyleSheet.create({
+     paddingHorizontal: 16,
+     marginBottom: 12,
+   },
+-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+   dotsRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, marginTop: 10 },
+   dot: { height: 5, borderRadius: 3 },
+ 
+@@ -536,8 +533,8 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  specialtyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+-  specialtyDesc: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
++  specialtyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
++  specialtyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16 },
+ 
+   // ── Badge card ────────────────────────────────────────────────────────────
+   badgeCard: {
+@@ -559,14 +556,14 @@ const styles = StyleSheet.create({
+   },
+   badgeCardLeft: { flex: 1, gap: 4, marginRight: 12 },
+   badgeCardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+-  badgeCardTitle: { fontFamily: 'Inter_700Bold', fontSize: 13 },
+-  badgeCardSub: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  badgeCardTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
++  badgeCardSub: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+   badgeTiers: { flexDirection: 'row', gap: 12 },
+   badgeTierItem: { alignItems: 'center', gap: 3 },
+-  badgeTierLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
++  badgeTierLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
+   badgeTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
+   badgeFill: { height: '100%', borderRadius: 3 },
+-  badgeProgressLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 6 },
++  badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
+ 
+   // ── Invite card ───────────────────────────────────────────────────────────
+   inviteCard: {
+@@ -579,12 +576,12 @@ const styles = StyleSheet.create({
+   },
+   inviteLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+   inviteText: { flex: 1 },
+-  inviteTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+-  inviteSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2, lineHeight: 16 },
++  inviteTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  inviteSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2, lineHeight: 16 },
+   inviteBtn: {
+     paddingHorizontal: 14,
+     paddingVertical: 8,
+     borderRadius: 10,
+   },
+-  inviteBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  inviteBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/(tabs)/jobs.tsx b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+index 30f94df..2c4f29b 100644
+--- a/artifacts/skillbuddy/app/(tabs)/jobs.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/jobs.tsx
+@@ -132,14 +132,14 @@ const styles = StyleSheet.create({
+     justifyContent: 'space-between',
+     borderBottomWidth: 1,
+   },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 22 },
+-  roleSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 22 },
++  roleSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+   roleToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
+-  roleToggleText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
++  roleToggleText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
+   postBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
+-  postBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
++  postBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
+   filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1 },
+   filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+-  filterText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  filterText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+ });
+diff --git a/artifacts/skillbuddy/app/(tabs)/profile.tsx b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+index 4dc0e3d..87c605d 100644
+--- a/artifacts/skillbuddy/app/(tabs)/profile.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/profile.tsx
+@@ -157,7 +157,7 @@ export default function ProfileScreen() {
+       <View style={[styles.profileHeader, { backgroundColor: c.headerBg, paddingTop: insets.top + 12 }]}>
+         {/* Logo mark + theme toggle row — real brand asset, consistent size with Home header */}
+         <View style={styles.headerTopRow}>
+-          <LogoImage variant="white" height={40} />
++          <LogoImage variant="white" height={52} />
+           <View ref={toggleBtnRef} collapsable={false}>
+             <TouchableOpacity
+               style={styles.themeToggleBtn}
+@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
+   },
+   roleSwitchOption: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9 },
+   roleSwitchActive: { backgroundColor: '#FFFFFF' },
+-  roleSwitchText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
++  roleSwitchText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+   avatarWrap: { position: 'relative', marginBottom: 12 },
+   avatar: {
+     width: 88,
+@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+     borderWidth: 3,
+   },
+-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 36, color: '#FFF' },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 36, color: '#FFF' },
+   editAvatarBtn: {
+     position: 'absolute',
+     bottom: 0,
+@@ -316,15 +316,15 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+     borderWidth: 2,
+   },
+-  name: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#FFF', marginBottom: 2 },
+-  email: { fontFamily: 'Inter_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)', marginBottom: 10 },
++  name: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#FFF', marginBottom: 2 },
++  email: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)', marginBottom: 10 },
+   roleBadge: {
+     paddingHorizontal: 14,
+     paddingVertical: 4,
+     borderRadius: 20,
+     backgroundColor: 'rgba(255,255,255,0.2)',
+   },
+-  roleText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
++  roleText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
+   statsRow: {
+     flexDirection: 'row',
+     marginHorizontal: 16,
+@@ -336,10 +336,10 @@ const styles = StyleSheet.create({
+     shadowRadius: 8,
+   },
+   statItem: { flex: 1, alignItems: 'center', paddingVertical: 16 },
+-  statValue: { fontFamily: 'Inter_700Bold', fontSize: 20 },
+-  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  statValue: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
++  statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+   sectionTitle: {
+-    fontFamily: 'Inter_600SemiBold',
++    fontFamily: 'Manrope_600SemiBold',
+     fontSize: 12,
+     marginTop: 20,
+     marginBottom: 8,
+@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
+   menuCard: { marginHorizontal: 16, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+   menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
+   menuIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+-  menuLabel: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14 },
++  menuLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
+   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
+-  badgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
++  badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+ });
+diff --git a/artifacts/skillbuddy/app/(tabs)/services.tsx b/artifacts/skillbuddy/app/(tabs)/services.tsx
+index a33dd67..ccacc8b 100644
+--- a/artifacts/skillbuddy/app/(tabs)/services.tsx
++++ b/artifacts/skillbuddy/app/(tabs)/services.tsx
+@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
+     gap: 10,
+   },
+   headerTitle: {
+-    fontFamily: 'Inter_700Bold',
++    fontFamily: 'Manrope_700Bold',
+     fontSize: 20,
+     color: '#FFF',
+   },
+@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
+   },
+   searchInput: {
+     flex: 1,
+-    fontFamily: 'Inter_400Regular',
++    fontFamily: 'Manrope_400Regular',
+     fontSize: 13,
+     color: '#1A1A1A',
+     // Explicit height avoids web rendering quirks
+@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+     paddingHorizontal: 3,
+   },
+-  filterBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 9, color: '#FFF' },
++  filterBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#FFF' },
+ 
+   // ── Category chips ──────────────────────────────────────────────────────────
+   catSection: { paddingTop: 20 },
+@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
+     borderRadius: 20,
+     borderWidth: 1,
+   },
+-  catChipText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  catChipText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+ 
+   // ── Results ─────────────────────────────────────────────────────────────────
+   resultsHeader: {
+@@ -351,9 +351,9 @@ const styles = StyleSheet.create({
+     marginTop: 22,
+     marginBottom: 12,
+   },
+-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  seeAll: { fontFamily: 'Inter_500Medium', fontSize: 13 },
+-  resultCount: { fontFamily: 'Inter_400Regular', fontSize: 13 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
++  resultCount: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
+   servicesList: { paddingHorizontal: 16 },
+ 
+   // ── Empty state ─────────────────────────────────────────────────────────────
+@@ -370,10 +370,10 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 17, textAlign: 'center' },
+-  emptySub: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
++  emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 17, textAlign: 'center' },
++  emptySub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+   emptyBtn: { marginTop: 4, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 28 },
+-  emptyBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
++  emptyBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+   emptyBtnOutline: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -383,5 +383,5 @@ const styles = StyleSheet.create({
+     borderRadius: 28,
+     borderWidth: 1.5,
+   },
+-  emptyBtnOutlineText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  emptyBtnOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+ });
+diff --git a/artifacts/skillbuddy/app/_layout.tsx b/artifacts/skillbuddy/app/_layout.tsx
+index e76aff6..7954a93 100644
+--- a/artifacts/skillbuddy/app/_layout.tsx
++++ b/artifacts/skillbuddy/app/_layout.tsx
+@@ -5,12 +5,12 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
+ import { SafeAreaProvider } from 'react-native-safe-area-context';
+ import { ErrorBoundary } from '@/components/ErrorBoundary';
+ import {
+-  Inter_400Regular,
+-  Inter_500Medium,
+-  Inter_600SemiBold,
+-  Inter_700Bold,
++  Manrope_400Regular,
++  Manrope_500Medium,
++  Manrope_600SemiBold,
++  Manrope_700Bold,
+   useFonts,
+-} from '@expo-google-fonts/inter';
++} from '@expo-google-fonts/manrope';
+ import { Stack, useRouter, useSegments } from 'expo-router';
+ import * as SplashScreen from 'expo-splash-screen';
+ import { AuthProvider } from '@/context/AuthContext';
+@@ -19,6 +19,8 @@ import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+ import { RoleProvider } from '@/context/RoleContext';
+ import { FilterProvider } from '@/context/FilterContext';
+ import { AlertModalProvider } from '@/context/AlertModalContext';
++import NavigationLoaderOverlay from '@/components/NavigationLoaderOverlay';
++import { LanguageProvider } from '@/context/LanguageContext';
+ 
+ SplashScreen.preventAutoHideAsync();
+ const queryClient = new QueryClient();
+@@ -97,16 +99,17 @@ function RootLayoutNav() {
+           options={{ headerShown: false, animation: 'slide_from_bottom' }}
+         />
+       </Stack>
++      <NavigationLoaderOverlay />
+     </>
+   );
+ }
+ 
+ export default function RootLayout() {
+   const [fontsLoaded, fontError] = useFonts({
+-    Inter_400Regular,
+-    Inter_500Medium,
+-    Inter_600SemiBold,
+-    Inter_700Bold,
++    Manrope_400Regular,
++    Manrope_500Medium,
++    Manrope_600SemiBold,
++    Manrope_700Bold,
+   });
+ 
+   useEffect(() => {
+@@ -124,6 +127,7 @@ export default function RootLayout() {
+               <RoleProvider>
+               <FilterProvider>
+               <AlertModalProvider>
++              <LanguageProvider>
+               <BookmarkProvider>
+                 <GestureHandlerRootView style={{ flex: 1 }}>
+                   <KeyboardProvider>
+@@ -131,6 +135,7 @@ export default function RootLayout() {
+                   </KeyboardProvider>
+                 </GestureHandlerRootView>
+               </BookmarkProvider>
++              </LanguageProvider>
+               </AlertModalProvider>
+               </FilterProvider>
+               </RoleProvider>
+diff --git a/artifacts/skillbuddy/app/booking/[id].tsx b/artifacts/skillbuddy/app/booking/[id].tsx
+index c7e34bc..01bc577 100644
+--- a/artifacts/skillbuddy/app/booking/[id].tsx
++++ b/artifacts/skillbuddy/app/booking/[id].tsx
+@@ -6,11 +6,11 @@ import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeInDown } from 'react-native-reanimated';
+ import * as Haptics from 'expo-haptics';
+ import colors from '@/constants/colors';
++import { useTheme } from '@/context/ThemeContext';
+ import { SERVICES } from '@/data/mockData';
+ import BackButton from '@/components/BackButton';
+ import { useAppAlert } from '@/context/AlertModalContext';
+ 
+-const c = colors.light;
+ 
+ const DAYS = [
+   { day: 'Mon', date: '15', month: 'Jan' },
+@@ -33,6 +33,7 @@ const TIME_SLOTS = [
+ 
+ export default function BookingScreen() {
+   const insets = useSafeAreaInsets();
++  const { colors: c } = useTheme();
+   const router = useRouter();
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const service = SERVICES.find((s) => s.id === id) ?? SERVICES[0];
+@@ -52,7 +53,7 @@ export default function BookingScreen() {
+   };
+ 
+   return (
+-    <View style={[styles.root, { paddingTop: insets.top }]}>
++    <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
+       {/* Header */}
+       <View style={[styles.header, { backgroundColor: c.primary }]}>
+         <BackButton />
+@@ -68,17 +69,17 @@ export default function BookingScreen() {
+       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+         {/* Day Selector */}
+         <Animated.View entering={FadeInDown.delay(50).duration(350)} style={styles.section}>
+-          <Text style={styles.sectionLabel}>Select Day</Text>
++          <Text style={[styles.sectionLabel, { color: c.text }]}>Select Day</Text>
+           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
+             {DAYS.map((d, i) => (
+               <TouchableOpacity
+                 key={i}
+-                style={[styles.dayTab, i === selectedDay && { backgroundColor: c.primary }]}
++                style={[styles.dayTab, { backgroundColor: c.muted }, i === selectedDay && { backgroundColor: c.primary }]}
+                 onPress={() => setSelectedDay(i)}
+               >
+-                <Text style={[styles.dayMonth, i === selectedDay && { color: 'rgba(255,255,255,0.8)' }]}>{d.month}</Text>
+-                <Text style={[styles.dayDate, i === selectedDay && { color: '#FFF' }]}>{d.date}</Text>
+-                <Text style={[styles.dayName, i === selectedDay && { color: 'rgba(255,255,255,0.8)' }]}>{d.day}</Text>
++                <Text style={[styles.dayMonth, { color: c.mutedForeground }, i === selectedDay && { color: 'rgba(255,255,255,0.8)' }]}>{d.month}</Text>
++                <Text style={[styles.dayDate, { color: c.text }, i === selectedDay && { color: '#FFF' }]}>{d.date}</Text>
++                <Text style={[styles.dayName, { color: c.mutedForeground }, i === selectedDay && { color: 'rgba(255,255,255,0.8)' }]}>{d.day}</Text>
+               </TouchableOpacity>
+             ))}
+           </ScrollView>
+@@ -86,15 +87,15 @@ export default function BookingScreen() {
+ 
+         {/* Time Slots */}
+         <Animated.View entering={FadeInDown.delay(100).duration(350)} style={styles.section}>
+-          <Text style={styles.sectionLabel}>Select Time</Text>
++          <Text style={[styles.sectionLabel, { color: c.text }]}>Select Time</Text>
+           <View style={styles.timeGrid}>
+             {TIME_SLOTS.map((slot) => (
+               <TouchableOpacity
+                 key={slot}
+-                style={[styles.timeSlot, selectedTime === slot && { backgroundColor: c.primary, borderColor: c.primary }]}
++                style={[styles.timeSlot, { backgroundColor: c.muted, borderColor: c.border }, selectedTime === slot && { backgroundColor: c.primary, borderColor: c.primary }]}
+                 onPress={() => { setSelectedTime(slot); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+               >
+-                <Text style={[styles.timeText, selectedTime === slot && { color: '#FFF', fontFamily: 'Inter_600SemiBold' }]}>{slot}</Text>
++                <Text style={[styles.timeText, { color: c.text }, selectedTime === slot && { color: '#FFF', fontFamily: 'Manrope_600SemiBold' }]}>{slot}</Text>
+               </TouchableOpacity>
+             ))}
+           </View>
+@@ -102,7 +103,7 @@ export default function BookingScreen() {
+       </ScrollView>
+ 
+       {/* Submit Button */}
+-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
++      <View style={[styles.bottomBar, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 12 }]}>
+         <TouchableOpacity style={[styles.submitBtn, { backgroundColor: c.primary }]} onPress={handleSubmit}>
+           <Text style={styles.submitText}>Submit</Text>
+         </TouchableOpacity>
+@@ -115,28 +116,28 @@ const styles = StyleSheet.create({
+   root: { flex: 1, backgroundColor: '#FFF' },
+   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+   headerMid: { flex: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#FFF' },
+-  headerSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)' },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: '#FFF' },
++  headerSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+   section: { marginTop: 20, paddingHorizontal: 16 },
+-  sectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#1A1A1A', marginBottom: 12 },
++  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#1A1A1A', marginBottom: 12 },
+   dayTab: {
+     alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14,
+     backgroundColor: '#F5F5F5', minWidth: 56,
+   },
+-  dayMonth: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#737373' },
+-  dayDate: { fontFamily: 'Inter_700Bold', fontSize: 20, color: '#1A1A1A', marginVertical: 2 },
+-  dayName: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#737373' },
++  dayMonth: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#737373' },
++  dayDate: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#1A1A1A', marginVertical: 2 },
++  dayName: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#737373' },
+   timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+   timeSlot: {
+     width: '47%', paddingVertical: 14, borderRadius: 12,
+     backgroundColor: '#F5F5F5', borderWidth: 1.5, borderColor: '#F0F0F0', alignItems: 'center',
+   },
+-  timeText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#1A1A1A' },
++  timeText: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: '#1A1A1A' },
+   bottomBar: {
+     position: 'absolute', bottom: 0, left: 0, right: 0,
+     paddingHorizontal: 20, paddingTop: 16,
+     backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0',
+   },
+   submitBtn: { borderRadius: 28, paddingVertical: 16, alignItems: 'center' },
+-  submitText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  submitText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/categories.tsx b/artifacts/skillbuddy/app/categories.tsx
+index fca37ce..1d995ba 100644
+--- a/artifacts/skillbuddy/app/categories.tsx
++++ b/artifacts/skillbuddy/app/categories.tsx
+@@ -67,12 +67,12 @@ const styles = StyleSheet.create({
+   quoteInner: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+   quoteIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+   quoteText: { flex: 1 },
+-  quoteTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
+-  quoteSub: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 2 },
++  quoteTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
++  quoteSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginTop: 2 },
+   quoteBtn: {
+     borderRadius: 28,
+     paddingVertical: 13,
+     alignItems: 'center',
+   },
+-  quoteBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
++  quoteBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/category/[id].tsx b/artifacts/skillbuddy/app/category/[id].tsx
+index 33b5a50..64e1df6 100644
+--- a/artifacts/skillbuddy/app/category/[id].tsx
++++ b/artifacts/skillbuddy/app/category/[id].tsx
+@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
+   },
+   headerTitle: {
+     flex: 1,
+-    fontFamily: 'Inter_700Bold',
++    fontFamily: 'Manrope_700Bold',
+     fontSize: 18,
+     color: '#FFF',
+     textAlign: 'center',
+@@ -113,8 +113,8 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+   },
+   cardBody: { flex: 1 },
+-  cardTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, marginBottom: 3 },
+-  cardDesc: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 18 },
++  cardTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, marginBottom: 3 },
++  cardDesc: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 18 },
+   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
+-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
++  emptyText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/chat/[id].tsx b/artifacts/skillbuddy/app/chat/[id].tsx
+index 6450710..9821b5b 100644
+--- a/artifacts/skillbuddy/app/chat/[id].tsx
++++ b/artifacts/skillbuddy/app/chat/[id].tsx
+@@ -17,11 +17,11 @@ import { Image } from 'expo-image';
+ import * as Haptics from 'expo-haptics';
+ import Animated, { FadeIn } from 'react-native-reanimated';
+ import colors from '@/constants/colors';
++import { useTheme } from '@/context/ThemeContext';
+ import { CHAT_THREADS } from '@/data/mockData';
+ import BackButton from '@/components/BackButton';
+ import type { ChatMessage } from '@/types';
+ 
+-const c = colors.light;
+ 
+ const INITIAL_MESSAGES: ChatMessage[] = [
+   { id: 'm1', text: 'Lorem Ipsum is simply dummy text of the printing and typesetting industry.', sender: 'other', timestamp: '08:04 pm', senderName: 'Jenny Wilson' },
+@@ -31,6 +31,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
+ ];
+ 
+ export default function ChatThreadScreen() {
++  const { colors: c } = useTheme();
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { id } = useLocalSearchParams<{ id: string }>();
+@@ -64,11 +65,11 @@ export default function ChatThreadScreen() {
+         )}
+         <View style={styles.msgContent}>
+           {item.image ? (
+-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther, { padding: 4 }]}>
++            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }, { padding: 4 }]}>
+               <Image source={{ uri: item.image }} style={[styles.msgImage, { borderRadius: 12 }]} contentFit="cover" />
+             </View>
+           ) : item.voice ? (
+-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther, styles.voiceBubble]}>
++            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }, styles.voiceBubble]}>
+               <TouchableOpacity style={styles.playBtn}>
+                 <Feather name="play" size={18} color="#FFF" />
+               </TouchableOpacity>
+@@ -80,8 +81,8 @@ export default function ChatThreadScreen() {
+               <Text style={styles.voiceDuration}>0:{String(item.voiceDuration ?? 0).padStart(2, '0')}</Text>
+             </View>
+           ) : (
+-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
+-              <Text style={[styles.msgText, isMe && styles.msgTextMe]}>{item.text}</Text>
++            <View style={[styles.bubble, isMe ? { backgroundColor: c.primary, borderBottomRightRadius: 4 } : { backgroundColor: c.card, borderBottomLeftRadius: 4 }]}>
++              <Text style={[styles.msgText, { color: c.text }, isMe && styles.msgTextMe]}>{item.text}</Text>
+             </View>
+           )}
+           <View style={[styles.metaRow, isMe && { justifyContent: 'flex-end' }]}>
+@@ -139,24 +140,24 @@ export default function ChatThreadScreen() {
+         />
+ 
+         {/* Input Bar */}
+-        <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
++        <View style={[styles.inputBar, { backgroundColor: c.surface, borderTopColor: c.border, paddingBottom: insets.bottom + 8 }]}>
+           <TouchableOpacity style={[styles.attachBtn, { backgroundColor: c.primaryLight }]}>
+             <Feather name="plus" size={20} color={c.primary} />
+           </TouchableOpacity>
+           <TextInput
+-            style={styles.textInput}
++            style={[styles.textInput, { backgroundColor: c.muted, color: c.text }]}
+             value={input}
+             onChangeText={setInput}
+             placeholder="Type a message here..."
+-            placeholderTextColor="#9E9E9E"
++            placeholderTextColor={c.mutedForeground}
+             multiline
+             maxLength={500}
+           />
+           <TouchableOpacity
+-            style={[styles.sendBtn, { backgroundColor: input.trim() ? c.primary : '#E8E8E8' }]}
++            style={[styles.sendBtn, { backgroundColor: input.trim() ? c.primary : c.muted }]}
+             onPress={sendMessage}
+           >
+-            <Feather name={input.trim() ? 'send' : 'mic'} size={18} color={input.trim() ? '#FFF' : '#9E9E9E'} />
++            <Feather name={input.trim() ? 'send' : 'mic'} size={18} color={input.trim() ? '#FFF' : c.mutedForeground} />
+           </TouchableOpacity>
+         </View>
+       </KeyboardAvoidingView>
+@@ -171,30 +172,30 @@ const styles = StyleSheet.create({
+   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+   backBtn: {},
+   headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+-  headerAvatarText: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  headerName: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
+-  headerStatus: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.8)' },
++  headerAvatarText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  headerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
++  headerStatus: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.8)' },
+   dateSep: { alignItems: 'center', marginVertical: 8 },
+-  dateText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: '#9E9E9E', backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
++  dateText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#9E9E9E', backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+   msgRowMe: { flexDirection: 'row-reverse' },
+   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+-  avatarText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  avatarText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+   msgContent: { maxWidth: '70%', gap: 4 },
+   bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+   bubbleOther: { backgroundColor: '#FFF', borderBottomLeftRadius: 4 },
+   bubbleMe: { backgroundColor: colors.light.primary, borderBottomRightRadius: 4 },
+-  msgText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
++  msgText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
+   msgTextMe: { color: '#FFF' },
+   msgImage: { width: 200, height: 150, borderRadius: 12 },
+   voiceBubble: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+   playBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' },
+   waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2 },
+   bar: { width: 3, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 1.5 },
+-  voiceDuration: { fontFamily: 'Inter_500Medium', fontSize: 12, color: '#FFF' },
++  voiceDuration: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#FFF' },
+   metaRow: { flexDirection: 'row-reverse', gap: 6, alignItems: 'center' },
+-  timestamp: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#9E9E9E' },
+-  senderName: { fontFamily: 'Inter_400Regular', fontSize: 11, color: '#9E9E9E' },
++  timestamp: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#9E9E9E' },
++  senderName: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: '#9E9E9E' },
+   inputBar: {
+     flexDirection: 'row', alignItems: 'center', gap: 10,
+     paddingHorizontal: 16, paddingTop: 10,
+@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
+   },
+   attachBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+   textInput: {
+-    flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A',
++    flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A',
+     backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10,
+     maxHeight: 100,
+   },
+diff --git a/artifacts/skillbuddy/app/chat/support.tsx b/artifacts/skillbuddy/app/chat/support.tsx
+index 31483b8..e61c5f2 100644
+--- a/artifacts/skillbuddy/app/chat/support.tsx
++++ b/artifacts/skillbuddy/app/chat/support.tsx
+@@ -129,18 +129,18 @@ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+   headerCenter: { alignItems: 'center', gap: 4 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: '#FFF' },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: '#FFF' },
+   supportBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+-  supportBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 10, color: '#FFF' },
+-  prompt: { fontFamily: 'Inter_700Bold', fontSize: 18, marginBottom: 16 },
++  supportBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: '#FFF' },
++  prompt: { fontFamily: 'Manrope_700Bold', fontSize: 18, marginBottom: 16 },
+   catCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
+   catIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+-  catLabel: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  catLabel: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+   msgRow: { marginBottom: 10, maxWidth: '80%' },
+   msgRowMe: { alignSelf: 'flex-end' },
+   bubble: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
+-  msgText: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20 },
++  msgText: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 20 },
+   inputBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1 },
+-  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 100 },
++  input: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 100 },
+   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+ });
+diff --git a/artifacts/skillbuddy/app/filter.tsx b/artifacts/skillbuddy/app/filter.tsx
+index dc5fba4..c9aa41f 100644
+--- a/artifacts/skillbuddy/app/filter.tsx
++++ b/artifacts/skillbuddy/app/filter.tsx
+@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
+     paddingHorizontal: 20,
+     paddingVertical: 12,
+   },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   closeBtn: {
+     width: 34,
+     height: 34,
+@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
+     justifyContent: 'center',
+   },
+   sectionLabel: {
+-    fontFamily: 'Inter_600SemiBold',
++    fontFamily: 'Manrope_600SemiBold',
+     fontSize: 14,
+     paddingHorizontal: 20,
+     marginTop: 18,
+@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
+     borderRadius: 20,
+     borderWidth: 1,
+   },
+-  catTabText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  catTabText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+   priceRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -321,13 +321,13 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     minWidth: 62,
+   },
+-  priceBoxLabel: { fontFamily: 'Inter_400Regular', fontSize: 10 },
+-  priceBoxValue: { fontFamily: 'Inter_700Bold', fontSize: 14 },
++  priceBoxLabel: { fontFamily: 'Manrope_400Regular', fontSize: 10 },
++  priceBoxValue: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
+   sliderTrack: { flex: 1, height: 4, borderRadius: 2 },
+   sliderFill: { position: 'absolute', left: '10%', right: '10%', height: '100%', borderRadius: 2 },
+   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+   starsRow: { flexDirection: 'row', gap: 2 },
+-  ratingLabel: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  ratingLabel: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14 },
+   radio: {
+     width: 20,
+     height: 20,
+@@ -345,8 +345,8 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     minWidth: 64,
+   },
+-  dateDay: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+-  dateNum: { fontFamily: 'Inter_600SemiBold', fontSize: 13, marginTop: 2 },
++  dateDay: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
++  dateNum: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginTop: 2 },
+   bottomRow: {
+     flexDirection: 'row',
+     gap: 12,
+@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
+     paddingVertical: 14,
+     alignItems: 'center',
+   },
+-  resetText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  resetText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   applyBtn: { flex: 1, borderRadius: 28, paddingVertical: 14, alignItems: 'center' },
+-  applyText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
++  applyText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+index 727ade3..897fdbd 100644
+--- a/artifacts/skillbuddy/app/job/[id].tsx
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -270,22 +270,22 @@ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+   backBtn: { padding: 4 },
+-  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Inter_700Bold', fontSize: 16, marginHorizontal: 8 },
++  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Manrope_700Bold', fontSize: 16, marginHorizontal: 8 },
+   restartBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingVertical: 10, marginTop: 10 },
+-  restartText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  restartText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+   noBidsCard: { borderWidth: 1, borderRadius: 16, padding: 20, alignItems: 'center', gap: 8, marginTop: 20 },
+-  noBidsTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  noBidsSub: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19 },
++  noBidsTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  noBidsSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19 },
+   noBidsActions: { flexDirection: 'row', gap: 10, marginTop: 10, width: '100%' },
+   restartBtnFull: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10 },
+-  restartFullText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  restartFullText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 },
+-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  viewAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  viewAll: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   sortChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+-  sortChipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  sortChipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   statusCard: { alignItems: 'center', gap: 8, borderRadius: 16, padding: 24, marginTop: 10 },
+-  statusText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   cancelBtn: { marginTop: 24, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+-  cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  cancelText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/job/[id]/bid.tsx b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+index cb370ba..2659eec 100644
+--- a/artifacts/skillbuddy/app/job/[id]/bid.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+@@ -248,40 +248,40 @@ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+   backBtn: { padding: 4 },
+-  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Inter_700Bold', fontSize: 16, marginHorizontal: 8 },
++  headerTitle: { flex: 1, textAlign: 'center', fontFamily: 'Manrope_700Bold', fontSize: 16, marginHorizontal: 8 },
+   urgencyBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 12 },
+-  urgencyBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
++  urgencyBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+   clientCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 16 },
+   clientAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+-  clientAvatarText: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+-  clientName: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+-  clientMeta: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  clientAvatarText: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  clientName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  clientMeta: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+   clientStats: { alignItems: 'flex-end' },
+   clientStatItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+-  clientStatText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+-  clientStatSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
+-  jobTitle: { fontFamily: 'Inter_700Bold', fontSize: 19, marginTop: 18 },
+-  jobDescription: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 21, marginTop: 8 },
++  clientStatText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  clientStatSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
++  jobTitle: { fontFamily: 'Manrope_700Bold', fontSize: 19, marginTop: 18 },
++  jobDescription: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 21, marginTop: 8 },
+   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+   detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
+-  detailText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  detailText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   jobPhoto: { width: 100, height: 100, borderRadius: 12, marginRight: 10 },
+   scoreCard: { borderRadius: 14, padding: 14, marginTop: 16, alignItems: 'center' },
+-  scoreLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+-  scoreValue: { fontFamily: 'Inter_700Bold', fontSize: 22, marginTop: 2 },
+-  label: { fontFamily: 'Inter_700Bold', fontSize: 16, marginTop: 24, marginBottom: 4 },
+-  sublabel: { fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 8 },
++  scoreLabel: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  scoreValue: { fontFamily: 'Manrope_700Bold', fontSize: 22, marginTop: 2 },
++  label: { fontFamily: 'Manrope_700Bold', fontSize: 16, marginTop: 24, marginBottom: 4 },
++  sublabel: { fontFamily: 'Manrope_500Medium', fontSize: 12, marginBottom: 8 },
+   priceRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+   adjustBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+-  adjustText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  adjustText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
++  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14 },
+   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
+-  chipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   submitBtn: { marginTop: 22, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+-  submitText: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
++  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+   cancelBidBtn: { marginTop: 12, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+-  cancelBidText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  cancelBidText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+   closedCard: { borderRadius: 14, padding: 20, alignItems: 'center', marginTop: 20 },
+-  closedText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
++  closedText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+ });
+diff --git a/artifacts/skillbuddy/app/job/post.tsx b/artifacts/skillbuddy/app/job/post.tsx
+index 9d48e85..1f6aadc 100644
+--- a/artifacts/skillbuddy/app/job/post.tsx
++++ b/artifacts/skillbuddy/app/job/post.tsx
+@@ -320,36 +320,36 @@ const styles = StyleSheet.create({
+     borderBottomWidth: 1,
+   },
+   backBtn: { padding: 4 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   scroll: { padding: 20, paddingBottom: 60, gap: 6 },
+-  label: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginTop: 16, marginBottom: 8 },
++  label: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 16, marginBottom: 8 },
+   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
+-  counter: { fontFamily: 'Inter_400Regular', fontSize: 11, marginBottom: 8 },
+-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14 },
+-  textArea: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Inter_400Regular', fontSize: 14, minHeight: 110 },
+-  error: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 4 },
++  counter: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginBottom: 8 },
++  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14 },
++  textArea: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14, minHeight: 110 },
++  error: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 4 },
+   categoryRow: { gap: 8, paddingRight: 8 },
+   categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
+-  categoryText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  categoryText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
+-  chipText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 12, padding: 8 },
+   stepperBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+-  stepperValue: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  stepperValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+   photoThumbWrap: { width: 72, height: 72, borderRadius: 12, position: 'relative' },
+   photoThumb: { width: 72, height: 72, borderRadius: 12 },
+   photoRemove: { position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+   photoAdd: { width: 72, height: 72, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
+   totalCard: { borderRadius: 14, padding: 16, marginTop: 16, alignItems: 'center', gap: 2 },
+-  totalLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+-  totalValue: { fontFamily: 'Inter_700Bold', fontSize: 28 },
+-  totalSub: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center' },
++  totalLabel: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  totalValue: { fontFamily: 'Manrope_700Bold', fontSize: 28 },
++  totalSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center' },
+   urgencyRow: { flexDirection: 'row', gap: 10 },
+   urgencyOption: { flex: 1, borderWidth: 1.5, borderRadius: 14, padding: 14, alignItems: 'center', gap: 6 },
+-  urgencyTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+-  urgencyDesc: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center', lineHeight: 15 },
++  urgencyTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
++  urgencyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center', lineHeight: 15 },
+   submitBtn: { marginTop: 28, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+-  submitText: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
++  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/location.tsx b/artifacts/skillbuddy/app/location.tsx
+index f2ed094..8bbaa04 100644
+--- a/artifacts/skillbuddy/app/location.tsx
++++ b/artifacts/skillbuddy/app/location.tsx
+@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
+     flexShrink: 0,
+   },
+   title: {
+-    fontFamily: 'Inter_700Bold',
++    fontFamily: 'Manrope_700Bold',
+     fontSize: 18,
+     flex: 1,
+   },
+@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
+     flex: 1,
+     paddingVertical: 13,
+     paddingHorizontal: 8,
+-    fontFamily: 'Inter_400Regular',
++    fontFamily: 'Manrope_400Regular',
+     fontSize: 15,
+   },
+   clearBtn: { paddingHorizontal: 12 },
+@@ -187,8 +187,8 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  currentLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+-  currentSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  currentLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  currentSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+ 
+   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16, marginBottom: 4 },
+ 
+@@ -207,10 +207,10 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  resultName: { fontFamily: 'Inter_500Medium', fontSize: 14 },
+-  resultSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  resultName: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
++  resultSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+ 
+   sep: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+   empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
+-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
++  emptyText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/notifications.tsx b/artifacts/skillbuddy/app/notifications.tsx
+index b992ff8..1fa2eab 100644
+--- a/artifacts/skillbuddy/app/notifications.tsx
++++ b/artifacts/skillbuddy/app/notifications.tsx
+@@ -27,7 +27,7 @@ function NotifItem({ item, index, c }: { item: Notification; index: number; c: a
+         <View style={styles.itemBody}>
+           <View style={styles.itemTop}>
+             <Text
+-              style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Inter_700Bold' }]}
++              style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Manrope_700Bold' }]}
+             >
+               {item.title}
+             </Text>
+@@ -123,9 +123,9 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  title: { flex: 1, fontFamily: 'Inter_700Bold', fontSize: 20 },
++  title: { flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 20 },
+   badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
+-  badgeText: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#FFF' },
++  badgeText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: '#FFF' },
+ 
+   sectionHdr: {
+     flexDirection: 'row',
+@@ -135,8 +135,8 @@ const styles = StyleSheet.create({
+     paddingTop: 12,
+     paddingBottom: 12,
+   },
+-  sectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
+-  markAll: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, letterSpacing: 0.5 },
++  markAll: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+ 
+   item: {
+     flexDirection: 'row',
+@@ -161,9 +161,9 @@ const styles = StyleSheet.create({
+     alignItems: 'flex-start',
+     marginBottom: 4,
+   },
+-  itemTitle: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14, marginRight: 8 },
+-  itemTime: { fontFamily: 'Inter_400Regular', fontSize: 12, flexShrink: 0 },
+-  itemMsg: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20 },
++  itemTitle: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginRight: 8 },
++  itemTime: { fontFamily: 'Manrope_400Regular', fontSize: 12, flexShrink: 0 },
++  itemMsg: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20 },
+   unreadDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4, flexShrink: 0 },
+   sep: { height: StyleSheet.hairlineWidth },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/credit-points.tsx b/artifacts/skillbuddy/app/profile/credit-points.tsx
+index 4655f81..69cd5d1 100644
+--- a/artifacts/skillbuddy/app/profile/credit-points.tsx
++++ b/artifacts/skillbuddy/app/profile/credit-points.tsx
+@@ -56,16 +56,16 @@ export default function CreditPointsScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   balanceCard: { margin: 20, borderRadius: 20, padding: 24, alignItems: 'center', gap: 4 },
+-  balanceValue: { fontFamily: 'Inter_700Bold', fontSize: 40, color: '#FFF', marginTop: 4 },
+-  balanceLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.9)' },
+-  balanceSub: { fontFamily: 'Inter_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 6 },
+-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, paddingHorizontal: 20, marginBottom: 8 },
++  balanceValue: { fontFamily: 'Manrope_700Bold', fontSize: 40, color: '#FFF', marginTop: 4 },
++  balanceLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.9)' },
++  balanceSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 6 },
++  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, paddingHorizontal: 20, marginBottom: 8 },
+   txRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1 },
+   txIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+-  txDesc: { fontFamily: 'Inter_500Medium', fontSize: 13 },
+-  txDate: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
+-  txChange: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+-  txBalance: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  txDesc: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
++  txDate: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
++  txChange: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
++  txBalance: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/documents.tsx b/artifacts/skillbuddy/app/profile/documents.tsx
+index fe0e6d2..07e832f 100644
+--- a/artifacts/skillbuddy/app/profile/documents.tsx
++++ b/artifacts/skillbuddy/app/profile/documents.tsx
+@@ -75,13 +75,13 @@ export default function DocumentsScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+-  hint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, marginBottom: 16 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  hint: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 19, marginBottom: 16 },
+   docCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 12 },
+   docIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+-  docTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginBottom: 6 },
++  docTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 6 },
+   statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+-  statusText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++  statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
+   docAction: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+-  docActionText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  docActionText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/edit.tsx b/artifacts/skillbuddy/app/profile/edit.tsx
+index 9acce90..f25ed87 100644
+--- a/artifacts/skillbuddy/app/profile/edit.tsx
++++ b/artifacts/skillbuddy/app/profile/edit.tsx
+@@ -4,13 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+ import colors from '@/constants/colors';
++import { useTheme } from '@/context/ThemeContext';
+ import { useAuth } from '@/context/AuthContext';
+ import { authApi } from '@/services/api';
+ import BackButton from '@/components/BackButton';
+ 
+-const c = colors.light;
+ 
+ export default function EditProfileScreen() {
++  const { colors: c } = useTheme();
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { user, refreshUser } = useAuth();
+@@ -35,10 +36,10 @@ export default function EditProfileScreen() {
+   };
+ 
+   return (
+-    <View style={[styles.root, { paddingTop: insets.top }]}>
++    <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
+       <View style={styles.header}>
+         <BackButton />
+-        <Text style={styles.title}>Edit Profile</Text>
++        <Text style={[styles.title, { color: c.text }]}>Edit Profile</Text>
+         <TouchableOpacity onPress={handleSave} disabled={loading}>
+           {loading ? <ActivityIndicator size="small" color={c.primary} /> : (
+             <Text style={[styles.saveText, { color: c.primary }]}>Save</Text>
+@@ -60,15 +61,15 @@ export default function EditProfileScreen() {
+           { label: 'Phone', value: phone, set: setPhone, icon: 'phone' as const, keyboardType: 'phone-pad' as const },
+         ].map((f) => (
+           <View key={f.label}>
+-            <Text style={styles.label}>{f.label}</Text>
+-            <View style={styles.inputRow}>
++            <Text style={[styles.label, { color: c.text }]}>{f.label}</Text>
++            <View style={[styles.inputRow, { backgroundColor: c.muted, borderColor: c.border }]}>
+               <Feather name={f.icon} size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
+               <TextInput
+-                style={styles.input}
++                style={[styles.input, { color: c.text }]}
+                 value={f.value}
+                 onChangeText={f.set}
+                 placeholder={f.label}
+-                placeholderTextColor="#9E9E9E"
++                placeholderTextColor={c.mutedForeground}
+                 keyboardType={f.keyboardType}
+                 autoCapitalize={f.label === 'Phone' ? 'none' : 'words'}
+               />
+@@ -77,10 +78,10 @@ export default function EditProfileScreen() {
+         ))}
+ 
+         <View>
+-          <Text style={styles.label}>Email (read-only)</Text>
+-          <View style={[styles.inputRow, { backgroundColor: '#F0F0F0' }]}>
+-            <Feather name="mail" size={18} color="#9E9E9E" style={{ marginRight: 10 }} />
+-            <Text style={styles.readOnly}>{user?.email ?? ''}</Text>
++          <Text style={[styles.label, { color: c.text }]}>Email (read-only)</Text>
++          <View style={[styles.inputRow, { backgroundColor: c.muted, borderColor: c.border }]}>
++            <Feather name="mail" size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
++            <Text style={[styles.readOnly, { color: c.mutedForeground }]}>{user?.email ?? ''}</Text>
+           </View>
+         </View>
+       </ScrollView>
+@@ -91,16 +92,16 @@ export default function EditProfileScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1, backgroundColor: '#FFF' },
+   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+-  title: { flex: 1, fontFamily: 'Inter_700Bold', fontSize: 18, color: '#1A1A1A' },
+-  saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  title: { flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 18, color: '#1A1A1A' },
++  saveText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   avatarWrap: { width: 88, height: 88, borderRadius: 44, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginBottom: 8, position: 'relative' },
+-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 36 },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 36 },
+   cameraBtn: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: '#1A1A1A', marginBottom: 8 },
+   inputRow: {
+     flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5',
+     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E8E8E8',
+   },
+-  input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#1A1A1A' },
+-  readOnly: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: '#9E9E9E' },
++  input: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A' },
++  readOnly: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#9E9E9E' },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/faqs.tsx b/artifacts/skillbuddy/app/profile/faqs.tsx
+index 6f29e19..a2ddaa9 100644
+--- a/artifacts/skillbuddy/app/profile/faqs.tsx
++++ b/artifacts/skillbuddy/app/profile/faqs.tsx
+@@ -107,17 +107,17 @@ export default function FaqsScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   searchWrap: { paddingHorizontal: 20, paddingTop: 16 },
+   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+-  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14 },
+   tabsRow: { marginTop: 14, marginBottom: 4, flexGrow: 0 },
+   tab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+-  tabText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  tabText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   faqCard: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
+   faqHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+-  faqQuestion: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+-  faqAnswer: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, marginTop: 10 },
++  faqQuestion: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  faqAnswer: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20, marginTop: 10 },
+   contactBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, paddingVertical: 14, marginTop: 10 },
+-  contactText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
++  contactText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/legal.tsx b/artifacts/skillbuddy/app/profile/legal.tsx
+index 1d6fda3..23b0053 100644
+--- a/artifacts/skillbuddy/app/profile/legal.tsx
++++ b/artifacts/skillbuddy/app/profile/legal.tsx
+@@ -57,6 +57,6 @@ export default function LegalScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+-  paragraph: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, marginBottom: 16 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  paragraph: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 22, marginBottom: 16 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/professional.tsx b/artifacts/skillbuddy/app/profile/professional.tsx
+index 34e0ebf..b6bd9d9 100644
+--- a/artifacts/skillbuddy/app/profile/professional.tsx
++++ b/artifacts/skillbuddy/app/profile/professional.tsx
+@@ -127,22 +127,22 @@ export default function ProfessionalInfoScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   statGrid: { flexDirection: 'row', gap: 10 },
+   statCard: { flex: 1, borderWidth: 1, borderRadius: 14, padding: 14, alignItems: 'center', gap: 6 },
+-  statValue: { fontFamily: 'Inter_700Bold', fontSize: 17 },
+-  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'center' },
++  statValue: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
++  statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center' },
+   skillsCard: { borderWidth: 1, borderRadius: 14, padding: 16 },
+   skillRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+-  skillLabel: { fontFamily: 'Inter_400Regular', fontSize: 11 },
+-  skillValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginTop: 2 },
+-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 10 },
++  skillLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
++  skillValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 2 },
++  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 10 },
+   scoreCard: { borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 14 },
+-  scoreLabel: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+-  scoreValue: { fontFamily: 'Inter_700Bold', fontSize: 22, marginTop: 2 },
++  scoreLabel: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  scoreValue: { fontFamily: 'Manrope_700Bold', fontSize: 22, marginTop: 2 },
+   historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1 },
+-  historyClient: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+-  historyMeta: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  historyClient: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
++  historyMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
+   historyRating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+-  historyRatingText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  historyRatingText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/safety.tsx b/artifacts/skillbuddy/app/profile/safety.tsx
+index 10f0799..6d5ec3a 100644
+--- a/artifacts/skillbuddy/app/profile/safety.tsx
++++ b/artifacts/skillbuddy/app/profile/safety.tsx
+@@ -67,13 +67,13 @@ export default function SafetyScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   sosBtn: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginTop: 4 },
+   sosIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+-  sosTitle: { fontFamily: 'Inter_700Bold', fontSize: 15, color: '#FFF' },
+-  sosSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 8 },
++  sosTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
++  sosSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
++  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 8 },
+   card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
+   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+-  rowLabel: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14 },
++  rowLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/settings.tsx b/artifacts/skillbuddy/app/profile/settings.tsx
+index 2132111..1f61033 100644
+--- a/artifacts/skillbuddy/app/profile/settings.tsx
++++ b/artifacts/skillbuddy/app/profile/settings.tsx
+@@ -5,8 +5,10 @@ import { useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
+ import BackButton from '@/components/BackButton';
++import { useLanguage } from '@/context/LanguageContext';
++import type { LanguageCode } from '@/context/LanguageContext';
+ 
+-const LANGUAGES = [
++const LANGUAGES: { code: LanguageCode; name: string }[] = [
+   { code: 'en', name: 'English' },
+   { code: 'de', name: 'German' },
+   { code: 'et', name: 'Estonian' },
+@@ -21,7 +23,7 @@ export default function SettingsScreen() {
+   const [notifBooking, setNotifBooking] = useState(true);
+   const [notifOffers, setNotifOffers] = useState(true);
+   const [notifChat, setNotifChat] = useState(true);
+-  const [language, setLanguage] = useState('en');
++  const { language, setLanguage } = useLanguage();
+ 
+   return (
+     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+@@ -86,9 +88,9 @@ export default function SettingsScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
+-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 20, marginBottom: 8 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
++  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 20, marginBottom: 8 },
+   card: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
+   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+-  rowLabel: { fontFamily: 'Inter_500Medium', fontSize: 14 },
++  rowLabel: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/app/profile/wallet.tsx b/artifacts/skillbuddy/app/profile/wallet.tsx
+index 3fe5f73..75e8b84 100644
+--- a/artifacts/skillbuddy/app/profile/wallet.tsx
++++ b/artifacts/skillbuddy/app/profile/wallet.tsx
+@@ -76,20 +76,20 @@ export default function WalletScreen() {
+ const styles = StyleSheet.create({
+   root: { flex: 1 },
+   header: { paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 18 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
+   summaryCard: { borderRadius: 20, padding: 22, marginTop: 4 },
+-  summaryLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.85)' },
+-  summaryValue: { fontFamily: 'Inter_700Bold', fontSize: 34, color: '#FFF', marginTop: 4, marginBottom: 12 },
++  summaryLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.85)' },
++  summaryValue: { fontFamily: 'Manrope_700Bold', fontSize: 34, color: '#FFF', marginTop: 4, marginBottom: 12 },
+   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)', paddingTop: 12 },
+-  summarySub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+-  summarySubValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#FFF' },
+-  sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 8 },
++  summarySub: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.85)' },
++  summarySubValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
++  sectionTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 22, marginBottom: 8 },
+   breakdownCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+   breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+-  breakdownLabel: { fontFamily: 'Inter_400Regular', fontSize: 13 },
+-  breakdownValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
++  breakdownLabel: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
++  breakdownValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+   cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 14, padding: 14 },
+   cardIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+-  cardMasked: { fontFamily: 'Inter_600SemiBold', fontSize: 14, letterSpacing: 1 },
+-  cardSub: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 2 },
++  cardMasked: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, letterSpacing: 1 },
++  cardSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
+ });
+diff --git a/artifacts/skillbuddy/app/quote-request.tsx b/artifacts/skillbuddy/app/quote-request.tsx
+index a15da0e..fcf8587 100644
+--- a/artifacts/skillbuddy/app/quote-request.tsx
++++ b/artifacts/skillbuddy/app/quote-request.tsx
+@@ -165,9 +165,9 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, flex: 1, textAlign: 'center' },
+-  sectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 15, marginBottom: 4 },
+-  sectionHint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 18, marginBottom: 12 },
++  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 17, flex: 1, textAlign: 'center' },
++  sectionLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, marginBottom: 4 },
++  sectionHint: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 18, marginBottom: 12 },
+   textAreaWrap: {
+     borderWidth: 1,
+     borderRadius: 14,
+@@ -175,12 +175,12 @@ const styles = StyleSheet.create({
+     minHeight: 140,
+   },
+   textArea: {
+-    fontFamily: 'Inter_400Regular',
++    fontFamily: 'Manrope_400Regular',
+     fontSize: 14,
+     lineHeight: 22,
+     minHeight: 120,
+   },
+-  charCount: { fontFamily: 'Inter_400Regular', fontSize: 11, textAlign: 'right', marginTop: 4 },
++  charCount: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', marginTop: 4 },
+   segRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+   segBtn: {
+     flex: 1,
+@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
+     borderRadius: 28,
+     borderWidth: 1,
+   },
+-  segText: { fontFamily: 'Inter_500Medium', fontSize: 14 },
++  segText: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+   submitBtn: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -202,11 +202,11 @@ const styles = StyleSheet.create({
+     borderRadius: 28,
+     paddingVertical: 16,
+   },
+-  submitBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  submitBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
+   successIcon: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center' },
+-  successTitle: { fontFamily: 'Inter_700Bold', fontSize: 24 },
+-  successSub: { fontFamily: 'Inter_400Regular', fontSize: 15, textAlign: 'center', lineHeight: 22 },
++  successTitle: { fontFamily: 'Manrope_700Bold', fontSize: 24 },
++  successSub: { fontFamily: 'Manrope_400Regular', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+   doneBtn: { marginTop: 8, paddingHorizontal: 40, paddingVertical: 14, borderRadius: 28 },
+-  doneBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  doneBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/app/search.tsx b/artifacts/skillbuddy/app/search.tsx
+index a3a55e9..9602e5d 100644
+--- a/artifacts/skillbuddy/app/search.tsx
++++ b/artifacts/skillbuddy/app/search.tsx
+@@ -189,7 +189,7 @@ export default function SearchScreen() {
+         <View style={[styles.resultRow, { borderBottomColor: c.border }]}>
+           <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
+             {filtered.length} result{filtered.length !== 1 ? 's' : ''} for{' '}
+-            <Text style={{ color: c.text, fontFamily: 'Inter_600SemiBold' }}>"{query}"</Text>
++            <Text style={{ color: c.text, fontFamily: 'Manrope_600SemiBold' }}>"{query}"</Text>
+           </Text>
+         </View>
+       )}
+@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
+     paddingHorizontal: 12,
+     paddingVertical: 10,
+   },
+-  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14 },
++  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14 },
+   clearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+   suggestBox: {
+     marginHorizontal: 16,
+@@ -287,16 +287,16 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  suggestLabel: { fontFamily: 'Inter_500Medium', fontSize: 14 },
+-  suggestSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 1 },
++  suggestLabel: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
++  suggestSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 1 },
+   resultRow: { paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1 },
+-  resultCount: { fontFamily: 'Inter_400Regular', fontSize: 13 },
++  resultCount: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
+   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+   emptyIconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
+-  emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, textAlign: 'center' },
+-  emptySub: { fontFamily: 'Inter_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
++  emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 18, textAlign: 'center' },
++  emptySub: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+   emptyBtn: { marginTop: 4, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 28 },
+-  emptyBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#FFF' },
++  emptyBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+   emptyBtnOutline: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -306,5 +306,5 @@ const styles = StyleSheet.create({
+     borderRadius: 28,
+     borderWidth: 1.5,
+   },
+-  emptyBtnOutlineText: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  emptyBtnOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+ });
+diff --git a/artifacts/skillbuddy/app/service/[id].tsx b/artifacts/skillbuddy/app/service/[id].tsx
+index 95cd88a..d5c66b3 100644
+--- a/artifacts/skillbuddy/app/service/[id].tsx
++++ b/artifacts/skillbuddy/app/service/[id].tsx
+@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
+   floatingTitle: {
+     flex: 1,
+     marginHorizontal: 10,
+-    fontFamily: 'Inter_700Bold',
++    fontFamily: 'Manrope_700Bold',
+     fontSize: 16,
+     textAlign: 'center',
+   },
+@@ -337,11 +337,11 @@ const styles = StyleSheet.create({
+   thumb: { width: 56, height: 56, borderRadius: 10 },
+   body: { flex: 1 },
+   titleRow: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 20, paddingTop: 20, gap: 12 },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 18, flex: 1 },
+-  categoryLabel: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 2 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 18, flex: 1 },
++  categoryLabel: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginTop: 2 },
+   priceBox: { flexDirection: 'row', alignItems: 'flex-end', gap: 2 },
+-  price: { fontFamily: 'Inter_700Bold', fontSize: 22 },
+-  priceUnit: { fontFamily: 'Inter_400Regular', fontSize: 13, marginBottom: 3 },
++  price: { fontFamily: 'Manrope_700Bold', fontSize: 22 },
++  priceUnit: { fontFamily: 'Manrope_400Regular', fontSize: 13, marginBottom: 3 },
+   providerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginTop: 16, gap: 10 },
+   providerInitials: {
+     width: 42,
+@@ -350,10 +350,10 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  providerInitialsText: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  providerName: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+-  providerSub: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
+-  ratingCount: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++  providerInitialsText: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  providerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  providerSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
++  ratingCount: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+   statsRow: {
+     flexDirection: 'row',
+     marginHorizontal: 20,
+@@ -363,8 +363,8 @@ const styles = StyleSheet.create({
+     justifyContent: 'space-around',
+   },
+   statItem: { alignItems: 'center' },
+-  statValue: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+-  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
++  statValue: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
++  statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+   tabRow: { flexDirection: 'row', marginTop: 20, borderBottomWidth: 1 },
+   tab: {
+     flex: 1,
+@@ -373,11 +373,11 @@ const styles = StyleSheet.create({
+     borderBottomWidth: 2,
+     borderBottomColor: 'transparent',
+   },
+-  tabText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 15, marginBottom: 8 },
+-  body2: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22 },
++  tabText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, marginBottom: 8 },
++  body2: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 22 },
+   includeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+-  includeText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
++  includeText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
+   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+   galleryItem: { width: (W - 40) / 2, height: (W - 40) / 2, borderRadius: 12 },
+   reviewCard: { marginHorizontal: 20, marginBottom: 16, padding: 16, borderRadius: 16 },
+@@ -389,10 +389,10 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  reviewerInitialsText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+-  reviewerName: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
+-  reviewDate: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 2 },
+-  reviewText: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20 },
++  reviewerInitialsText: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
++  reviewerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
++  reviewDate: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
++  reviewText: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20 },
+   bottomBar: {
+     flexDirection: 'row',
+     paddingHorizontal: 20,
+@@ -402,5 +402,5 @@ const styles = StyleSheet.create({
+   },
+   chatBtn: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+   bookBtn: { flex: 1, borderRadius: 28, paddingVertical: 14, alignItems: 'center' },
+-  bookBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#FFF' },
++  bookBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/components/BidCard.tsx b/artifacts/skillbuddy/components/BidCard.tsx
+index 06ca4af..ec92846 100644
+--- a/artifacts/skillbuddy/components/BidCard.tsx
++++ b/artifacts/skillbuddy/components/BidCard.tsx
+@@ -66,20 +66,20 @@ export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }:
+ const styles = StyleSheet.create({
+   card: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 12, marginBottom: 12 },
+   rankBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginBottom: -2 },
+-  rankText: { fontFamily: 'Inter_600SemiBold', fontSize: 10, color: '#FFF' },
++  rankText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: '#FFF' },
+   topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+-  avatarText: { fontFamily: 'Inter_700Bold', fontSize: 17 },
+-  name: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginBottom: 2 },
++  avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
++  name: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 2 },
+   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+-  metaText: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  metaText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+   badgeDot: { width: 2.5, height: 2.5, borderRadius: 1.25 },
+   priceWrap: { alignItems: 'flex-end' },
+-  price: { fontFamily: 'Inter_700Bold', fontSize: 17 },
+-  eta: { fontFamily: 'Inter_400Regular', fontSize: 11 },
++  price: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
++  eta: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+   actionsRow: { flexDirection: 'row', gap: 8 },
+   actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, flex: 1, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
+-  actionText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
++  actionText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+   acceptBtn: { flex: 1.2, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 10 },
+-  acceptText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFF' },
++  acceptText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
+ });
+diff --git a/artifacts/skillbuddy/components/CategoryItem.tsx b/artifacts/skillbuddy/components/CategoryItem.tsx
+index 78a7ec3..d3c8d10 100644
+--- a/artifacts/skillbuddy/components/CategoryItem.tsx
++++ b/artifacts/skillbuddy/components/CategoryItem.tsx
+@@ -49,6 +49,6 @@ const styles = StyleSheet.create({
+   container: { alignItems: 'center', gap: 8, width: 72 },
+   containerSm: { width: 64 },
+   circle: { alignItems: 'center', justifyContent: 'center' },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 13, textAlign: 'center' },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 13, textAlign: 'center' },
+   labelSm: { fontSize: 11 },
+ });
+diff --git a/artifacts/skillbuddy/components/CountdownTimer.tsx b/artifacts/skillbuddy/components/CountdownTimer.tsx
+index ba3d4fa..2cbd5de 100644
+--- a/artifacts/skillbuddy/components/CountdownTimer.tsx
++++ b/artifacts/skillbuddy/components/CountdownTimer.tsx
+@@ -76,8 +76,8 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     gap: 4,
+   },
+-  label: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+-  time: { fontFamily: 'Inter_700Bold', fontSize: 24 },
++  label: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
++  time: { fontFamily: 'Manrope_700Bold', fontSize: 24 },
+   compactWrap: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -87,5 +87,5 @@ const styles = StyleSheet.create({
+     borderRadius: 8,
+     alignSelf: 'flex-start',
+   },
+-  compactText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++  compactText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
+ });
+diff --git a/artifacts/skillbuddy/components/EmptyState.tsx b/artifacts/skillbuddy/components/EmptyState.tsx
+index fb4608f..91aa933 100644
+--- a/artifacts/skillbuddy/components/EmptyState.tsx
++++ b/artifacts/skillbuddy/components/EmptyState.tsx
+@@ -32,8 +32,8 @@ export default function EmptyState({ icon = 'inbox', title, subtitle, actionLabe
+ const styles = StyleSheet.create({
+   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+   iconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
+-  title: { fontFamily: 'Inter_600SemiBold', fontSize: 18, textAlign: 'center' },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
++  title: { fontFamily: 'Manrope_600SemiBold', fontSize: 18, textAlign: 'center' },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+   btn: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 25 },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: '#FFFFFF' },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: '#FFFFFF' },
+ });
+diff --git a/artifacts/skillbuddy/components/ExploreMap.tsx b/artifacts/skillbuddy/components/ExploreMap.tsx
+index 6198af7..0be709c 100644
+--- a/artifacts/skillbuddy/components/ExploreMap.tsx
++++ b/artifacts/skillbuddy/components/ExploreMap.tsx
+@@ -55,9 +55,9 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  label: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  label: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   sub: {
+-    fontFamily: 'Inter_400Regular',
++    fontFamily: 'Manrope_400Regular',
+     fontSize: 13,
+     textAlign: 'center',
+     paddingHorizontal: 40,
+diff --git a/artifacts/skillbuddy/components/JobCard.tsx b/artifacts/skillbuddy/components/JobCard.tsx
+index a728e21..3dc6781 100644
+--- a/artifacts/skillbuddy/components/JobCard.tsx
++++ b/artifacts/skillbuddy/components/JobCard.tsx
+@@ -65,12 +65,12 @@ const styles = StyleSheet.create({
+   card: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 8, marginBottom: 12 },
+   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+   urgencyChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+-  urgencyText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
++  urgencyText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
+   statusChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+-  statusText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 16 },
++  statusText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+-  metaText: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++  metaText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+   dot: { width: 3, height: 3, borderRadius: 1.5 },
+-  dateText: { fontFamily: 'Inter_400Regular', fontSize: 12 },
++  dateText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+ });
+diff --git a/artifacts/skillbuddy/components/NavigationLoaderOverlay.tsx b/artifacts/skillbuddy/components/NavigationLoaderOverlay.tsx
+new file mode 100644
+index 0000000..c36e476
+--- /dev/null
++++ b/artifacts/skillbuddy/components/NavigationLoaderOverlay.tsx
+@@ -0,0 +1,55 @@
++import React, { useEffect, useRef, useState } from 'react';
++import { StyleSheet, View } from 'react-native';
++import { usePathname } from 'expo-router';
++import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
++import BrandedLoader from '@/components/BrandedLoader';
++import { useTheme } from '@/context/ThemeContext';
++
++/**
++ * Mounted once near the root. Watches the current route (pathname) and,
++ * on every change, briefly shows a full-screen branded loader before the
++ * destination screen's content is considered "settled" — guarantees every
++ * navigation has a visible loading state instead of an abrupt instant swap
++ * or a blank white gap.
++ */
++export default function NavigationLoaderOverlay() {
++  const pathname = usePathname();
++  const { colors: c } = useTheme();
++  const [visible, setVisible] = useState(false);
++  const isFirstRender = useRef(true);
++  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++
++  useEffect(() => {
++    // Skip the very first mount (app boot already has its own splash/font-load gate).
++    if (isFirstRender.current) {
++      isFirstRender.current = false;
++      return;
++    }
++    // The filter sheet is a transparent modal — a solid loader flash would
++    // defeat its see-through backdrop, so skip it for that route only.
++    if (pathname === '/filter') return;
++    setVisible(true);
++    if (timeoutRef.current) clearTimeout(timeoutRef.current);
++    timeoutRef.current = setTimeout(() => setVisible(false), 320);
++    return () => {
++      if (timeoutRef.current) clearTimeout(timeoutRef.current);
++    };
++  }, [pathname]);
++
++  if (!visible) return null;
++
++  return (
++    <Animated.View
++      entering={FadeIn.duration(90)}
++      exiting={FadeOut.duration(180)}
++      style={[StyleSheet.absoluteFill, styles.wrap, { backgroundColor: c.background }]}
++      pointerEvents="none"
++    >
++      <BrandedLoader size={46} />
++    </Animated.View>
++  );
++}
++
++const styles = StyleSheet.create({
++  wrap: { alignItems: 'center', justifyContent: 'center', zIndex: 9998, elevation: 20 },
++});
+diff --git a/artifacts/skillbuddy/components/RatingStars.tsx b/artifacts/skillbuddy/components/RatingStars.tsx
+index 5a71376..d4b3988 100644
+--- a/artifacts/skillbuddy/components/RatingStars.tsx
++++ b/artifacts/skillbuddy/components/RatingStars.tsx
+@@ -45,6 +45,6 @@ export default function RatingStars({ rating, size = 14, showValue = true, revie
+ 
+ const styles = StyleSheet.create({
+   row: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+-  value: { fontFamily: 'Inter_600SemiBold', marginLeft: 3 },
+-  count: { fontFamily: 'Inter_400Regular', marginLeft: 2 },
++  value: { fontFamily: 'Manrope_600SemiBold', marginLeft: 3 },
++  count: { fontFamily: 'Manrope_400Regular', marginLeft: 2 },
+ });
+diff --git a/artifacts/skillbuddy/components/ServiceCard.tsx b/artifacts/skillbuddy/components/ServiceCard.tsx
+index bd7cfda..d4082bb 100644
+--- a/artifacts/skillbuddy/components/ServiceCard.tsx
++++ b/artifacts/skillbuddy/components/ServiceCard.tsx
+@@ -130,14 +130,14 @@ const styles = StyleSheet.create({
+     paddingVertical: 3,
+     gap: 2,
+   },
+-  ratingText: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#1A1A1A' },
++  ratingText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: '#1A1A1A' },
+   bookmarkBtn: { position: 'absolute', top: 8, right: 8 },
+   bookmarkBg: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+   body: { padding: 10, gap: 3 },
+-  title: { fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18 },
++  title: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, lineHeight: 18 },
+   providerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+-  providerName: { fontFamily: 'Inter_400Regular', fontSize: 12 },
+-  price: { fontFamily: 'Inter_700Bold', fontSize: 13 },
++  providerName: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
++  price: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+   listCard: {
+     flexDirection: 'row',
+     borderRadius: 16,
+@@ -153,8 +153,8 @@ const styles = StyleSheet.create({
+   },
+   listImage: { width: 85, height: 85, borderRadius: 12 },
+   listBody: { flex: 1, paddingHorizontal: 12, gap: 3 },
+-  listTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15 },
++  listTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+   listBookmark: { padding: 4 },
+   chip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
+-  chipText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
++  chipText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
+ });
+diff --git a/artifacts/skillbuddy/components/SkeletonCard.tsx b/artifacts/skillbuddy/components/SkeletonCard.tsx
+index c609384..7670091 100644
+--- a/artifacts/skillbuddy/components/SkeletonCard.tsx
++++ b/artifacts/skillbuddy/components/SkeletonCard.tsx
+@@ -1,10 +1,11 @@
+ import React, { useEffect, useRef } from 'react';
+ import { Animated, StyleSheet, View } from 'react-native';
+-import colors from '@/constants/colors';
++import { useTheme } from '@/context/ThemeContext';
+ 
+ interface Props { height?: number; borderRadius?: number; style?: object }
+ 
+ export function SkeletonBox({ height = 20, borderRadius = 8, style }: Props) {
++  const { colors: c } = useTheme();
+   const anim = useRef(new Animated.Value(0)).current;
+ 
+   useEffect(() => {
+@@ -18,15 +19,16 @@ export function SkeletonBox({ height = 20, borderRadius = 8, style }: Props) {
+ 
+   const bg = anim.interpolate({
+     inputRange: [0, 1],
+-    outputRange: [colors.light.skeletonBase, colors.light.skeletonHighlight],
++    outputRange: [c.skeletonBase, c.skeletonHighlight],
+   });
+ 
+   return <Animated.View style={[{ height, borderRadius, backgroundColor: bg }, style]} />;
+ }
+ 
+ export default function SkeletonCard() {
++  const { colors: c } = useTheme();
+   return (
+-    <View style={styles.card}>
++    <View style={[styles.card, { backgroundColor: c.card, shadowColor: c.shadow }]}>
+       <SkeletonBox height={110} borderRadius={12} />
+       <View style={styles.body}>
+         <SkeletonBox height={10} style={{ width: '50%' }} />
+@@ -40,11 +42,9 @@ export default function SkeletonCard() {
+ 
+ const styles = StyleSheet.create({
+   card: {
+-    backgroundColor: '#FFF',
+     borderRadius: 16,
+     overflow: 'hidden',
+     elevation: 2,
+-    shadowColor: '#000',
+     shadowOffset: { width: 0, height: 2 },
+     shadowOpacity: 0.08,
+     shadowRadius: 6,
+diff --git a/artifacts/skillbuddy/components/SpecialOfferCard.tsx b/artifacts/skillbuddy/components/SpecialOfferCard.tsx
+index 3ba95b8..63ae5be 100644
+--- a/artifacts/skillbuddy/components/SpecialOfferCard.tsx
++++ b/artifacts/skillbuddy/components/SpecialOfferCard.tsx
+@@ -79,9 +79,9 @@ const styles = StyleSheet.create({
+     paddingVertical: 2,
+     borderRadius: 20,
+   },
+-  badgeText: { fontFamily: 'Inter_500Medium', fontSize: 10, color: '#FFF' },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#FFF' },
+-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.75)' },
++  badgeText: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: '#FFF' },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
++  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.75)' },
+   right: {
+     alignItems: 'center',
+     gap: 6,
+@@ -91,8 +91,8 @@ const styles = StyleSheet.create({
+     alignItems: 'flex-end',
+     gap: 2,
+   },
+-  discountNum: { fontFamily: 'Inter_700Bold', fontSize: 32, color: '#FFF', lineHeight: 36 },
+-  discountPct: { fontFamily: 'Inter_700Bold', fontSize: 11, color: 'rgba(255,255,255,0.85)', marginBottom: 4, lineHeight: 14 },
++  discountNum: { fontFamily: 'Manrope_700Bold', fontSize: 32, color: '#FFF', lineHeight: 36 },
++  discountPct: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: 'rgba(255,255,255,0.85)', marginBottom: 4, lineHeight: 14 },
+   claimBtn: {
+     backgroundColor: 'rgba(255,255,255,0.2)',
+     width: 28,
+diff --git a/artifacts/skillbuddy/context/AlertModalContext.tsx b/artifacts/skillbuddy/context/AlertModalContext.tsx
+index fad7638..932c789 100644
+--- a/artifacts/skillbuddy/context/AlertModalContext.tsx
++++ b/artifacts/skillbuddy/context/AlertModalContext.tsx
+@@ -95,9 +95,9 @@ const styles = StyleSheet.create({
+   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+   card: { width: '100%', borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },
+   iconWrap: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+-  title: { fontFamily: 'Inter_700Bold', fontSize: 17, textAlign: 'center' },
+-  message: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 10 },
++  title: { fontFamily: 'Manrope_700Bold', fontSize: 17, textAlign: 'center' },
++  message: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 10 },
+   buttonRow: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 6 },
+   btn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 12 },
+-  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++  btnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+ });
+diff --git a/artifacts/skillbuddy/context/LanguageContext.tsx b/artifacts/skillbuddy/context/LanguageContext.tsx
+new file mode 100644
+index 0000000..c9a5609
+--- /dev/null
++++ b/artifacts/skillbuddy/context/LanguageContext.tsx
+@@ -0,0 +1,135 @@
++import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
++import AsyncStorage from '@react-native-async-storage/async-storage';
++
++export type LanguageCode = 'en' | 'de' | 'et' | 'lv' | 'lt';
++
++const LANG_KEY = 'sb_language';
++
++// Translation dictionary — currently covers the highest-visibility, most
++// frequently seen strings (tab bar, Home headings, common actions) as a
++// working foundation. Extending coverage to every string in the app is a
++// large follow-up task (40+ screens) tracked separately.
++const STRINGS: Record<LanguageCode, Record<string, string>> = {
++  en: {
++    tab_home: 'Home',
++    tab_services: 'Services',
++    tab_jobs: 'Jobs',
++    tab_inbox: 'Inbox',
++    tab_profile: 'Profile',
++    home_heading: 'What service do you need today?',
++    home_credit_points: 'Credit Points',
++    home_earn_note: 'Earn 1 pt per €1 spent',
++    home_categories: 'Categories',
++    home_special_for_you: 'Special For You',
++    see_all: 'See all',
++    search_placeholder: 'Search for a service...',
++    post_a_job: 'Post a Job',
++    book_now: 'Book Now',
++  },
++  de: {
++    tab_home: 'Start',
++    tab_services: 'Dienste',
++    tab_jobs: 'Aufträge',
++    tab_inbox: 'Posteingang',
++    tab_profile: 'Profil',
++    home_heading: 'Welchen Service brauchst du heute?',
++    home_credit_points: 'Punkte',
++    home_earn_note: '1 Punkt pro €1 Ausgabe',
++    home_categories: 'Kategorien',
++    home_special_for_you: 'Nur für dich',
++    see_all: 'Alle ansehen',
++    search_placeholder: 'Dienst suchen...',
++    post_a_job: 'Auftrag erstellen',
++    book_now: 'Jetzt buchen',
++  },
++  et: {
++    tab_home: 'Avaleht',
++    tab_services: 'Teenused',
++    tab_jobs: 'Tööd',
++    tab_inbox: 'Sõnumid',
++    tab_profile: 'Profiil',
++    home_heading: 'Millist teenust täna vajad?',
++    home_credit_points: 'Krediidipunktid',
++    home_earn_note: 'Teeni 1 punkt iga kulutatud €1 kohta',
++    home_categories: 'Kategooriad',
++    home_special_for_you: 'Just sinu jaoks',
++    see_all: 'Vaata kõiki',
++    search_placeholder: 'Otsi teenust...',
++    post_a_job: 'Postita töö',
++    book_now: 'Broneeri kohe',
++  },
++  lv: {
++    tab_home: 'Sākums',
++    tab_services: 'Pakalpojumi',
++    tab_jobs: 'Darbi',
++    tab_inbox: 'Iesūtne',
++    tab_profile: 'Profils',
++    home_heading: 'Kāds pakalpojums šodien nepieciešams?',
++    home_credit_points: 'Kredītpunkti',
++    home_earn_note: 'Nopelni 1 punktu par katru iztērēto €1',
++    home_categories: 'Kategorijas',
++    home_special_for_you: 'Tieši jums',
++    see_all: 'Skatīt visu',
++    search_placeholder: 'Meklēt pakalpojumu...',
++    post_a_job: 'Publicēt darbu',
++    book_now: 'Rezervēt tagad',
++  },
++  lt: {
++    tab_home: 'Pradžia',
++    tab_services: 'Paslaugos',
++    tab_jobs: 'Darbai',
++    tab_inbox: 'Gautieji',
++    tab_profile: 'Profilis',
++    home_heading: 'Kokios paslaugos jums reikia šiandien?',
++    home_credit_points: 'Kredito taškai',
++    home_earn_note: 'Uždirbkite 1 tašką už kiekvieną išleistą €1',
++    home_categories: 'Kategorijos',
++    home_special_for_you: 'Specialiai jums',
++    see_all: 'Žiūrėti viską',
++    search_placeholder: 'Ieškoti paslaugos...',
++    post_a_job: 'Skelbti darbą',
++    book_now: 'Rezervuoti dabar',
++  },
++};
++
++interface LanguageContextType {
++  language: LanguageCode;
++  setLanguage: (lang: LanguageCode) => void;
++  t: (key: keyof typeof STRINGS['en']) => string;
++}
++
++const LanguageContext = createContext<LanguageContextType>({
++  language: 'en',
++  setLanguage: () => {},
++  t: (key) => STRINGS.en[key] ?? key,
++});
++
++export function LanguageProvider({ children }: { children: React.ReactNode }) {
++  const [language, setLanguageState] = useState<LanguageCode>('en');
++
++  useEffect(() => {
++    AsyncStorage.getItem(LANG_KEY).then((saved) => {
++      if (saved && saved in STRINGS) setLanguageState(saved as LanguageCode);
++    });
++  }, []);
++
++  const setLanguage = useCallback((lang: LanguageCode) => {
++    setLanguageState(lang);
++    AsyncStorage.setItem(LANG_KEY, lang);
++  }, []);
++
++  const t = useCallback(
++    (key: keyof typeof STRINGS['en']) => STRINGS[language][key] ?? STRINGS.en[key] ?? key,
++    [language]
++  );
++
++  return (
++    <LanguageContext.Provider value={{ language, setLanguage, t }}>
++      {children}
++    </LanguageContext.Provider>
++  );
++}
++
++export function useLanguage() {
++  return useContext(LanguageContext);
++}
+diff --git a/artifacts/skillbuddy/context/ThemeContext.tsx b/artifacts/skillbuddy/context/ThemeContext.tsx
+index 41184a4..d965255 100644
+--- a/artifacts/skillbuddy/context/ThemeContext.tsx
++++ b/artifacts/skillbuddy/context/ThemeContext.tsx
+@@ -85,10 +85,12 @@ function PaintRevealOverlay({
+ 
+ export function ThemeProvider({ children }: { children: React.ReactNode }) {
+   const [theme, setTheme] = useState<ThemeMode>('light');
+-  const originRef = useRef({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
+   const [overlayColor, setOverlayColor] = useState('#111614');
++  const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
+   // Whether a toggle is currently in flight — prevents double-taps.
+   const isAnimating = useRef(false);
++  const themeRef = useRef<ThemeMode>('light');
++  themeRef.current = theme;
+ 
+   const scaleAnim = useSharedValue(0);
+ 
+@@ -98,47 +100,46 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
+     });
+   }, []);
+ 
++  // Runs on the JS thread once the overlay has fully expanded and covers the
++  // screen — safe to swap the actual theme here since nothing is visible
++  // underneath the overlay at this point.
++  const applyThemeSwap = useCallback(() => {
++    const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
++    setTheme(next);
++    AsyncStorage.setItem(THEME_KEY, next);
++    // Collapse the overlay now that the new theme is underneath it.
++    scaleAnim.value = withTiming(0, { duration: 260, easing: Easing.in(Easing.cubic) }, (finished) => {
++      if (finished) {
++        isAnimating.current = false;
++      }
++    });
++  }, [scaleAnim]);
++
+   const toggleTheme = useCallback(
+     (originX = SCREEN_W / 2, originY = SCREEN_H / 2) => {
+       if (isAnimating.current) return;
+       isAnimating.current = true;
+ 
+-      setTheme((current) => {
+-        const next: ThemeMode = current === 'light' ? 'dark' : 'light';
+-        const nextBg = next === 'dark' ? colors.dark.background : colors.light.background;
+-        originRef.current = { x: originX, y: originY };
+-        setOverlayColor(nextBg);
+-
+-        // Kick off expand animation.
+-        // After half the duration, apply the theme swap under the still-covering overlay.
+-        // After the full expand, collapse the overlay instantly.
+-        scaleAnim.value = 0;
+-
+-        // Phase 1: expand 0 → 1 over 480ms
+-        scaleAnim.value = withTiming(
+-          1,
+-          { duration: 480, easing: Easing.out(Easing.cubic) },
+-          (finished) => {
+-            if (!finished) {
+-              runOnJS(() => { isAnimating.current = false; })();
+-              return;
+-            }
+-            // Phase 2: collapse instantly (sets opacity to 0 via the animated style)
+-            scaleAnim.value = 0;
+-            runOnJS(() => { isAnimating.current = false; })();
+-          }
+-        );
+-
+-        // Apply the theme after 240ms (mid-point) — overlay fully covers the screen by then.
+-        setTimeout(() => {
+-          setTheme(next);
+-          AsyncStorage.setItem(THEME_KEY, next);
+-        }, 240);
+-
+-        return current; // Return current for the outer setTheme — we handle it in setTimeout above
++      const next: ThemeMode = themeRef.current === 'light' ? 'dark' : 'light';
++      const nextBg = next === 'dark' ? colors.dark.background : colors.light.background;
++
++      // Plain state updates — no nested setState-inside-updater here, which
++      // was the source of the crash (React may invoke updater functions more
++      // than once, causing the side effects inside it to fire unpredictably).
++      setOrigin({ x: originX, y: originY });
++      setOverlayColor(nextBg);
++      scaleAnim.value = 0;
++      scaleAnim.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }, (finished) => {
++        if (finished) {
++          runOnJS(applyThemeSwap)();
++        } else {
++          runOnJS(() => {
++            isAnimating.current = false;
++          })();
++        }
+       });
+     },
+-    [scaleAnim]
++    [scaleAnim, applyThemeSwap]
+   );
+ 
+   const palette = theme === 'dark' ? colors.dark : colors.light;
+@@ -149,8 +150,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
+       <PaintRevealOverlay
+         scaleAnim={scaleAnim}
+         overlayColor={overlayColor}
+-        originX={originRef.current.x}
+-        originY={originRef.current.y}
++        originX={origin.x}
++        originY={origin.y}
+       />
+     </ThemeContext.Provider>
+   );
+diff --git a/artifacts/skillbuddy/package.json b/artifacts/skillbuddy/package.json
+index 7679a5d..d10c1a5 100644
+--- a/artifacts/skillbuddy/package.json
++++ b/artifacts/skillbuddy/package.json
+@@ -11,7 +11,7 @@
+   },
+   "devDependencies": {
+     "@babel/core": "^7.25.2",
+-    "@expo-google-fonts/inter": "^0.4.0",
++    "@expo-google-fonts/manrope": "^0.4.0",
+     "@expo/cli": "54.0.23",
+     "@expo/ngrok": "^4.1.0",
+     "@expo/vector-icons": "^15.0.3",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 362eaef..7a957d0 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -415,7 +415,7 @@ importers:
+       '@babel/core':
+         specifier: ^7.25.2
+         version: 7.29.7
+-      '@expo-google-fonts/inter':
++      '@expo-google-fonts/manrope':
+         specifier: ^0.4.0
+         version: 0.4.2
+       '@expo/cli':
+@@ -1131,8 +1131,8 @@ packages:
+     cpu: [x64]
+     os: [linux]
+ 
+-  '@expo-google-fonts/inter@0.4.2':
+-    resolution: {integrity: sha512-syfiImMaDmq7cFi0of+waE2M4uSCyd16zgyWxdPOY7fN2VBmSLKEzkfbZgeOjJq61kSqPBNNtXjggiQiSD6gMQ==}
++  '@expo-google-fonts/manrope@0.4.2':
++    resolution: {integrity: sha512-BZsKe8d9BJrVnIQIZcTS7/Kac0TbXnqs/+8EBSiQxrmK6GoCO6eTkmr50D1weIk/EoF20pTmAkpWICnovATr/g==}
+ 
+   '@expo/cli@54.0.23':
+     resolution: {integrity: sha512-km0h72SFfQCmVycH/JtPFTVy69w6Lx1cHNDmfLfQqgKFYeeHTjx7LVDP4POHCtNxFP2UeRazrygJhlh4zz498g==}
+@@ -6325,7 +6325,7 @@ snapshots:
+   '@esbuild/linux-x64@0.27.3':
+     optional: true
+ 
+-  '@expo-google-fonts/inter@0.4.2': {}
++  '@expo-google-fonts/manrope@0.4.2': {}
+ 
+   '@expo/cli@54.0.23(expo-router@6.0.24)(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(typescript@5.9.3)':
+     dependencies:
+-- 
+2.43.0
+

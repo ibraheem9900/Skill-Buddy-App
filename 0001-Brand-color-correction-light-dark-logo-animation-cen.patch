@@ -1,0 +1,334 @@
+From cc23d05de06bb99843e0c9092f6ef7b04626bd76 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Sat, 1 Aug 2026 19:35:28 +0000
+Subject: [PATCH] Brand color correction (light + dark) + logo animation,
+ centralized
+
+FLAGGED: No official brand hex codes were found anywhere in the repo
+(no design-token file, Figma export, or brand doc besides the app's
+own theme file). Used the approximate values given in the task:
+- Light theme primary green: #2E9E7A (was #3A9E8F)
+- Dark theme background green: #12332E (was #111614)
+Please confirm/correct these if they do not match final brand guidelines
+- since it is all centralized in one file now, correcting it later is
+a single-file edit.
+
+PART 2/3 - Full audit results:
+Colors were ALREADY centralized in constants/colors.ts (single source
+of truth for both themes) before this task. Real hardcoded leaks found
+and fixed: data/mockData.ts (18 category icon colors), LogoImage.tsx,
+LogoMark.tsx (unused, fixed anyway), app/call/[id].tsx, SuspensionGate.tsx,
+ThemeContext.tsx overlay default.
+
+NOT changed: app/(auth)/verify-email.tsx has old-color hardcodes,
+left untouched per the standing do-not-touch-Authentication instruction.
+
+PART 5 - Logo: fade-in + scale-up animation added on mount (~500ms).
+Logo placement audit: only appears in Home + Profile headers already,
+nothing to remove. Size already increased in an earlier pass.
+
+Full workspace typecheck: zero errors.
+
+Web app note: this repo is mobile-only; the web app is a separate repo
+not touched here.
+---
+ artifacts/skillbuddy/app/call/[id].tsx        |  5 +--
+ artifacts/skillbuddy/components/LogoImage.tsx | 31 ++++++++++++----
+ artifacts/skillbuddy/components/LogoMark.tsx  |  5 ++-
+ .../skillbuddy/components/SuspensionGate.tsx  |  7 ++--
+ artifacts/skillbuddy/constants/colors.ts      | 36 +++++++++---------
+ artifacts/skillbuddy/context/ThemeContext.tsx |  2 +-
+ artifacts/skillbuddy/data/mockData.ts         | 37 ++++++++++---------
+ 7 files changed, 71 insertions(+), 52 deletions(-)
+
+diff --git a/artifacts/skillbuddy/app/call/[id].tsx b/artifacts/skillbuddy/app/call/[id].tsx
+index 7b84677..576db8f 100644
+--- a/artifacts/skillbuddy/app/call/[id].tsx
++++ b/artifacts/skillbuddy/app/call/[id].tsx
+@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useLocalSearchParams, useRouter } from 'expo-router';
+ import { Feather } from '@expo/vector-icons';
+ import Animated, { FadeIn } from 'react-native-reanimated';
+-import { useTheme } from '@/context/ThemeContext';
++import colors from '@/constants/colors';
+ import { BID_PROVIDERS, CHAT_THREADS } from '@/data/mockData';
+ 
+ const MAX_CALL_SECONDS = 5 * 60;
+@@ -19,7 +19,6 @@ export default function ActiveCallScreen() {
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+-  const { colors: c } = useTheme();
+ 
+   const provider = BID_PROVIDERS.find((p) => p.id === id);
+   const thread = CHAT_THREADS.find((t) => t.participant.id === id);
+@@ -51,7 +50,7 @@ export default function ActiveCallScreen() {
+   };
+ 
+   return (
+-    <View style={[styles.root, { backgroundColor: '#111614', paddingTop: insets.top }]}>
++    <View style={[styles.root, { backgroundColor: colors.dark.background, paddingTop: insets.top }]}>
+       <Animated.View entering={FadeIn.duration(300)} style={styles.center}>
+         <View style={styles.avatar}>
+           <Text style={styles.avatarText}>{name.charAt(0)}</Text>
+diff --git a/artifacts/skillbuddy/components/LogoImage.tsx b/artifacts/skillbuddy/components/LogoImage.tsx
+index 66b7af2..a2973dd 100644
+--- a/artifacts/skillbuddy/components/LogoImage.tsx
++++ b/artifacts/skillbuddy/components/LogoImage.tsx
+@@ -7,14 +7,17 @@
+  *   <LogoImage variant="green" height={32} />   ← on light surface
+  *   <LogoImage variant="light" height={32} />   ← on dark surface (light-green tint)
+  */
+-import React from 'react';
+-import { Image, StyleSheet } from 'react-native';
++import React, { useEffect } from 'react';
++import { StyleSheet } from 'react-native';
++import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
++import colors from '@/constants/colors';
+ 
+ type Variant = 'white' | 'green' | 'light';
+ 
+ interface Props {
+   variant?: Variant;
+   height?: number;
++  animateOnMount?: boolean;
+ }
+ 
+ // Original aspect ratio of the brand mark: ~2.26 : 1
+@@ -22,17 +25,31 @@ const ASPECT = 2.26;
+ 
+ const TINTS: Record<Variant, string> = {
+   white: '#FFFFFF',
+-  green: '#2D6B55',
+-  light: '#6BBFAD',  // softer green for dark surfaces
++  green: colors.light.primaryDark,
++  light: colors.dark.primary, // softer green for dark surfaces
+ };
+ 
+-export default function LogoImage({ variant = 'green', height = 32 }: Props) {
++export default function LogoImage({ variant = 'green', height = 32, animateOnMount = true }: Props) {
+   const width = Math.round(height * ASPECT);
++
++  const opacity = useSharedValue(animateOnMount ? 0 : 1);
++  const scale = useSharedValue(animateOnMount ? 0.9 : 1);
++
++  useEffect(() => {
++    if (!animateOnMount) return;
++    opacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
++    scale.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
++  }, [animateOnMount]);
++
++  const animatedStyle = useAnimatedStyle(() => ({
++    opacity: opacity.value,
++    transform: [{ scale: scale.value }],
++  }));
+   return (
+-    <Image
++    <Animated.Image
+       // eslint-disable-next-line @typescript-eslint/no-require-imports
+       source={require('@/assets/images/logo-icon.png')}
+-      style={[styles.img, { width, height }]}
++      style={[styles.img, { width, height }, animatedStyle]}
+       tintColor={TINTS[variant]}
+       resizeMode="contain"
+     />
+diff --git a/artifacts/skillbuddy/components/LogoMark.tsx b/artifacts/skillbuddy/components/LogoMark.tsx
+index 9ff9832..4c5edcd 100644
+--- a/artifacts/skillbuddy/components/LogoMark.tsx
++++ b/artifacts/skillbuddy/components/LogoMark.tsx
+@@ -1,5 +1,6 @@
+ import React from 'react';
+ import Svg, { Circle, Path } from 'react-native-svg';
++import colors from '@/constants/colors';
+ 
+ interface LogoMarkProps {
+   color?: string;
+@@ -13,9 +14,9 @@ interface LogoMarkProps {
+  *
+  * Usage:
+  *   <LogoMark color="#FFFFFF" size={34} />   ← header
+- *   <LogoMark color="#2D7A6E" size={34} />   ← light bg
++ *   <LogoMark color="#20735A" size={34} />   ← light bg
+  */
+-export default function LogoMark({ color = '#2D6B55', size = 34 }: LogoMarkProps) {
++export default function LogoMark({ color = colors.light.primaryDark, size = 34 }: LogoMarkProps) {
+   // Aspect ratio ≈ 2.4 : 1  (matches the real brand mark width:height)
+   const W = size * 2.4;
+   const H = size;
+diff --git a/artifacts/skillbuddy/components/SuspensionGate.tsx b/artifacts/skillbuddy/components/SuspensionGate.tsx
+index d59aff7..f769ccf 100644
+--- a/artifacts/skillbuddy/components/SuspensionGate.tsx
++++ b/artifacts/skillbuddy/components/SuspensionGate.tsx
+@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { Feather } from '@expo/vector-icons';
+ import { CURRENT_USER } from '@/data/mockData';
+ import { useRole } from '@/context/RoleContext';
++import colors from '@/constants/colors';
+ 
+ function formatDaysLeft(until: number): number {
+   return Math.max(1, Math.ceil((until - Date.now()) / (24 * 60 * 60 * 1000)));
+@@ -28,7 +29,7 @@ export default function SuspensionGate({ children }: { children: React.ReactNode
+   const daysLeft = formatDaysLeft(suspendedUntil!);
+ 
+   return (
+-    <View style={[styles.root, { paddingTop: insets.top + 40 }]}>
++    <View style={[styles.root, { backgroundColor: colors.dark.background, paddingTop: insets.top + 40 }]}>
+       <View style={styles.iconWrap}>
+         <Feather name="alert-triangle" size={40} color="#E85D5D" />
+       </View>
+@@ -52,7 +53,7 @@ export default function SuspensionGate({ children }: { children: React.ReactNode
+ }
+ 
+ const styles = StyleSheet.create({
+-  root: { flex: 1, alignItems: 'center', paddingHorizontal: 28, backgroundColor: '#161B19' },
++  root: { flex: 1, alignItems: 'center', paddingHorizontal: 28 },
+   iconWrap: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(232,93,93,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+   title: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: '#FFF', textAlign: 'center', marginBottom: 12 },
+   message: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+@@ -61,5 +62,5 @@ const styles = StyleSheet.create({
+   daysLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+   hint: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.55)', textAlign: 'center', marginBottom: 20 },
+   switchBtn: { backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
+-  switchText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#161B19' },
++  switchText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.dark.background },
+ });
+diff --git a/artifacts/skillbuddy/constants/colors.ts b/artifacts/skillbuddy/constants/colors.ts
+index 22e1116..f52a825 100644
+--- a/artifacts/skillbuddy/constants/colors.ts
++++ b/artifacts/skillbuddy/constants/colors.ts
+@@ -1,7 +1,7 @@
+ const palette = {
+-  primary: '#3A9E8F',
+-  primaryDark: '#2D7A6E',
+-  primaryLight: '#E8F5F3',
++  primary: '#2E9E7A',
++  primaryDark: '#20735A',
++  primaryLight: '#E5F4EE',
+   rating: '#FFB800',
+   destructive: '#E74C3C',
+   destructiveForeground: '#FFFFFF',
+@@ -52,26 +52,26 @@ const colors = {
+   dark: {
+     text: '#F0F0F0',
+     tint: '#4DBFAD',
+-    background: '#111614',
+-    surface: '#1A211F',
++    background: '#12332E',
++    surface: '#173D37',
+     foreground: '#F0F0F0',
+-    card: '#1E2A27',
++    card: '#1B4740',
+     cardForeground: '#F0F0F0',
+     // Slightly brighter primary so it pops on dark surfaces
+     primary: '#4DBFAD',
+     primaryForeground: '#FFFFFF',
+     primaryLight: 'rgba(77, 191, 173, 0.15)',
+     primaryDark: palette.primary,
+-    secondary: '#1E2A27',
++    secondary: '#1B4740',
+     secondaryForeground: '#F0F0F0',
+-    muted: '#1E2A27',
+-    mutedForeground: '#8A9E99',
+-    accent: 'rgba(58, 158, 143, 0.15)',
++    muted: '#1B4740',
++    mutedForeground: '#8FB0A9',
++    accent: 'rgba(46, 158, 122, 0.18)',
+     accentForeground: '#4DBFAD',
+     destructive: '#E74C3C',
+     destructiveForeground: '#FFFFFF',
+-    border: '#2A3A37',
+-    input: '#1E2A27',
++    border: '#245049',
++    input: '#1B4740',
+     rating: palette.rating,
+     urgent: palette.destructive,
+     urgentLight: 'rgba(231, 76, 60, 0.15)',
+@@ -81,12 +81,12 @@ const colors = {
+     shadow: 'rgba(0, 0, 0, 0.3)',
+     shadowMd: 'rgba(0, 0, 0, 0.4)',
+     overlay: 'rgba(0, 0, 0, 0.7)',
+-    headerBg: '#1A2E2B',
+-    tabBarActive: '#3ABFAD',
+-    tabBarInactive: '#5A7A75',
+-    tabBarBg: '#141F1D',
+-    skeletonBase: '#1E2A27',
+-    skeletonHighlight: '#253530',
++    headerBg: '#12332E',
++    tabBarActive: '#4DBFAD',
++    tabBarInactive: '#6B9891',
++    tabBarBg: '#12332E',
++    skeletonBase: '#1B4740',
++    skeletonHighlight: '#214F47',
+   },
+   radius: 12,
+ };
+diff --git a/artifacts/skillbuddy/context/ThemeContext.tsx b/artifacts/skillbuddy/context/ThemeContext.tsx
+index 353416e..e8cdd02 100644
+--- a/artifacts/skillbuddy/context/ThemeContext.tsx
++++ b/artifacts/skillbuddy/context/ThemeContext.tsx
+@@ -84,7 +84,7 @@ function PaintRevealOverlay({
+ 
+ export function ThemeProvider({ children }: { children: React.ReactNode }) {
+   const [theme, setTheme] = useState<ThemeMode>('light');
+-  const [overlayColor, setOverlayColor] = useState('#111614');
++  const [overlayColor, setOverlayColor] = useState('#12332E');
+   const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
+   const themeRef = useRef<ThemeMode>('light');
+   themeRef.current = theme;
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index f9078e2..c486887 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -1,5 +1,6 @@
+ import type { Category, Service, Offer, Notification, ChatThread, Booking, Review, Job, Bid, BidProvider } from '@/types';
+ import { calculateProviderScore } from '@/lib/scoring';
++import colors from '@/constants/colors';
+ 
+ // ─── Current User (mock) ──────────────────────────────────────────────────────
+ export interface MockUser {
+@@ -83,24 +84,24 @@ export const PROVIDER_JOB_HISTORY: JobHistoryEntry[] = [
+ 
+ // ─── Categories ───────────────────────────────────────────────────────────────
+ export const CATEGORIES: Category[] = [
+-  { id: '1',  name: 'Cleaning',        iconLib: 'MaterialCommunityIcons', iconName: 'broom',                   color: '#3A9E8F' },
+-  { id: '2',  name: 'Repairing',       iconLib: 'MaterialCommunityIcons', iconName: 'tools',                   color: '#3A9E8F' },
+-  { id: '3',  name: 'Plumbing',        iconLib: 'MaterialCommunityIcons', iconName: 'pipe',                    color: '#3A9E8F' },
+-  { id: '4',  name: 'Shifting',        iconLib: 'MaterialCommunityIcons', iconName: 'truck-delivery',          color: '#3A9E8F' },
+-  { id: '5',  name: 'Painting',        iconLib: 'MaterialCommunityIcons', iconName: 'format-paint',            color: '#3A9E8F' },
+-  { id: '6',  name: 'Laundry',         iconLib: 'MaterialCommunityIcons', iconName: 'washing-machine',         color: '#3A9E8F' },
+-  { id: '7',  name: 'AC Repair',       iconLib: 'MaterialCommunityIcons', iconName: 'air-conditioner',         color: '#3A9E8F' },
+-  { id: '8',  name: 'Car Repair',      iconLib: 'MaterialCommunityIcons', iconName: 'car-wrench',              color: '#3A9E8F' },
+-  { id: '9',  name: 'Beauty',          iconLib: 'MaterialCommunityIcons', iconName: 'face-woman',              color: '#3A9E8F' },
+-  { id: '10', name: 'Pets',            iconLib: 'MaterialCommunityIcons', iconName: 'paw',                     color: '#3A9E8F' },
+-  { id: '11', name: 'Photography',     iconLib: 'MaterialCommunityIcons', iconName: 'camera',                  color: '#3A9E8F' },
+-  { id: '12', name: 'Babysitting',     iconLib: 'MaterialCommunityIcons', iconName: 'baby-face-outline',       color: '#3A9E8F' },
+-  { id: '13', name: 'Barbering',       iconLib: 'MaterialCommunityIcons', iconName: 'content-cut',             color: '#3A9E8F' },
+-  { id: '14', name: 'Dog Training',    iconLib: 'MaterialCommunityIcons', iconName: 'dog',                     color: '#3A9E8F' },
+-  { id: '15', name: 'Party',           iconLib: 'MaterialCommunityIcons', iconName: 'party-popper',            color: '#3A9E8F' },
+-  { id: '16', name: 'Gardening',       iconLib: 'MaterialCommunityIcons', iconName: 'flower',                  color: '#3A9E8F' },
+-  { id: '17', name: 'Pest Control',    iconLib: 'MaterialCommunityIcons', iconName: 'bug',                     color: '#3A9E8F' },
+-  { id: '18', name: 'Electrical',      iconLib: 'MaterialCommunityIcons', iconName: 'lightning-bolt',          color: '#3A9E8F' },
++  { id: '1',  name: 'Cleaning',        iconLib: 'MaterialCommunityIcons', iconName: 'broom',                   color: colors.light.primary },
++  { id: '2',  name: 'Repairing',       iconLib: 'MaterialCommunityIcons', iconName: 'tools',                   color: colors.light.primary },
++  { id: '3',  name: 'Plumbing',        iconLib: 'MaterialCommunityIcons', iconName: 'pipe',                    color: colors.light.primary },
++  { id: '4',  name: 'Shifting',        iconLib: 'MaterialCommunityIcons', iconName: 'truck-delivery',          color: colors.light.primary },
++  { id: '5',  name: 'Painting',        iconLib: 'MaterialCommunityIcons', iconName: 'format-paint',            color: colors.light.primary },
++  { id: '6',  name: 'Laundry',         iconLib: 'MaterialCommunityIcons', iconName: 'washing-machine',         color: colors.light.primary },
++  { id: '7',  name: 'AC Repair',       iconLib: 'MaterialCommunityIcons', iconName: 'air-conditioner',         color: colors.light.primary },
++  { id: '8',  name: 'Car Repair',      iconLib: 'MaterialCommunityIcons', iconName: 'car-wrench',              color: colors.light.primary },
++  { id: '9',  name: 'Beauty',          iconLib: 'MaterialCommunityIcons', iconName: 'face-woman',              color: colors.light.primary },
++  { id: '10', name: 'Pets',            iconLib: 'MaterialCommunityIcons', iconName: 'paw',                     color: colors.light.primary },
++  { id: '11', name: 'Photography',     iconLib: 'MaterialCommunityIcons', iconName: 'camera',                  color: colors.light.primary },
++  { id: '12', name: 'Babysitting',     iconLib: 'MaterialCommunityIcons', iconName: 'baby-face-outline',       color: colors.light.primary },
++  { id: '13', name: 'Barbering',       iconLib: 'MaterialCommunityIcons', iconName: 'content-cut',             color: colors.light.primary },
++  { id: '14', name: 'Dog Training',    iconLib: 'MaterialCommunityIcons', iconName: 'dog',                     color: colors.light.primary },
++  { id: '15', name: 'Party',           iconLib: 'MaterialCommunityIcons', iconName: 'party-popper',            color: colors.light.primary },
++  { id: '16', name: 'Gardening',       iconLib: 'MaterialCommunityIcons', iconName: 'flower',                  color: colors.light.primary },
++  { id: '17', name: 'Pest Control',    iconLib: 'MaterialCommunityIcons', iconName: 'bug',                     color: colors.light.primary },
++  { id: '18', name: 'Electrical',      iconLib: 'MaterialCommunityIcons', iconName: 'lightning-bolt',          color: colors.light.primary },
+ ];
+ 
+ // ─── Subservices (for Task 6 follow-up) ───────────────────────────────────────
+-- 
+2.43.0
+

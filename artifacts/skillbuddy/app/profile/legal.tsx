@@ -3,11 +3,12 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 
-const CONTENT: Record<string, { title: string; body: string[] }> = {
+const CONTENT: Record<string, { titleKey: string; body: string[] }> = {
   about: {
-    title: 'About Us',
+    titleKey: 'profile_about',
     body: [
       'SkillBuddy connects people who need everyday services done with verified local professionals — SkillBuddy Pilots — across the Baltic region.',
       'Our mission is to make booking trusted help as simple as a few taps: post a job or browse services, compare real bids, and get it done.',
@@ -15,7 +16,7 @@ const CONTENT: Record<string, { title: string; body: string[] }> = {
     ],
   },
   privacy: {
-    title: 'Privacy & Cookie Policy',
+    titleKey: 'profile_privacy',
     body: [
       'We collect only the information needed to connect clients with SkillBuddy Pilots and process bookings: account details, job/service data, and payment records.',
       'We never sell personal data to third parties. Location data is used only to match nearby providers and is never shared beyond what a job requires.',
@@ -23,7 +24,7 @@ const CONTENT: Record<string, { title: string; body: string[] }> = {
     ],
   },
   terms: {
-    title: 'Terms & Conditions',
+    titleKey: 'profile_terms',
     body: [
       'By using SkillBuddy, you agree to provide accurate information when posting jobs or bidding on them.',
       'Cancellation fees apply only after a provider has been assigned to a job — cancelling before assignment is always free.',
@@ -36,13 +37,14 @@ export default function LegalScreen() {
   const { type } = useLocalSearchParams<{ type: string }>();
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const content = CONTENT[type as string] ?? CONTENT.about;
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>{content.title}</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t(content.titleKey as any)}</Text>
         <View style={{ width: 40 }} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>

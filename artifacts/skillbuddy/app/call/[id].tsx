@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import colors from '@/constants/colors';
+import { useLanguage } from '@/context/LanguageContext';
 import { BID_PROVIDERS, CHAT_THREADS } from '@/data/mockData';
 
 const MAX_CALL_SECONDS = 5 * 60;
@@ -22,7 +23,8 @@ export default function ActiveCallScreen() {
 
   const provider = BID_PROVIDERS.find((p) => p.id === id);
   const thread = CHAT_THREADS.find((t) => t.participant.id === id);
-  const name = provider?.name ?? thread?.participant.name ?? 'Unknown';
+  const { t } = useLanguage();
+  const name = provider?.name ?? thread?.participant.name ?? t('call_unknown');
 
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
@@ -57,7 +59,7 @@ export default function ActiveCallScreen() {
         </View>
         <Text style={styles.name}>{name}</Text>
         <Text style={styles.status}>
-          {seconds >= MAX_CALL_SECONDS - 30 && !ended ? 'Call ending soon…' : 'Ongoing call'}
+          {seconds >= MAX_CALL_SECONDS - 30 && !ended ? t('call_ending') : t('call_ongoing')}
         </Text>
         <Text style={styles.duration}>{formatDuration(seconds)}</Text>
       </Animated.View>
@@ -69,14 +71,14 @@ export default function ActiveCallScreen() {
             onPress={() => setMuted((m) => !m)}
           >
             <Feather name={muted ? 'mic-off' : 'mic'} size={22} color="#FFF" />
-            <Text style={styles.controlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
+            <Text style={styles.controlLabel}>{muted ? t('call_unmute') : t('call_mute')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.controlBtn, speaker && styles.controlBtnActive]}
             onPress={() => setSpeaker((s) => !s)}
           >
             <Feather name={speaker ? 'volume-2' : 'headphones'} size={22} color="#FFF" />
-            <Text style={styles.controlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
+            <Text style={styles.controlLabel}>{speaker ? t('call_speaker') : t('call_earpiece')}</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity style={styles.endBtn} onPress={endCall}>

@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CATEGORIES, SUBSERVICES } from '@/data/mockData';
 import { getServiceForSubservice } from '@/lib/serviceLookup';
 import BackButton from '@/components/BackButton';
@@ -13,6 +14,7 @@ export default function CategoryDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const category = CATEGORIES.find((cat) => cat.id === id) ?? CATEGORIES[0];
@@ -28,7 +30,7 @@ export default function CategoryDetailScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.primary }]}>
         <BackButton />
-        <Text style={styles.headerTitle}>{category.name}</Text>
+        <Text style={styles.headerTitle}>{tCat(category.id)}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -40,7 +42,7 @@ export default function CategoryDetailScreen() {
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Feather name="inbox" size={40} color={c.border} />
-            <Text style={[styles.emptyText, { color: c.mutedForeground }]}>No subservices found.</Text>
+            <Text style={[styles.emptyText, { color: c.mutedForeground }]}>{t('category_no_subservices')}</Text>
           </View>
         }
         renderItem={({ item, index }) => (

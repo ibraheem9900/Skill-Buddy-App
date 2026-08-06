@@ -1,11 +1,13 @@
 import React from 'react';
 import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useLanguage } from '@/context/LanguageContext';
 import type { Offer } from '@/types';
 
 interface Props { offer: Offer; cardWidth?: number }
 
 export default function SpecialOfferCard({ offer, cardWidth }: Props) {
+  const { t } = useLanguage();
   return (
     <View style={[styles.card, cardWidth ? { width: cardWidth } : undefined]}>
       <ImageBackground
@@ -20,7 +22,7 @@ export default function SpecialOfferCard({ offer, cardWidth }: Props) {
         <View style={styles.content}>
           <View style={styles.left}>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>Limited time</Text>
+              <Text style={styles.badgeText}>{t('offer_limited')}</Text>
             </View>
             <Text style={styles.title} numberOfLines={1}>{offer.title}</Text>
             <Text style={styles.subtitle} numberOfLines={1}>{offer.subtitle}</Text>
@@ -29,7 +31,7 @@ export default function SpecialOfferCard({ offer, cardWidth }: Props) {
           <View style={styles.right}>
             <View style={styles.discountBox}>
               <Text style={styles.discountNum}>{offer.discount}</Text>
-              <Text style={styles.discountPct}>%{'\n'}OFF</Text>
+              <Text style={styles.discountPct}>{t('offer_off')}</Text>
             </View>
             <Pressable style={styles.claimBtn} android_ripple={{ color: 'rgba(255,255,255,0.2)' }}>
               <Feather name="arrow-right" size={14} color="#FFF" />

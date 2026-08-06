@@ -14,27 +14,28 @@ import AnimatedTabIcon from '@/components/AnimatedTabIcon';
 import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
 
 function NativeTabLayout() {
+  const { t } = useLanguage();
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: 'house', selected: 'house.fill' }} />
-        <Label>Home</Label>
+        <Label>{t('tab_home')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="services">
         <Icon sf={{ default: 'square.grid.2x2', selected: 'square.grid.2x2.fill' }} />
-        <Label>Services</Label>
+        <Label>{t('tab_services')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="jobs">
         <Icon sf={{ default: 'briefcase', selected: 'briefcase.fill' }} />
-        <Label>Jobs</Label>
+        <Label>{t('tab_jobs')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="inbox">
         <Icon sf={{ default: 'bubble.left', selected: 'bubble.left.fill' }} />
-        <Label>Inbox</Label>
+        <Label>{t('tab_inbox')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: 'person', selected: 'person.fill' }} />
-        <Label>Profile</Label>
+        <Label>{t('tab_profile')}</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );

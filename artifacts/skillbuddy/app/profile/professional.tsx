@@ -3,6 +3,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER, PROVIDER_JOB_HISTORY } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
@@ -30,6 +31,7 @@ export default function ProfessionalInfoScreen() {
   const ME_AS_PROVIDER = getMeAsProvider();
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const { activeRole } = useRole();
   const isProvider = activeRole === 'PROVIDER';
   const score = calculateProviderScore(ME_AS_PROVIDER);
@@ -38,7 +40,7 @@ export default function ProfessionalInfoScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Professional Info</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('prof_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -46,9 +48,9 @@ export default function ProfessionalInfoScreen() {
         <View style={{ padding: 20 }}>
           <View style={styles.statGrid}>
             {[
-              { label: 'Jobs Done', value: CURRENT_USER.jobsDone, icon: 'check-circle' as const },
-              { label: 'Active Jobs', value: CURRENT_USER.activeJobs, icon: 'clock' as const },
-              { label: 'Due Payments', value: `€${CURRENT_USER.duePayments}`, icon: 'dollar-sign' as const },
+              { label: t('prof_jobs_done'), value: CURRENT_USER.jobsDone, icon: 'check-circle' as const },
+              { label: t('prof_active_jobs'), value: CURRENT_USER.activeJobs, icon: 'clock' as const },
+              { label: t('prof_due_payments'), value: `€${CURRENT_USER.duePayments}`, icon: 'dollar-sign' as const },
             ].map((s) => (
               <View key={s.label} style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
                 <Feather name={s.icon} size={18} color={c.primary} />
@@ -66,44 +68,44 @@ export default function ProfessionalInfoScreen() {
                 <View style={styles.skillRow}>
                   <MaterialCommunityIcons name="star-circle-outline" size={18} color={c.primary} />
                   <View>
-                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>Primary Skill</Text>
+                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>{t('prof_primary_skill')}</Text>
                     <Text style={[styles.skillValue, { color: c.text }]}>{CURRENT_USER.primarySkill}</Text>
                   </View>
                 </View>
                 <View style={[styles.skillRow, { borderTopWidth: 1, borderTopColor: c.border, paddingTop: 12, marginTop: 12 }]}>
                   <MaterialCommunityIcons name="star-outline" size={18} color={c.mutedForeground} />
                   <View>
-                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>Secondary Skill</Text>
+                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>{t('prof_secondary_skill')}</Text>
                     <Text style={[styles.skillValue, { color: c.text }]}>{CURRENT_USER.secondarySkill}</Text>
                   </View>
                 </View>
               </View>
 
-              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Performance Metrics</Text>
+              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('prof_metrics')}</Text>
               <View style={styles.statGrid}>
                 <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
                   <Feather name="star" size={18} color={c.rating} />
                   <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.rating}</Text>
-                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Rating</Text>
+                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{t('prof_rating')}</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
                   <Feather name="check-circle" size={18} color={c.primary} />
                   <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.jobsDone}</Text>
-                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Jobs Done</Text>
+                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{t('prof_jobs_done')}</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
                   <Feather name="zap" size={18} color={c.warning} />
                   <Text style={[styles.statValue, { color: c.text }]}>{ME_AS_PROVIDER.responseTimeMin}m</Text>
-                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>Avg. Response</Text>
+                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{t('prof_avg_response')}</Text>
                 </View>
               </View>
 
               <View style={[styles.scoreCard, { backgroundColor: c.primaryLight }]}>
-                <Text style={[styles.scoreLabel, { color: c.primary }]}>Your overall match score</Text>
+                <Text style={[styles.scoreLabel, { color: c.primary }]}>{t('prof_score')}</Text>
                 <Text style={[styles.scoreValue, { color: c.primary }]}>{score.total}/100</Text>
               </View>
 
-              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Job History</Text>
+              <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('prof_history')}</Text>
             </View>
           }
           data={PROVIDER_JOB_HISTORY}

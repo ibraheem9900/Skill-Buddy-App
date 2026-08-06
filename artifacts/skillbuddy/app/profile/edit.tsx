@@ -3,8 +3,8 @@ import { Alert, ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, Touc
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import colors from '@/constants/colors';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
@@ -12,6 +12,7 @@ import BackButton from '@/components/BackButton';
 
 export default function EditProfileScreen() {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, refreshUser } = useAuth();
@@ -26,10 +27,10 @@ export default function EditProfileScreen() {
     try {
       await authApi.updateUser({ first_name: firstName, last_name: lastName, phone });
       await refreshUser();
-      Alert.alert('Saved', 'Profile updated successfully.');
+      Alert.alert(t('edit_saved_title'), t('edit_saved_msg'));
       router.back();
     } catch {
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
+      Alert.alert(t('edit_error_title'), t('edit_error_msg'));
     } finally {
       setLoading(false);
     }
@@ -39,10 +40,10 @@ export default function EditProfileScreen() {
     <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <BackButton />
-        <Text style={[styles.title, { color: c.text }]}>Edit Profile</Text>
+        <Text style={[styles.title, { color: c.text }]}>{t('edit_title')}</Text>
         <TouchableOpacity onPress={handleSave} disabled={loading}>
           {loading ? <ActivityIndicator size="small" color={c.primary} /> : (
-            <Text style={[styles.saveText, { color: c.primary }]}>Save</Text>
+            <Text style={[styles.saveText, { color: c.primary }]}>{t('action_save')}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -56,9 +57,9 @@ export default function EditProfileScreen() {
         </View>
 
         {[
-          { label: 'First Name', value: firstName, set: setFirstName, icon: 'user' as const },
-          { label: 'Last Name', value: lastName, set: setLastName, icon: 'user' as const },
-          { label: 'Phone', value: phone, set: setPhone, icon: 'phone' as const, keyboardType: 'phone-pad' as const },
+          { labelKey: 'edit_first_name', label: t('edit_first_name'), value: firstName, set: setFirstName, icon: 'user' as const },
+          { labelKey: 'edit_last_name', label: t('edit_last_name'), value: lastName, set: setLastName, icon: 'user' as const },
+          { labelKey: 'edit_phone', label: t('edit_phone'), value: phone, set: setPhone, icon: 'phone' as const, keyboardType: 'phone-pad' as const },
         ].map((f) => (
           <View key={f.label}>
             <Text style={[styles.label, { color: c.text }]}>{f.label}</Text>
@@ -71,14 +72,14 @@ export default function EditProfileScreen() {
                 placeholder={f.label}
                 placeholderTextColor={c.mutedForeground}
                 keyboardType={f.keyboardType}
-                autoCapitalize={f.label === 'Phone' ? 'none' : 'words'}
+                autoCapitalize={f.labelKey === 'edit_phone' ? 'none' : 'words'}
               />
             </View>
           </View>
         ))}
 
         <View>
-          <Text style={[styles.label, { color: c.text }]}>Email (read-only)</Text>
+          <Text style={[styles.label, { color: c.text }]}>{t('edit_email_readonly')}</Text>
           <View style={[styles.inputRow, { backgroundColor: c.muted, borderColor: c.border }]}>
             <Feather name="mail" size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
             <Text style={[styles.readOnly, { color: c.mutedForeground }]}>{user?.email ?? ''}</Text>

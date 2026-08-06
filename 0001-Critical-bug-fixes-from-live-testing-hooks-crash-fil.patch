@@ -1,0 +1,593 @@
+From 511ecdb2348f21d8f32e2b3a0572798eb744b9d8 Mon Sep 17 00:00:00 2001
+From: SkillBuddy Agent <agent@skillbuddy.local>
+Date: Wed, 22 Jul 2026 10:01:41 +0000
+Subject: [PATCH] Critical bug fixes from live testing: hooks crash, filter
+ sheet regressions, styled popups
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- FIXED CRASH: 'Rendered more hooks than during previous render' when
+  opening a job card. Root cause: a useMemo (sortedForAll) was declared
+  AFTER the screenLoading/job-not-found early returns in the Bidding
+  Dashboard, so it was skipped on the first render and called on the
+  second — a genuine Rules-of-Hooks violation. Moved it above all early
+  returns.
+
+- FIXED REGRESSION: the filter bottom sheet's dimmed backdrop was
+  showing solid opaque background instead of the previous screen
+  showing through. Root cause: the global Stack contentStyle background
+  fix (previous commit) was being inherited by the filter route's
+  transparentModal presentation, which needs contentStyle: transparent
+  specifically. Added a per-screen override.
+
+- FIXED FAKE UI: the Price Range 'slider' was a purely decorative View
+  with no thumbs and no touch handling at all — confirmed by testing,
+  matches the reported 'no balls to drag' bug. Built a real RangeSlider
+  component with two draggable PanResponder-driven thumbs, wired into
+  the filter sheet with live min/max values.
+
+- Replaced default unstyled Alert.alert popups with a new app-styled
+  AlertModalContext (blurred backdrop, themed card, icon, proper
+  button styling matching the rest of the app) — applied to Booking
+  Confirmed, Cancel Job, Accept Bid, Cancel Bid, and invalid-bid-price
+  alerts.
+
+- Renamed the mock user identity from 'Alex Johnson' to 'Marta Ozola'
+  (name/email/username) — the greeting binding itself was already
+  correctly wired everywhere in a prior pass; the visible complaint was
+  the placeholder-like mock value itself.
+
+Full typecheck (skillbuddy + libs): zero errors.
+
+Remaining from this testing round, not yet addressed (follow-up pass):
+Service Detail screen visual/UX overhaul with a scrolling (non-sticky)
+image header, directional back/forward navigation animations, deeper
+header polish pass, and the requested per-tab icon morph animations
+(door/blocks/briefcase/chat/eyes).
+---
+ artifacts/skillbuddy/app/_layout.tsx          |  10 +-
+ artifacts/skillbuddy/app/booking/[id].tsx     |  13 ++-
+ artifacts/skillbuddy/app/filter.tsx           |  14 ++-
+ artifacts/skillbuddy/app/job/[id].tsx         |  74 +++++++------
+ artifacts/skillbuddy/app/job/[id]/bid.tsx     |  31 ++++--
+ .../skillbuddy/components/RangeSlider.tsx     | 103 ++++++++++++++++++
+ .../skillbuddy/context/AlertModalContext.tsx  | 103 ++++++++++++++++++
+ artifacts/skillbuddy/data/mockData.ts         |  10 +-
+ 8 files changed, 301 insertions(+), 57 deletions(-)
+ create mode 100644 artifacts/skillbuddy/components/RangeSlider.tsx
+ create mode 100644 artifacts/skillbuddy/context/AlertModalContext.tsx
+
+diff --git a/artifacts/skillbuddy/app/_layout.tsx b/artifacts/skillbuddy/app/_layout.tsx
+index bce0ff0..e76aff6 100644
+--- a/artifacts/skillbuddy/app/_layout.tsx
++++ b/artifacts/skillbuddy/app/_layout.tsx
+@@ -18,6 +18,7 @@ import { BookmarkProvider } from '@/context/BookmarkContext';
+ import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+ import { RoleProvider } from '@/context/RoleContext';
+ import { FilterProvider } from '@/context/FilterContext';
++import { AlertModalProvider } from '@/context/AlertModalContext';
+ 
+ SplashScreen.preventAutoHideAsync();
+ const queryClient = new QueryClient();
+@@ -76,7 +77,12 @@ function RootLayoutNav() {
+         />
+         <Stack.Screen
+           name="filter"
+-          options={{ headerShown: false, presentation: 'transparentModal', animation: 'slide_from_bottom' }}
++          options={{
++            headerShown: false,
++            presentation: 'transparentModal',
++            animation: 'slide_from_bottom',
++            contentStyle: { backgroundColor: 'transparent' },
++          }}
+         />
+         <Stack.Screen
+           name="chat/[id]"
+@@ -117,6 +123,7 @@ export default function RootLayout() {
+             <AuthProvider>
+               <RoleProvider>
+               <FilterProvider>
++              <AlertModalProvider>
+               <BookmarkProvider>
+                 <GestureHandlerRootView style={{ flex: 1 }}>
+                   <KeyboardProvider>
+@@ -124,6 +131,7 @@ export default function RootLayout() {
+                   </KeyboardProvider>
+                 </GestureHandlerRootView>
+               </BookmarkProvider>
++              </AlertModalProvider>
+               </FilterProvider>
+               </RoleProvider>
+             </AuthProvider>
+diff --git a/artifacts/skillbuddy/app/booking/[id].tsx b/artifacts/skillbuddy/app/booking/[id].tsx
+index 4198e19..c7e34bc 100644
+--- a/artifacts/skillbuddy/app/booking/[id].tsx
++++ b/artifacts/skillbuddy/app/booking/[id].tsx
+@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
+ import colors from '@/constants/colors';
+ import { SERVICES } from '@/data/mockData';
+ import BackButton from '@/components/BackButton';
++import { useAppAlert } from '@/context/AlertModalContext';
+ 
+ const c = colors.light;
+ 
+@@ -38,14 +39,16 @@ export default function BookingScreen() {
+ 
+   const [selectedDay, setSelectedDay] = useState(0);
+   const [selectedTime, setSelectedTime] = useState('11:00 AM - 12:00 PM');
++  const showAlert = useAppAlert();
+ 
+   const handleSubmit = () => {
+     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+-    Alert.alert(
+-      'Booking Confirmed!',
+-      `Your ${service.title} service is booked for ${DAYS[selectedDay].month} ${DAYS[selectedDay].date} at ${selectedTime}.`,
+-      [{ text: 'View Bookings', onPress: () => router.replace('/(tabs)') }]
+-    );
++    showAlert({
++      title: 'Booking Confirmed!',
++      message: `Your ${service.title} service is booked for ${DAYS[selectedDay].month} ${DAYS[selectedDay].date} at ${selectedTime}.`,
++      icon: 'check-circle',
++      buttons: [{ text: 'View Bookings', onPress: () => router.replace('/(tabs)') }],
++    });
+   };
+ 
+   return (
+diff --git a/artifacts/skillbuddy/app/filter.tsx b/artifacts/skillbuddy/app/filter.tsx
+index 62c59d7..dc5fba4 100644
+--- a/artifacts/skillbuddy/app/filter.tsx
++++ b/artifacts/skillbuddy/app/filter.tsx
+@@ -21,6 +21,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
+ import { useTheme } from '@/context/ThemeContext';
+ import { CATEGORIES } from '@/data/mockData';
+ import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
++import RangeSlider from '@/components/RangeSlider';
+ 
+ const { height: SCREEN_H } = Dimensions.get('window');
+ const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
+@@ -160,9 +161,16 @@ export default function FilterScreen() {
+               <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Min</Text>
+               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{minPrice}</Text>
+             </View>
+-            <View style={[styles.sliderTrack, { backgroundColor: c.border }]}>
+-              <View style={[styles.sliderFill, { backgroundColor: c.primary }]} />
+-            </View>
++            <RangeSlider
++              min={0}
++              max={400}
++              valueMin={minPrice}
++              valueMax={maxPrice}
++              onChange={(lo, hi) => {
++                setMinPrice(lo);
++                setMaxPrice(hi);
++              }}
++            />
+             <View style={[styles.priceBox, { borderColor: c.border, backgroundColor: c.muted }]}>
+               <Text style={[styles.priceBoxLabel, { color: c.mutedForeground }]}>Max</Text>
+               <Text style={[styles.priceBoxValue, { color: c.text }]}>€{maxPrice}</Text>
+diff --git a/artifacts/skillbuddy/app/job/[id].tsx b/artifacts/skillbuddy/app/job/[id].tsx
+index da94ada..727ade3 100644
+--- a/artifacts/skillbuddy/app/job/[id].tsx
++++ b/artifacts/skillbuddy/app/job/[id].tsx
+@@ -12,6 +12,7 @@ import CountdownTimer from '@/components/CountdownTimer';
+ import BidCard from '@/components/BidCard';
+ import EmptyState from '@/components/EmptyState';
+ import BrandedLoader from '@/components/BrandedLoader';
++import { useAppAlert } from '@/context/AlertModalContext';
+ import type { Bid, BidProvider } from '@/types';
+ 
+ type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
+@@ -34,6 +35,7 @@ export default function BiddingDashboardScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
+ 
+   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
+   const [bids, setBids] = useState<Bid[]>(() => MOCK_BIDS.filter((b) => b.jobId === id));
+@@ -43,6 +45,17 @@ export default function BiddingDashboardScreen() {
+   const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
+   const [screenLoading, setScreenLoading] = useState(true);
+ 
++  const sortedForAll = useMemo(() => {
++    const arr = [...bids];
++    switch (sortMode) {
++      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
++      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
++      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
++      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
++      default: return arr.sort((a, b) => b.score - a.score);
++    }
++  }, [bids, sortMode]);
++
+   useEffect(() => {
+     const t = setTimeout(() => setScreenLoading(false), 400);
+     return () => clearTimeout(t);
+@@ -80,17 +93,6 @@ export default function BiddingDashboardScreen() {
+   const sortedByScore = [...bids].sort((a, b) => b.score - a.score);
+   const top3 = sortedByScore.slice(0, 3);
+ 
+-  const sortedForAll = useMemo(() => {
+-    const arr = [...bids];
+-    switch (sortMode) {
+-      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
+-      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
+-      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
+-      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
+-      default: return arr.sort((a, b) => b.score - a.score);
+-    }
+-  }, [bids, sortMode]);
+-
+   const restartTimer = () => {
+     job.biddingEndsAt = Date.now() + job.biddingDurationMs;
+     setExpired(false);
+@@ -104,31 +106,41 @@ export default function BiddingDashboardScreen() {
+   };
+ 
+   const cancelJob = () => {
+-    Alert.alert('Cancel Job', 'Are you sure? No cancellation fee applies at this stage.', [
+-      { text: 'Keep Job', style: 'cancel' },
+-      {
+-        text: 'Cancel Job',
+-        style: 'destructive',
+-        onPress: () => {
+-          job.status = 'cancelled';
+-          router.back();
++    showAlert({
++      title: 'Cancel Job',
++      message: 'Are you sure? No cancellation fee applies at this stage.',
++      icon: 'alert-triangle',
++      buttons: [
++        { text: 'Keep Job', style: 'cancel' },
++        {
++          text: 'Cancel Job',
++          style: 'destructive',
++          onPress: () => {
++            job.status = 'cancelled';
++            router.back();
++          },
+         },
+-      },
+-    ]);
++      ],
++    });
+   };
+ 
+   const acceptBid = (bid: Bid) => {
+-    Alert.alert('Accept this bid?', `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`, [
+-      { text: 'Cancel', style: 'cancel' },
+-      {
+-        text: 'Accept',
+-        onPress: () => {
+-          job.status = 'assigned';
+-          job.assignedProviderId = bid.provider.id;
+-          router.back();
++    showAlert({
++      title: 'Accept this bid?',
++      message: `${bid.provider.name} — €${bid.price}, ETA ${bid.eta}`,
++      icon: 'check-circle',
++      buttons: [
++        { text: 'Cancel', style: 'cancel' },
++        {
++          text: 'Accept',
++          onPress: () => {
++            job.status = 'assigned';
++            job.assignedProviderId = bid.provider.id;
++            router.back();
++          },
+         },
+-      },
+-    ]);
++      ],
++    });
+   };
+ 
+   const openChat = (provider: BidProvider) => {
+diff --git a/artifacts/skillbuddy/app/job/[id]/bid.tsx b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+index daf410f..cb370ba 100644
+--- a/artifacts/skillbuddy/app/job/[id]/bid.tsx
++++ b/artifacts/skillbuddy/app/job/[id]/bid.tsx
+@@ -10,6 +10,7 @@ import { calculateProviderScore } from '@/lib/scoring';
+ import CountdownTimer from '@/components/CountdownTimer';
+ import InlineLoader from '@/components/InlineLoader';
+ import EmptyState from '@/components/EmptyState';
++import { useAppAlert } from '@/context/AlertModalContext';
+ import type { Bid, BidProvider } from '@/types';
+ 
+ // The mock-logged-in provider identity (used when submitting a bid as a Pilot).
+@@ -33,6 +34,7 @@ export default function ProviderJobBidScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const { colors: c } = useTheme();
++  const showAlert = useAppAlert();
+ 
+   const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
+   const existingBid = useMemo(
+@@ -58,7 +60,7 @@ export default function ProviderJobBidScreen() {
+   const submitBid = async () => {
+     const priceNum = parseFloat(price);
+     if (!priceNum || priceNum <= 0) {
+-      Alert.alert('Invalid price', 'Please enter a valid bid amount.');
++      showAlert({ title: 'Invalid price', message: 'Please enter a valid bid amount.', icon: 'alert-circle' });
+       return;
+     }
+     setSubmitting(true);
+@@ -80,18 +82,23 @@ export default function ProviderJobBidScreen() {
+   };
+ 
+   const cancelBid = () => {
+-    Alert.alert('Cancel Bid', 'Are you sure you want to withdraw your bid?', [
+-      { text: 'Keep Bid', style: 'cancel' },
+-      {
+-        text: 'Cancel Bid',
+-        style: 'destructive',
+-        onPress: () => {
+-          const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
+-          if (idx >= 0) MOCK_BIDS.splice(idx, 1);
+-          setSubmitted(false);
++    showAlert({
++      title: 'Cancel Bid',
++      message: 'Are you sure you want to withdraw your bid?',
++      icon: 'alert-triangle',
++      buttons: [
++        { text: 'Keep Bid', style: 'cancel' },
++        {
++          text: 'Cancel Bid',
++          style: 'destructive',
++          onPress: () => {
++            const idx = MOCK_BIDS.findIndex((b) => b.jobId === job.id && b.provider.id === ME_AS_PROVIDER.id);
++            if (idx >= 0) MOCK_BIDS.splice(idx, 1);
++            setSubmitted(false);
++          },
+         },
+-      },
+-    ]);
++      ],
++    });
+   };
+ 
+   const adjustPrice = (delta: number) => {
+diff --git a/artifacts/skillbuddy/components/RangeSlider.tsx b/artifacts/skillbuddy/components/RangeSlider.tsx
+new file mode 100644
+index 0000000..d55d093
+--- /dev/null
++++ b/artifacts/skillbuddy/components/RangeSlider.tsx
+@@ -0,0 +1,103 @@
++import React, { useRef, useState } from 'react';
++import { PanResponder, StyleSheet, View } from 'react-native';
++import { useTheme } from '@/context/ThemeContext';
++
++interface Props {
++  min: number;
++  max: number;
++  valueMin: number;
++  valueMax: number;
++  onChange: (min: number, max: number) => void;
++  step?: number;
++}
++
++const TRACK_WIDTH = 220;
++const THUMB_SIZE = 22;
++
++export default function RangeSlider({ min, max, valueMin, valueMax, onChange, step = 5 }: Props) {
++  const { colors: c } = useTheme();
++  const range = max - min;
++
++  const valueToX = (v: number) => ((v - min) / range) * TRACK_WIDTH;
++  const xToValue = (x: number) => {
++    const raw = min + (x / TRACK_WIDTH) * range;
++    return Math.round(raw / step) * step;
++  };
++
++  const [minX, setMinX] = useState(valueToX(valueMin));
++  const [maxX, setMaxX] = useState(valueToX(valueMax));
++  const minXRef = useRef(minX);
++  const maxXRef = useRef(maxX);
++  minXRef.current = minX;
++  maxXRef.current = maxX;
++
++  const minPanResponder = useRef(
++    PanResponder.create({
++      onStartShouldSetPanResponder: () => true,
++      onPanResponderMove: (_, gesture) => {
++        const startX = valueToX(valueMin);
++        let next = startX + gesture.dx;
++        next = Math.max(0, Math.min(next, maxXRef.current - THUMB_SIZE / 2));
++        setMinX(next);
++      },
++      onPanResponderRelease: () => {
++        const newVal = Math.max(min, xToValue(minXRef.current));
++        onChange(newVal, xToValue(maxXRef.current));
++      },
++    })
++  ).current;
++
++  const maxPanResponder = useRef(
++    PanResponder.create({
++      onStartShouldSetPanResponder: () => true,
++      onPanResponderMove: (_, gesture) => {
++        const startX = valueToX(valueMax);
++        let next = startX + gesture.dx;
++        next = Math.min(TRACK_WIDTH, Math.max(next, minXRef.current + THUMB_SIZE / 2));
++        setMaxX(next);
++      },
++      onPanResponderRelease: () => {
++        const newVal = Math.min(max, xToValue(maxXRef.current));
++        onChange(xToValue(minXRef.current), newVal);
++      },
++    })
++  ).current;
++
++  return (
++    <View style={styles.wrap}>
++      <View style={[styles.track, { backgroundColor: c.border }]} />
++      <View
++        style={[
++          styles.fill,
++          { backgroundColor: c.primary, left: minX, width: Math.max(0, maxX - minX) },
++        ]}
++      />
++      <View
++        style={[styles.thumb, { left: minX - THUMB_SIZE / 2, backgroundColor: '#FFF', borderColor: c.primary }]}
++        {...minPanResponder.panHandlers}
++      />
++      <View
++        style={[styles.thumb, { left: maxX - THUMB_SIZE / 2, backgroundColor: '#FFF', borderColor: c.primary }]}
++        {...maxPanResponder.panHandlers}
++      />
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  wrap: { width: TRACK_WIDTH, height: THUMB_SIZE, justifyContent: 'center' },
++  track: { position: 'absolute', height: 4, borderRadius: 2, width: TRACK_WIDTH },
++  fill: { position: 'absolute', height: 4, borderRadius: 2 },
++  thumb: {
++    position: 'absolute',
++    width: THUMB_SIZE,
++    height: THUMB_SIZE,
++    borderRadius: THUMB_SIZE / 2,
++    borderWidth: 2.5,
++    elevation: 3,
++    shadowColor: '#000',
++    shadowOpacity: 0.2,
++    shadowOffset: { width: 0, height: 1 },
++    shadowRadius: 2,
++  },
++});
+diff --git a/artifacts/skillbuddy/context/AlertModalContext.tsx b/artifacts/skillbuddy/context/AlertModalContext.tsx
+new file mode 100644
+index 0000000..fad7638
+--- /dev/null
++++ b/artifacts/skillbuddy/context/AlertModalContext.tsx
+@@ -0,0 +1,103 @@
++import React, { createContext, useCallback, useContext, useState } from 'react';
++import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { BlurView } from 'expo-blur';
++import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
++import { Feather } from '@expo/vector-icons';
++import { useTheme } from '@/context/ThemeContext';
++
++export interface AppAlertButton {
++  text: string;
++  style?: 'default' | 'cancel' | 'destructive';
++  onPress?: () => void;
++}
++
++export interface AppAlertConfig {
++  title: string;
++  message?: string;
++  icon?: keyof typeof Feather.glyphMap;
++  buttons?: AppAlertButton[];
++}
++
++interface AlertContextType {
++  showAlert: (config: AppAlertConfig) => void;
++}
++
++const AlertModalContext = createContext<AlertContextType>({ showAlert: () => {} });
++
++export function AlertModalProvider({ children }: { children: React.ReactNode }) {
++  const [config, setConfig] = useState<AppAlertConfig | null>(null);
++  const { colors: c } = useTheme();
++
++  const showAlert = useCallback((cfg: AppAlertConfig) => setConfig(cfg), []);
++  const close = useCallback(() => setConfig(null), []);
++
++  const buttons: AppAlertButton[] = config?.buttons?.length ? config.buttons : [{ text: 'OK' }];
++
++  return (
++    <AlertModalContext.Provider value={{ showAlert }}>
++      {children}
++      <Modal visible={!!config} transparent animationType="none" onRequestClose={close}>
++        <Animated.View entering={FadeIn.duration(180)} style={StyleSheet.absoluteFill}>
++          <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
++          <Pressable style={styles.backdrop} onPress={close} />
++          <View style={styles.centerWrap} pointerEvents="box-none">
++            <Animated.View
++              entering={ZoomIn.duration(220).springify().damping(16)}
++              style={[styles.card, { backgroundColor: c.card }]}
++            >
++              {config?.icon && (
++                <View style={[styles.iconWrap, { backgroundColor: c.primaryLight }]}>
++                  <Feather name={config.icon} size={24} color={c.primary} />
++                </View>
++              )}
++              <Text style={[styles.title, { color: c.text }]}>{config?.title}</Text>
++              {!!config?.message && (
++                <Text style={[styles.message, { color: c.mutedForeground }]}>{config.message}</Text>
++              )}
++              <View style={styles.buttonRow}>
++                {buttons.map((btn, i) => {
++                  const isDestructive = btn.style === 'destructive';
++                  const isCancel = btn.style === 'cancel';
++                  return (
++                    <TouchableOpacity
++                      key={i}
++                      style={[
++                        styles.btn,
++                        isCancel
++                          ? { backgroundColor: c.muted }
++                          : { backgroundColor: isDestructive ? c.destructive : c.primary },
++                      ]}
++                      onPress={() => {
++                        close();
++                        btn.onPress?.();
++                      }}
++                      activeOpacity={0.85}
++                    >
++                      <Text style={[styles.btnText, { color: isCancel ? c.text : '#FFF' }]}>{btn.text}</Text>
++                    </TouchableOpacity>
++                  );
++                })}
++              </View>
++            </Animated.View>
++          </View>
++        </Animated.View>
++      </Modal>
++    </AlertModalContext.Provider>
++  );
++}
++
++export function useAppAlert() {
++  return useContext(AlertModalContext).showAlert;
++}
++
++const styles = StyleSheet.create({
++  backdrop: { ...StyleSheet.absoluteFillObject },
++  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
++  card: { width: '100%', borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },
++  iconWrap: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
++  title: { fontFamily: 'Inter_700Bold', fontSize: 17, textAlign: 'center' },
++  message: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 10 },
++  buttonRow: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 6 },
++  btn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 12 },
++  btnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },
++});
+diff --git a/artifacts/skillbuddy/data/mockData.ts b/artifacts/skillbuddy/data/mockData.ts
+index 81464e7..dc5536b 100644
+--- a/artifacts/skillbuddy/data/mockData.ts
++++ b/artifacts/skillbuddy/data/mockData.ts
+@@ -27,12 +27,12 @@ export interface MockUser {
+ 
+ export const CURRENT_USER: MockUser = {
+   id: 'u1',
+-  name: 'Alex Johnson',
+-  firstName: 'Alex',
+-  lastName: 'Johnson',
+-  email: 'alex.johnson@example.com',
++  name: 'Marta Ozola',
++  firstName: 'Marta',
++  lastName: 'Ozola',
++  email: 'marta.ozola@example.com',
+   phone: '+371 2xxx xx45',
+-  username: 'alex.johnson',
++  username: 'marta.ozola',
+   personalCode: 'SB-2024-88213',
+   address: 'Riga, Latvia',
+   creditPoints: 340,
+-- 
+2.43.0
+

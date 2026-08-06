@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { BID_PROVIDERS, CURRENT_USER, MOCK_JOBS } from '@/data/mockData';
@@ -11,18 +12,18 @@ import { calculatePayoutBreakdown, CANCELLATION_FEE } from '@/lib/payment';
 import BackButton from '@/components/BackButton';
 import type { JobStatus } from '@/types';
 
-const CANCEL_REASONS = ['Schedule conflict', 'Found another provider', 'No longer needed', 'Price disagreement', 'Other'];
+const CANCEL_REASON_KEYS = ['track_reason_1', 'track_reason_2', 'track_reason_3', 'track_reason_4', 'track_reason_5'];
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-const STEPS: { status: JobStatus; label: string }[] = [
-  { status: 'task_assigned', label: 'Assigned' },
-  { status: 'arrived', label: 'Arrived' },
-  { status: 'in_progress', label: 'In Progress' },
-  { status: 'completed', label: 'Completed' },
-  { status: 'approved', label: 'Approved' },
+const STEPS: { status: JobStatus; labelKey: string }[] = [
+  { status: 'task_assigned', labelKey: 'track_assigned' },
+  { status: 'arrived', labelKey: 'track_arrived' },
+  { status: 'in_progress', labelKey: 'track_in_progress' },
+  { status: 'completed', labelKey: 'track_completed' },
+  { status: 'approved', labelKey: 'track_approved' },
 ];
 
 export default function JobTrackingScreen() {
@@ -30,6 +31,7 @@ export default function JobTrackingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const { activeRole } = useRole();
   const showAlert = useAppAlert();
   const isProvider = activeRole === 'PROVIDER';
@@ -44,7 +46,7 @@ export default function JobTrackingScreen() {
   if (!job) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <Text style={{ color: c.text, padding: 20 }}>Job not found.</Text>
+        <Text style={{ color: c.text, padding: 20 }}>{t('track_not_found')}</Text>
       </View>
     );
   }
@@ -58,7 +60,7 @@ export default function JobTrackingScreen() {
   const markArrived = () => {
     job.arrivedAt = Date.now();
     job.status = 'arrived';
-    showAlert({ title: 'Client notified', message: 'The client has been notified that you\'ve arrived.', icon: 'map-pin' });
+    showAlert({ title: t('track_client_notified'), message: t('track_client_notified_msg'), icon: 'map-pin' });
     refresh();
   };
 
@@ -69,17 +71,17 @@ export default function JobTrackingScreen() {
 
   const markDone = () => {
     showAlert({
-      title: 'Mark as Done?',
-      message: 'This cannot be undone. The client will be notified and asked to review the completed job.',
+      title: t('track_done_title'),
+      message: t('track_done_msg'),
       icon: 'check-circle',
       buttons: [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('action_cancel'), style: 'cancel' },
         {
-          text: 'Mark as Done',
+          text: t('track_done_btn'),
           onPress: () => {
             job.status = 'completed';
             refresh();
-            showAlert({ title: 'Job marked complete', message: 'The client has been notified and can now leave a review.', icon: 'check-circle' });
+            showAlert({ title: t('track_marked'), message: t('track_marked_msg'), icon: 'check-circle' });
           },
         },
       ],
@@ -92,7 +94,7 @@ export default function JobTrackingScreen() {
     const hours = parseFloat(extraHours);
     const price = parseFloat(newPrice);
     if (!hours || !price) {
-      showAlert({ title: 'Invalid values', message: 'Enter valid extra hours and a new price.', icon: 'alert-circle' });
+      showAlert({ title: t('track_invalid_title'), message: t('track_invalid_msg'), icon: 'alert-circle' });
       return;
     }
     job.revisionRequest = {
@@ -103,7 +105,7 @@ export default function JobTrackingScreen() {
     };
     setShowRevision(false);
     refresh();
-    showAlert({ title: 'Revision proposed', message: 'Waiting for the other party to respond.', icon: 'clock' });
+    showAlert({ title: t('track_rev_proposed_title'), message: t('track_rev_proposed_msg'), icon: 'clock' });
   };
 
   const respondToRevision = (approve: boolean) => {
@@ -131,7 +133,7 @@ export default function JobTrackingScreen() {
         router.replace('/(tabs)/jobs' as any);
         return;
       }
-      showAlert({ title: 'Job cancelled', message: 'The client has been notified and the job has reopened for bidding.', icon: 'info' });
+      showAlert({ title: t('track_cancelled_title'), message: t('track_cancelled_msg'), icon: 'info' });
       router.back();
     } else {
       job.cancellation = { by: 'client', reason, feeCharged: CANCELLATION_FEE };
@@ -141,8 +143,8 @@ export default function JobTrackingScreen() {
         // there's no live wallet ledger yet; tracked on the job for the payout screens.
       }
       showAlert({
-        title: 'Job Cancelled',
-        message: `A €${CANCELLATION_FEE.toFixed(2)} cancellation fee has been charged and credited to your Pilot.`,
+        title: t('track_cancelled_client'),
+        message: t('track_cancelled_client_msg', { fee: CANCELLATION_FEE.toFixed(2) }),
         icon: 'info',
       });
       router.back();
@@ -151,14 +153,14 @@ export default function JobTrackingScreen() {
 
   const confirmCancel = () => {
     showAlert({
-      title: 'Cancel this job?',
+      title: t('track_confirm_title'),
       message: isProvider
-        ? 'Cancelling will affect your credibility and rating.'
-        : `A €${CANCELLATION_FEE.toFixed(2)} cancellation fee applies.`,
+        ? t('track_confirm_provider')
+        : t('track_confirm_client', { fee: CANCELLATION_FEE.toFixed(2) }),
       icon: 'alert-triangle',
       buttons: [
-        { text: 'Keep Job', style: 'cancel' },
-        { text: 'Choose Reason', onPress: () => setShowCancelReasons(true) },
+        { text: t('job_keep'), style: 'cancel' },
+        { text: t('track_choose_reason'), onPress: () => setShowCancelReasons(true) },
       ],
     });
   };
@@ -185,7 +187,7 @@ export default function JobTrackingScreen() {
                 {i < currentStepIndex && <Feather name="check" size={12} color="#FFF" />}
               </View>
               <Text style={[styles.stepLabel, { color: i <= currentStepIndex ? c.primary : c.mutedForeground }]}>
-                {step.label}
+                {t(step.labelKey as any)}
               </Text>
               {i < STEPS.length - 1 && (
                 <View style={[styles.stepLine, { backgroundColor: i < currentStepIndex ? c.primary : c.border }]} />
@@ -201,7 +203,7 @@ export default function JobTrackingScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: c.text }]}>{provider.name}</Text>
-              <Text style={[styles.providerSub, { color: c.mutedForeground }]}>SkillBuddy Pilot</Text>
+              <Text style={[styles.providerSub, { color: c.mutedForeground }]}>{t('track_pilot')}</Text>
             </View>
             <TouchableOpacity style={[styles.iconAction, { backgroundColor: c.muted }]} onPress={() => router.push(`/chat/${provider.id}` as any)}>
               <Feather name="message-circle" size={16} color={c.text} />
@@ -212,17 +214,17 @@ export default function JobTrackingScreen() {
         {/* Revision request status */}
         {job.revisionRequest && job.revisionRequest.status === 'pending' && (
           <View style={[styles.revisionCard, { backgroundColor: c.primaryLight }]}>
-            <Text style={[styles.revisionTitle, { color: c.primary }]}>Revision Proposed</Text>
+            <Text style={[styles.revisionTitle, { color: c.primary }]}>{t('track_revision_proposed')}</Text>
             <Text style={[styles.revisionText, { color: c.primary }]}>
-              +{job.revisionRequest.extraHours} hrs, new price €{job.revisionRequest.newPrice}
+              {t('track_revision_text', { n: job.revisionRequest.extraHours, p: job.revisionRequest.newPrice })}
             </Text>
             {job.revisionRequest.proposedBy !== (isProvider ? 'provider' : 'client') && (
               <View style={styles.revisionActions}>
                 <TouchableOpacity style={[styles.smallBtn, { backgroundColor: c.primary }]} onPress={() => respondToRevision(true)}>
-                  <Text style={styles.smallBtnText}>Approve</Text>
+                  <Text style={styles.smallBtnText}>{t('track_approve')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.smallBtn, { backgroundColor: c.muted }]} onPress={() => respondToRevision(false)}>
-                  <Text style={[styles.smallBtnText, { color: c.text }]}>Deny</Text>
+                  <Text style={[styles.smallBtnText, { color: c.text }]}>{t('track_deny')}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -232,13 +234,13 @@ export default function JobTrackingScreen() {
         {/* Provider-side payout breakdown */}
         {isProvider && payout && (
           <View style={[styles.payoutCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Payout Breakdown</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('track_payout')}</Text>
             {[
-              ['Bidding Price', `€${payout.bidPrice.toFixed(2)}`],
-              ['Before VAT', `€${payout.beforeVat.toFixed(2)}`],
-              ['VAT (24%)', `€${payout.vat.toFixed(2)}`],
-              ['Platform Fee', `-€${payout.platformFee.toFixed(2)}`],
-              ['SkillBuddy Commission (5%)', `-€${payout.commission.toFixed(2)}`],
+              [t('pay_bidding_price'), `€${payout.bidPrice.toFixed(2)}`],
+              [t('pay_before_vat'), `€${payout.beforeVat.toFixed(2)}`],
+              [t('pay_vat'), `€${payout.vat.toFixed(2)}`],
+              [t('pay_platform_fee'), `-€${payout.platformFee.toFixed(2)}`],
+              [t('track_commission'), `-€${payout.commission.toFixed(2)}`],
             ].map(([label, value]) => (
               <View key={label} style={styles.summaryRow}>
                 <Text style={[styles.summaryLabel, { color: c.mutedForeground }]}>{label}</Text>
@@ -246,7 +248,7 @@ export default function JobTrackingScreen() {
               </View>
             ))}
             <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: c.border }]}>
-              <Text style={[styles.totalLabel, { color: c.text }]}>Payout</Text>
+              <Text style={[styles.totalLabel, { color: c.text }]}>{t('track_payout_total')}</Text>
               <Text style={[styles.totalValue, { color: c.primary }]}>€{payout.payout.toFixed(2)}</Text>
             </View>
           </View>
@@ -257,25 +259,25 @@ export default function JobTrackingScreen() {
           {isProvider && job.status === 'task_assigned' && (
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={markArrived}>
               <Feather name="map-pin" size={16} color="#FFF" />
-              <Text style={styles.actionText}>I've Arrived</Text>
+              <Text style={styles.actionText}>{t('track_arrived_btn')}</Text>
             </TouchableOpacity>
           )}
           {isProvider && job.status === 'arrived' && (
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={startJob}>
               <Feather name="play" size={16} color="#FFF" />
-              <Text style={styles.actionText}>Start Job</Text>
+              <Text style={styles.actionText}>{t('track_start')}</Text>
             </TouchableOpacity>
           )}
           {isProvider && job.status === 'in_progress' && (
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={markDone}>
               <Feather name="check-circle" size={16} color="#FFF" />
-              <Text style={styles.actionText}>Mark as Done</Text>
+              <Text style={styles.actionText}>{t('track_done')}</Text>
             </TouchableOpacity>
           )}
           {!isProvider && job.status === 'completed' && (
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={goToReview}>
               <Feather name="star" size={16} color="#FFF" />
-              <Text style={styles.actionText}>Leave a Review</Text>
+              <Text style={styles.actionText}>{t('track_review')}</Text>
             </TouchableOpacity>
           )}
           {['completed', 'approved', 'closed'].includes(job.status) && (
@@ -284,19 +286,19 @@ export default function JobTrackingScreen() {
               onPress={() => router.push({ pathname: '/profile/raise-ticket', params: { jobId: job.id } } as any)}
             >
               <Feather name="help-circle" size={16} color={c.text} />
-              <Text style={[styles.actionOutlineText, { color: c.text }]}>Get Help</Text>
+              <Text style={[styles.actionOutlineText, { color: c.text }]}>{t('track_help')}</Text>
             </TouchableOpacity>
           )}
           {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (
             <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: c.border }]} onPress={() => setShowRevision(true)}>
               <Feather name="edit-3" size={16} color={c.text} />
-              <Text style={[styles.actionOutlineText, { color: c.text }]}>Propose Revision</Text>
+              <Text style={[styles.actionOutlineText, { color: c.text }]}>{t('track_revision_btn')}</Text>
             </TouchableOpacity>
           )}
           {['task_assigned', 'arrived', 'in_progress'].includes(job.status) && (
             <TouchableOpacity style={[styles.actionBtnOutline, { borderColor: c.destructive }]} onPress={confirmCancel}>
               <Feather name="x-circle" size={16} color={c.destructive} />
-              <Text style={[styles.actionOutlineText, { color: c.destructive }]}>Cancel Job</Text>
+              <Text style={[styles.actionOutlineText, { color: c.destructive }]}>{t('track_cancel')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -304,10 +306,10 @@ export default function JobTrackingScreen() {
         {/* Cancel reason picker */}
         {showCancelReasons && (
           <View style={[styles.reasonCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Select a reason</Text>
-            {CANCEL_REASONS.map((r) => (
-              <TouchableOpacity key={r} style={[styles.reasonRow, { borderBottomColor: c.border }]} onPress={() => cancelJob(r)}>
-                <Text style={[styles.reasonText, { color: c.text }]}>{r}</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('track_select_reason')}</Text>
+            {CANCEL_REASON_KEYS.map((key) => (
+              <TouchableOpacity key={key} style={[styles.reasonRow, { borderBottomColor: c.border }]} onPress={() => cancelJob(t(key as any))}>
+                <Text style={[styles.reasonText, { color: c.text }]}>{t(key as any)}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -316,15 +318,15 @@ export default function JobTrackingScreen() {
         {/* Revision proposal form */}
         {showRevision && (
           <View style={[styles.reasonCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Propose Revision</Text>
-            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>Extra Hours</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('track_revision_title')}</Text>
+            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>{t('track_extra_hours')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: c.muted, color: c.text }]}
               value={extraHours}
               onChangeText={setExtraHours}
               keyboardType="numeric"
             />
-            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>New Total Price (€)</Text>
+            <Text style={[styles.fieldLabel, { color: c.mutedForeground }]}>{t('track_new_price')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: c.muted, color: c.text }]}
               value={newPrice}
@@ -334,7 +336,7 @@ export default function JobTrackingScreen() {
               placeholderTextColor={c.mutedForeground}
             />
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary, marginTop: 12 }]} onPress={proposeRevision}>
-              <Text style={styles.actionText}>Send Proposal</Text>
+              <Text style={styles.actionText}>{t('track_send')}</Text>
             </TouchableOpacity>
           </View>
         )}

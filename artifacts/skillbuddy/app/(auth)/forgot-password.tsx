@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import colors from '@/constants/colors';
+import { useLanguage } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 
 const c = colors.light;
@@ -11,18 +12,19 @@ const c = colors.light;
 export default function ForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
   const handleSend = async () => {
-    if (!email.trim()) { Alert.alert('Error', 'Please enter your email address.'); return; }
+    if (!email.trim()) { Alert.alert(t('fp_err_title'), t('fp_err_email')); return; }
     setLoading(true);
     try {
       await authApi.forgotPassword(email.trim());
       setSent(true);
     } catch {
-      Alert.alert('Error', 'Could not send reset email. Please try again.');
+      Alert.alert(t('fp_err_title'), t('fp_err_send'));
     } finally {
       setLoading(false);
     }
@@ -38,10 +40,10 @@ export default function ForgotPasswordScreen() {
           <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
             <Feather name="check-circle" size={48} color={c.primary} />
           </View>
-          <Text style={styles.title}>Check Your Email</Text>
-          <Text style={styles.subtitle}>We've sent a password reset link to{'\n'}{email}</Text>
+          <Text style={styles.title}>{t('fp_check_email')}</Text>
+          <Text style={styles.subtitle}>{t('fp_sent', { email })}</Text>
           <TouchableOpacity style={[styles.btn, { backgroundColor: c.primary }]} onPress={() => router.replace('/(auth)/login')}>
-            <Text style={styles.btnText}>Back to Login</Text>
+            <Text style={styles.btnText}>{t('fp_back_login')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -49,9 +51,9 @@ export default function ForgotPasswordScreen() {
           <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
             <Feather name="lock" size={40} color={c.primary} />
           </View>
-          <Text style={styles.title}>Forgot Password?</Text>
-          <Text style={styles.subtitle}>Don't worry! Enter your email address and we'll send you a link to reset your password.</Text>
-          <Text style={styles.label}>Email Address</Text>
+          <Text style={styles.title}>{t('fp_title')}</Text>
+          <Text style={styles.subtitle}>{t('fp_subtitle')}</Text>
+          <Text style={styles.label}>{t('fp_email_label')}</Text>
           <View style={styles.inputRow}>
             <Feather name="mail" size={18} color={c.mutedForeground} style={{ marginRight: 10 }} />
             <TextInput
@@ -65,7 +67,7 @@ export default function ForgotPasswordScreen() {
             />
           </View>
           <TouchableOpacity style={[styles.btn, { backgroundColor: loading ? c.primaryDark : c.primary }]} onPress={handleSend} disabled={loading}>
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Send Reset Link</Text>}
+            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>{t('fp_send')}</Text>}
           </TouchableOpacity>
         </View>
       )}

@@ -3,29 +3,31 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CURRENT_USER, CREDIT_HISTORY } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 
 export default function CreditPointsScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>Credit Points</Text>
+        <Text style={[styles.headerTitle, { color: c.text }]}>{t('credit_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <View style={[styles.balanceCard, { backgroundColor: c.primary }]}>
         <Feather name="star" size={28} color="#FFF" />
         <Text style={styles.balanceValue}>{CURRENT_USER.creditPoints}</Text>
-        <Text style={styles.balanceLabel}>Current Balance</Text>
-        <Text style={styles.balanceSub}>Earn 1 pt per €1 spent</Text>
+        <Text style={styles.balanceLabel}>{t('credit_balance')}</Text>
+        <Text style={styles.balanceSub}>{t('credit_earn_note')}</Text>
       </View>
 
-      <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>Redemption History</Text>
+      <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('credit_history')}</Text>
 
       <FlatList
         data={CREDIT_HISTORY}
@@ -44,7 +46,7 @@ export default function CreditPointsScreen() {
               <Text style={[styles.txChange, { color: item.change > 0 ? c.success : c.urgent }]}>
                 {item.change > 0 ? '+' : ''}{item.change}
               </Text>
-              <Text style={[styles.txBalance, { color: c.mutedForeground }]}>Bal: {item.balanceAfter}</Text>
+              <Text style={[styles.txBalance, { color: c.mutedForeground }]}>{t('credit_bal', { n: item.balanceAfter })}</Text>
             </View>
           </View>
         )}

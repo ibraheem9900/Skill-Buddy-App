@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import type { Bid } from '@/types';
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 
 export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: Props) {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const { provider } = bid;
 
   return (
@@ -21,7 +23,7 @@ export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: 
       {rank && (
         <View style={[styles.rankBadge, { backgroundColor: c.primary }]}>
           <MaterialCommunityIcons name="star" size={11} color="#FFF" />
-          <Text style={styles.rankText}>#{rank} Recommended · {bid.score}/100</Text>
+          <Text style={styles.rankText}>{t('bidcard_rank', { rank, score: bid.score })}</Text>
         </View>
       )}
 
@@ -36,27 +38,27 @@ export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: 
             <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.rating?.toFixed(1)}</Text>
             <View style={[styles.badgeDot, { backgroundColor: c.mutedForeground }]} />
             <MaterialCommunityIcons name="shield-check-outline" size={13} color={c.mutedForeground} />
-            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.badge} badge</Text>
+            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{t('bidcard_badge', { n: provider.badge ?? 0 })}</Text>
             <View style={[styles.badgeDot, { backgroundColor: c.mutedForeground }]} />
-            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{provider.distanceKm}km away</Text>
+            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{t('bidcard_distance', { n: provider.distanceKm })}</Text>
           </View>
         </View>
         <View style={styles.priceWrap}>
           <Text style={[styles.price, { color: c.primary }]}>€{bid.price}</Text>
-          <Text style={[styles.eta, { color: c.mutedForeground }]}>ETA {bid.eta}</Text>
+          <Text style={[styles.eta, { color: c.mutedForeground }]}>{t('bidcard_eta', { eta: bid.eta })}</Text>
         </View>
       </View>
 
       <View style={styles.actionsRow}>
         <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border }]} onPress={onViewProfile}>
-          <Text style={[styles.actionText, { color: c.text }]}>View Profile</Text>
+          <Text style={[styles.actionText, { color: c.text }]}>{t('bidcard_view_profile')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border }]} onPress={onChat}>
           <Feather name="message-circle" size={14} color={c.text} />
-          <Text style={[styles.actionText, { color: c.text }]}>Chat</Text>
+          <Text style={[styles.actionText, { color: c.text }]}>{t('bidcard_chat')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: c.primary }]} onPress={onAccept}>
-          <Text style={styles.acceptText}>Accept Bid</Text>
+          <Text style={styles.acceptText}>{t('bidcard_accept')}</Text>
         </TouchableOpacity>
       </View>
     </View>

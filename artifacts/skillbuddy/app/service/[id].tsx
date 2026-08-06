@@ -21,6 +21,7 @@ import Animated, {
   Extrapolation,
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
 import { getServiceById } from '@/lib/serviceLookup';
 import RatingStars from '@/components/RatingStars';
@@ -29,7 +30,7 @@ import { useBookmarks } from '@/context/BookmarkContext';
 
 const W = Dimensions.get('window').width;
 
-const TABS = ['About', 'Gallery', 'Reviews'] as const;
+const TABS = ['service_tab_about', 'service_tab_gallery', 'service_tab_reviews'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ServiceDetailScreen() {
@@ -38,11 +39,12 @@ export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const { colors: c } = useTheme();
+  const { t, tCat } = useLanguage();
 
   const service = (id ? getServiceById(id) : undefined) ?? SERVICES[0];
   const reviews = MOCK_REVIEWS.slice(0, 4);
 
-  const [activeTab, setActiveTab] = useState<Tab>('About');
+  const [activeTab, setActiveTab] = useState<Tab>('service_tab_about');
   const [selectedImage, setSelectedImage] = useState(0);
   const [screenLoading, setScreenLoading] = useState(true);
 
@@ -152,11 +154,11 @@ export default function ServiceDetailScreen() {
         <View style={styles.titleRow}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.title, { color: c.text }]}>{service.title}</Text>
-            <Text style={[styles.categoryLabel, { color: c.mutedForeground }]}>{service.category}</Text>
+            <Text style={[styles.categoryLabel, { color: c.mutedForeground }]}>{tCat(service.categoryId)}</Text>
           </View>
           <View style={styles.priceBox}>
             <Text style={[styles.price, { color: c.primary }]}>${service.price}</Text>
-            <Text style={[styles.priceUnit, { color: c.mutedForeground }]}>/ hr</Text>
+            <Text style={[styles.priceUnit, { color: c.mutedForeground }]}>{t('service_per_hour')}</Text>
           </View>
         </View>
 
@@ -182,9 +184,9 @@ export default function ServiceDetailScreen() {
         {/* Stats row */}
         <View style={[styles.statsRow, { backgroundColor: c.muted }]}>
           {[
-            { label: 'Jobs Done', value: `${service.provider.jobsDone}+` },
-            { label: 'Satisfaction', value: `${service.provider.credibility}%` },
-            { label: 'Rating', value: `${service.rating}★` },
+            { label: t('service_stat_jobs_done'), value: `${service.provider.jobsDone}+` },
+            { label: t('service_stat_satisfaction'), value: `${service.provider.credibility}%` },
+            { label: t('service_stat_rating'), value: `${service.rating}★` },
           ].map((stat) => (
             <View key={stat.label} style={styles.statItem}>
               <Text style={[styles.statValue, { color: c.text }]}>{stat.value}</Text>
@@ -205,25 +207,33 @@ export default function ServiceDetailScreen() {
               onPress={() => setActiveTab(tab)}
             >
               <Text style={[styles.tabText, { color: activeTab === tab ? c.primary : c.mutedForeground }]}>
-                {tab}
+                {t(tab)}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {/* About tab */}
-        {activeTab === 'About' && (
+        {activeTab === 'service_tab_about' && (
           <Animated.View entering={FadeIn} style={{ paddingHorizontal: 20, paddingTop: 16 }}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Description</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('service_description')}</Text>
             <Text style={[styles.body2, { color: c.mutedForeground }]}>
               {service.description ??
-                `${service.provider.name} is a highly skilled professional with years of experience in ${service.category}. They provide top-quality ${service.title.toLowerCase()} services tailored to your needs. Available for projects across Estonia, Latvia, and Lithuania.`}
+                t('service_default_desc', {
+                  provider: service.provider.name,
+                  category: tCat(service.categoryId),
+                  service: service.title.toLowerCase(),
+                })}
             </Text>
             <Text style={[styles.sectionTitle, { color: c.text, marginTop: 20 }]}>
-              What&apos;s Included
+              {t('service_whats_included')}
             </Text>
-            {['Free consultation', 'Initial assessment', 'Full service delivery', 'Post-service support'].map(
-              (item) => (
+            {[
+              t('service_include_1'),
+              t('service_include_2'),
+              t('service_include_3'),
+              t('service_include_4'),
+            ].map((item) => (
                 <View key={item} style={styles.includeRow}>
                   <Feather name="check-circle" size={16} color={c.primary} />
                   <Text style={[styles.includeText, { color: c.text }]}>{item}</Text>
@@ -234,7 +244,7 @@ export default function ServiceDetailScreen() {
         )}
 
         {/* Gallery tab */}
-        {activeTab === 'Gallery' && (
+        {activeTab === 'service_tab_gallery' && (
           <Animated.View entering={FadeIn} style={{ paddingHorizontal: 16, paddingTop: 16 }}>
             <View style={styles.galleryGrid}>
               {images.map((img, i) => (
@@ -247,7 +257,7 @@ export default function ServiceDetailScreen() {
         )}
 
         {/* Reviews tab */}
-        {activeTab === 'Reviews' && (
+        {activeTab === 'service_tab_reviews' && (
           <Animated.View entering={FadeIn} style={{ paddingTop: 16 }}>
             {reviews.map((review) => (
               <View key={review.id} style={[styles.reviewCard, { backgroundColor: c.muted }]}>
@@ -279,7 +289,7 @@ export default function ServiceDetailScreen() {
           style={[styles.bookBtn, { backgroundColor: c.primary }]}
           onPress={() => router.push(`/booking/${service.id}` as any)}
         >
-          <Text style={styles.bookBtnText}>Book Now</Text>
+          <Text style={styles.bookBtnText}>{t('book_now')}</Text>
         </TouchableOpacity>
       </View>
     </View>
