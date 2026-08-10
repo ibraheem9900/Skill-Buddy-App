@@ -39,6 +39,9 @@ const colors = {
     success: palette.success,
     successLight: palette.successLight,
     warning: palette.warning,
+    // Hero/summary card (balance, credit points): solid brand green in light,
+    // plain dark charcoal in dark so green stays an accent only.
+    heroCard: palette.primary,
     shadow: 'rgba(0, 0, 0, 0.08)',
     shadowMd: 'rgba(0, 0, 0, 0.12)',
     overlay: 'rgba(0, 0, 0, 0.5)',
@@ -81,6 +84,8 @@ const colors = {
     success: '#2FBF71',
     successLight: 'rgba(47, 191, 113, 0.14)',
     warning: palette.warning,
+    // Hero/summary card in dark mode — charcoal, NOT green (green = accent only)
+    heroCard: '#151A1A',
     shadow: 'rgba(0, 0, 0, 0.5)',
     shadowMd: 'rgba(0, 0, 0, 0.6)',
     overlay: 'rgba(0, 0, 0, 0.75)',

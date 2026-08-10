@@ -61,7 +61,7 @@ export default function BookingScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: c.primary }]}>
+      <View style={[styles.header, { backgroundColor: c.headerBg }]}>
         <BackButton />
         <View style={styles.headerMid}>
           <Text style={styles.headerTitle}>{t('booking_select_service')}</Text>

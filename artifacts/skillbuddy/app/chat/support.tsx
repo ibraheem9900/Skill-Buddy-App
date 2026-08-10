@@ -61,7 +61,7 @@ export default function SupportChatScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-      <View style={[styles.header, { backgroundColor: c.primary }]}>
+      <View style={[styles.header, { backgroundColor: c.headerBg }]}>
         <BackButton />
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>{t('support_title')}</Text>

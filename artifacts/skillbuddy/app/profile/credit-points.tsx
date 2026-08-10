@@ -20,7 +20,7 @@ export default function CreditPointsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <View style={[styles.balanceCard, { backgroundColor: c.primary }]}>
+      <View style={[styles.balanceCard, { backgroundColor: c.heroCard }]}>
         <Feather name="star" size={28} color="#FFF" />
         <Text style={styles.balanceValue}>{CURRENT_USER.creditPoints}</Text>
         <Text style={styles.balanceLabel}>{t('credit_balance')}</Text>

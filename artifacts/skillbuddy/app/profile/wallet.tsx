@@ -24,7 +24,7 @@ export default function WalletScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={[styles.summaryCard, { backgroundColor: c.primary }]}>
+        <View style={[styles.summaryCard, { backgroundColor: c.heroCard }]}>
           <Text style={styles.summaryLabel}>{isProvider ? t('wallet_total_earned') : t('wallet_total_spent')}</Text>
           <Text style={styles.summaryValue}>€{isProvider ? '2,140' : '860'}</Text>
           <View style={styles.summaryRow}>

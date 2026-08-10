@@ -28,7 +28,7 @@ export default function CategoryDetailScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: c.primary }]}>
+      <View style={[styles.header, { backgroundColor: c.headerBg }]}>
         <BackButton />
         <Text style={styles.headerTitle}>{tCat(category.id)}</Text>
         <View style={{ width: 40 }} />

@@ -101,9 +101,9 @@ export default function ChatThreadScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: c.primary }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: c.headerBg }]}>
         <View style={styles.headerLeft}>
           <BackButton color="#FFF" style={{ backgroundColor: 'rgba(255,255,255,0.25)', shadowOpacity: 0 }} />
           <View style={[styles.headerAvatar, { backgroundColor: '#FFF' }]}>
@@ -134,7 +134,7 @@ export default function ChatThreadScreen() {
       >
         {/* Date separator */}
         <View style={styles.dateSep}>
-          <Text style={styles.dateText}>{t('chat_today')}</Text>
+          <Text style={[styles.dateText, { color: c.mutedForeground, backgroundColor: c.muted }]}>{t('chat_today')}</Text>
         </View>
 
         <FlatList
@@ -175,7 +175,7 @@ export default function ChatThreadScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F8F8F8' },
+  root: { flex: 1 },
   flex: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 14 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -186,15 +186,13 @@ const styles = StyleSheet.create({
   headerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
   headerStatus: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.8)' },
   dateSep: { alignItems: 'center', marginVertical: 8 },
-  dateText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: '#9E9E9E', backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  dateText: { fontFamily: 'Manrope_500Medium', fontSize: 12, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowMe: { flexDirection: 'row-reverse' },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   avatarText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   msgContent: { maxWidth: '70%', gap: 4 },
   bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleOther: { backgroundColor: '#FFF', borderBottomLeftRadius: 4 },
-  bubbleMe: { backgroundColor: '#20735A', borderBottomRightRadius: 4 },
   msgText: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#1A1A1A', lineHeight: 20 },
   msgTextMe: { color: '#FFF' },
   msgImage: { width: 200, height: 150, borderRadius: 12 },

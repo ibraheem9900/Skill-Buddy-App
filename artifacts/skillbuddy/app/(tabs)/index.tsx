@@ -127,9 +127,11 @@ export default function HomeScreen() {
             <View style={styles.headerGlowOrb} />
           </View>
         )}
-        {/* Logo + notification row */}
+        {/* Logo + notification row — small brand mark (height 30 → ~72px wide).
+            Loaders use their own sizes (BrandedLoader 46-48, InlineLoader 18),
+            kept separate from this static header mark. */}
         <View style={styles.logoRow}>
-          <LogoImage variant="white" height={54} />
+          <LogoImage variant="white" height={30} />
           <TouchableOpacity
             style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
             onPress={() => router.push('/notifications')}

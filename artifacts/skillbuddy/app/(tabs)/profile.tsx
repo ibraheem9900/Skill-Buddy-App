@@ -161,9 +161,9 @@ export default function ProfileScreen() {
     >
       {/* Profile Header */}
       <View style={[styles.profileHeader, { backgroundColor: c.headerBg, paddingTop: insets.top + 12 }]}>
-        {/* Logo mark + theme toggle row — real brand asset, consistent size with Home header */}
+        {/* Logo mark + theme toggle row — real brand asset, consistent small size with Home header */}
         <View style={styles.headerTopRow}>
-          <LogoImage variant="white" height={52} />
+          <LogoImage variant="white" height={30} />
           <View ref={toggleBtnRef} collapsable={false}>
             <TouchableOpacity
               style={styles.themeToggleBtn}
