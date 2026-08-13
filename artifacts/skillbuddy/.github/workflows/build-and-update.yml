@@ -1,0 +1,95 @@
+name: Build APK + Push OTA Update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: android-build
+  cancel-in-progress: false
+
+jobs:
+  # Fast path: push JS changes to already-installed apps (no reinstall needed).
+  # Requires the EXPO_TOKEN repository secret (https://expo.dev/settings/access-tokens).
+  ota-update:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.EXPO_TOKEN != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: artifacts/skillbuddy
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Push OTA update (installed apps update automatically)
+        run: eas update --channel preview --message "OTA update from ${{ github.sha }}"
+        working-directory: artifacts/skillbuddy
+
+  # Slow path: rebuild the APK so the GitHub Release install link always has
+  # the latest code, and refresh the release asset.
+  apk-build:
+    runs-on: ubuntu-latest
+    if: secrets.EXPO_TOKEN != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: artifacts/skillbuddy
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK (preview profile)
+        run: eas build --platform android --profile preview --non-interactive
+        working-directory: artifacts/skillbuddy
+
+      - name: Download built APK
+        run: |
+          BUILD_ID=$(eas build:list --platform android --limit 1 --json --non-interactive | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d)[0].id))")
+          APK_URL=$(eas build:view $BUILD_ID --json --non-interactive | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).artifacts.buildUrl))")
+          curl -sL "$APK_URL" -o SkillBuddy.apk
+        working-directory: artifacts/skillbuddy
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Upload APK to GitHub Release
+        run: |
+          gh release upload v1.0.0-android SkillBuddy.apk --clobber \
+            || gh release create v1.0.0-android SkillBuddy.apk --title "SkillBuddy Android v1.0.0" \
+               --notes "Client install build. Install on Android: download the APK, open it, allow \"Install unknown apps\", then Install."
+        working-directory: artifacts/skillbuddy
+        env:
+          GH_TOKEN: ${{ github.token }}
