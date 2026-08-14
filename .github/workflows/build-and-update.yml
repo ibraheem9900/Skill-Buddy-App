@@ -96,9 +96,13 @@ jobs:
 
       - name: Download built APK
         run: |
-          BUILD_ID=$(eas build:list --platform android --limit 1 --json --non-interactive | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d)[0].id))")
-          APK_URL=$(eas build:view $BUILD_ID --json --non-interactive | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).artifacts.buildUrl))")
-          curl -sL "$APK_URL" -o SkillBuddy.apk
+          set -euo pipefail
+          # Note: eas build:view has no --non-interactive flag.
+          BUILD_ID=$(eas build:list --platform android --limit 10 --json --non-interactive | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const a=JSON.parse(d);const sha=process.env.GITHUB_SHA;const b=(a||[]).find(x=>x.status==='FINISHED'&&x.gitCommit&&x.gitCommit.commit===sha)||(a||[]).find(x=>x.status==='FINISHED');if(!b)throw new Error('no finished android build found');console.log(b.id)})")
+          echo "Using build $BUILD_ID"
+          APK_URL=$(eas build:view "$BUILD_ID" --json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const b=JSON.parse(d);const u=b.artifacts&&b.artifacts.buildUrl;if(!u)throw new Error('no buildUrl in build:view output');console.log(u)})")
+          curl -fsSL "$APK_URL" -o SkillBuddy.apk
+          ls -la SkillBuddy.apk
         working-directory: artifacts/skillbuddy
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
