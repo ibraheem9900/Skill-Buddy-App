@@ -12,12 +12,21 @@ concurrency:
 jobs:
   # Fast path: push JS changes to already-installed apps (no reinstall needed).
   # Requires the EXPO_TOKEN repository secret (https://expo.dev/settings/access-tokens).
+  # Note: the secrets context is NOT allowed in jobs.<job_id>.if, so we read it
+  # through job-level env and guard with a step instead.
   ota-update:
     runs-on: ubuntu-latest
-    if: ${{ secrets.EXPO_TOKEN != '' }}
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check EXPO_TOKEN secret is set
+        if: env.EXPO_TOKEN == ''
+        run: |
+          echo "::error::EXPO_TOKEN secret is missing. Add it at repo Settings → Secrets and variables → Actions, then re-run this workflow."
+          exit 1
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -47,10 +56,17 @@ jobs:
   # the latest code, and refresh the release asset.
   apk-build:
     runs-on: ubuntu-latest
-    if: secrets.EXPO_TOKEN != ''
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check EXPO_TOKEN secret is set
+        if: env.EXPO_TOKEN == ''
+        run: |
+          echo "::error::EXPO_TOKEN secret is missing. Add it at repo Settings → Secrets and variables → Actions, then re-run this workflow."
+          exit 1
 
       - name: Setup Node
         uses: actions/setup-node@v4
