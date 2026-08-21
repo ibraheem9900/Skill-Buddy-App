@@ -13,7 +13,7 @@ import {
 } from '@expo-google-fonts/manrope';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { AuthProvider } from '@/context/AuthContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { BookmarkProvider } from '@/context/BookmarkContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { RoleProvider } from '@/context/RoleContext';
@@ -25,16 +25,32 @@ import { LanguageProvider, useLanguage } from '@/context/LanguageContext';
 SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
-// Auth gate: if user somehow lands on an auth screen, push them back to tabs.
-// Login/signup are disabled — the app opens directly to the dashboard.
-function AuthGate() {
+// Route gate: directs users to onboarding, auth, or main app.
+// - New users (no onboarding flag) → (auth)/onboarding
+// - Authenticated users on any (auth) screen → (tabs)
+// - Unauthenticated users who completed onboarding → (auth)/login
+function RouteGate() {
   const router = useRouter();
   const segments = useSegments();
+  const { isAuthenticated, isLoading, hasSeenOnboarding } = useAuth();
 
   useEffect(() => {
+    if (isLoading) return; // wait for auth state to resolve
+
     const inAuth = segments[0] === '(auth)';
-    if (inAuth) router.replace('/(tabs)');
-  }, [segments]);
+    const inTabs = segments[0] === '(tabs)';
+
+    if (!isAuthenticated && !hasSeenOnboarding && !inAuth) {
+      // Brand new user → show onboarding
+      router.replace('/(auth)/onboarding');
+    } else if (!isAuthenticated && hasSeenOnboarding && inTabs) {
+      // Completed onboarding but not logged in → login
+      router.replace('/(auth)/login');
+    } else if (isAuthenticated && inAuth) {
+      // Already logged in, on an auth screen → go to app
+      router.replace('/(tabs)');
+    }
+  }, [isAuthenticated, isLoading, hasSeenOnboarding, segments]);
 
   return null;
 }
@@ -44,7 +60,7 @@ function RootLayoutNav() {
   const { t } = useLanguage();
   return (
     <>
-      <AuthGate />
+      <RouteGate />
       <Stack
         screenOptions={{
           headerShown: false,

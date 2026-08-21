@@ -16,6 +16,8 @@ interface AuthContextType {
   signup: (data: SignupData) => Promise<void>;
   refreshUser: () => Promise<void>;
   setOnboardingSeen: () => Promise<void>;
+  /** Exchange a social OAuth token (Google/Apple) with our backend. */
+  socialLogin: (provider: 'google' | 'apple', idToken: string) => Promise<void>;
 }
 
 interface SignupData {
@@ -93,6 +95,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await authApi.signup(data);
   }, []);
 
+  const socialLogin = useCallback(async (provider: 'google' | 'apple', idToken: string) => {
+    const { data } = await authApi.socialLogin(provider, idToken);
+    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
+    const ok = await fetchUser();
+    if (!ok) {
+      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      throw new Error('Unable to load user profile after social login.');
+    }
+  }, [fetchUser]);
+
   const refreshUser = useCallback(async () => {
     await fetchUser();
   }, [fetchUser]);
@@ -103,8 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider
-      value={{
+    <AuthContext.Provider        value={{
         user,
         isAuthenticated: !!user,
         isLoading,
@@ -114,6 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signup,
         refreshUser,
         setOnboardingSeen,
+        socialLogin,
       }}
     >
       {children}

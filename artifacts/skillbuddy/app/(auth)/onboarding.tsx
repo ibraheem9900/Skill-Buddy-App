@@ -1,205 +1,145 @@
-import React, { useRef, useState } from 'react';
-import {
-  Dimensions,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  ViewToken,
-} from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Dimensions, Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import colors from '@/constants/colors';
-import { useAuth } from '@/context/AuthContext';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 
-const { width } = Dimensions.get('window');
-const c = colors.light;
+const { width: SCREEN_W } = Dimensions.get('window');
 
-type Lang = { code: string; name: string; flag: string };
-const LANGS: Lang[] = [
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'et', name: 'Estonian', flag: '🇪🇪' },
-  { code: 'lv', name: 'Latvian', flag: '🇱🇻' },
-  { code: 'lt', name: 'Lithuanian', flag: '🇱🇹' },
-];
-
-const SLIDES = [
-  { id: 1, titleKey: 'onb_slide_1_title', subtitleKey: 'onb_slide_1_sub', icon: 'home' as const },
-  { id: 2, titleKey: 'onb_slide_2_title', subtitleKey: 'onb_slide_2_sub', icon: 'map' as const },
-  { id: 3, titleKey: 'onb_slide_3_title', subtitleKey: 'onb_slide_3_sub', icon: 'credit-card' as const },
-];
-
-export default function OnboardingScreen() {
+export default function OnboardingSplash() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { setOnboardingSeen } = useAuth();
-  const { t, setLanguage } = useLanguage();
-  const [step, setStep] = useState<'language' | 'slides'>('language');
-  const [selectedLang, setSelectedLang] = useState('en');
-  const [slideIdx, setSlideIdx] = useState(0);
-  const flatRef = useRef<FlatList>(null);
+  const { colors: c } = useTheme();
+  const { t } = useLanguage();
 
-  const onViewRef = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0) {
-      const idx = viewableItems[0].index ?? 0;
-      setSlideIdx(idx);
-    }
-  });
+  // Logo breathing animation
+  const logoScale = useSharedValue(1);
+  const logoOpacity = useSharedValue(0);
 
-  const finish = async () => {
-    await setOnboardingSeen();
-    router.replace('/(auth)/login');
-  };
+  // Button visibility (appears after ~2.5s)
+  const [showButton, setShowButton] = React.useState(false);
 
-  const nextSlide = () => {
-    if (slideIdx < SLIDES.length - 1) {
-      flatRef.current?.scrollToIndex({ index: slideIdx + 1, animated: true });
-    } else {
-      finish();
-    }
-  };
+  useEffect(() => {
+    // Fade in logo
+    logoOpacity.value = withTiming(1, { duration: 800 });
 
-  const prevSlide = () => {
-    if (slideIdx > 0) {
-      flatRef.current?.scrollToIndex({ index: slideIdx - 1, animated: true });
-    }
-  };
-
-  if (step === 'language') {
-    return (
-      <View style={[styles.screen, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
-        <TouchableOpacity style={styles.skipBtn} onPress={finish}>
-          <Text style={styles.skipText}>{t('onb_skip')}</Text>
-        </TouchableOpacity>
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.langContent}>
-          <Text style={styles.langTitle}>{t('onb_select_language')}</Text>
-          <Text style={styles.langSubtitle}>{t('onb_lang_tip')}</Text>
-          <View style={styles.langList}>
-            {LANGS.map((lang) => (
-              <TouchableOpacity
-                key={lang.code}
-                style={[
-                  styles.langItem,
-                  selectedLang === lang.code && { backgroundColor: c.primaryLight, borderColor: c.primary },
-                ]}
-                onPress={() => { setSelectedLang(lang.code); setLanguage(lang.code as any); }}
-              >
-                <Text style={styles.langFlag}>{lang.flag}</Text>
-                <Text style={[styles.langName, selectedLang === lang.code && { color: c.primary, fontFamily: 'Manrope_600SemiBold' }]}>
-                  {lang.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-        <View style={styles.dotsRow}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={[styles.dot, i === 0 && { backgroundColor: c.primary, width: 20 }]} />
-          ))}
-          <TouchableOpacity
-            style={[styles.arrowBtn, { backgroundColor: c.primary }]}
-            onPress={() => setStep('slides')}
-          >
-            <Feather name="arrow-right" size={20} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
+    // Breathing loop: scale 1 → 1.05 → 1, repeating
+    logoScale.value = withDelay(
+      800,
+      withRepeat(
+        withSequence(
+          withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+        ),
+        -1, // infinite
+        false,
+      ),
     );
-  }
+
+    // Show button after 2.5 seconds
+    const timer = setTimeout(() => setShowButton(true), 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const logoAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: logoScale.value }],
+    opacity: logoOpacity.value,
+  }));
 
   return (
-    <View style={[styles.screen, { paddingBottom: insets.bottom + 20 }]}>
-      <TouchableOpacity style={[styles.skipBtn, { top: insets.top + 12 }]} onPress={finish}>
-        <Text style={styles.skipText}>{t('onb_skip')}</Text>
-      </TouchableOpacity>
-      <FlatList
-        ref={flatRef}
-        data={SLIDES}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(s) => String(s.id)}
-        onViewableItemsChanged={onViewRef.current}
-        viewabilityConfig={{ viewAreaCoveragePercentThreshold: 50 }}
-        renderItem={({ item }) => (
-          <View style={styles.slide}>
-            <View style={[styles.slideIconWrap, { backgroundColor: c.primaryLight }]}>
-              <Feather name={item.icon} size={80} color={c.primary} />
-            </View>
-            <Animated.View entering={FadeIn.duration(400)}>
-              <Text style={styles.slideTitle}>{t(item.titleKey)}</Text>
-              <Text style={styles.slideSubtitle}>{t(item.subtitleKey)}</Text>
-            </Animated.View>
-          </View>
-        )}
-      />
-      <View style={styles.dotsRow}>
-        {slideIdx > 0 ? (
-          <TouchableOpacity style={[styles.arrowBtn, styles.arrowBtnOutline]} onPress={prevSlide}>
-            <Feather name="arrow-left" size={20} color={c.primary} />
-          </TouchableOpacity>
-        ) : <View style={styles.arrowPlaceholder} />}
-        <View style={styles.dots}>
-          {SLIDES.map((_, i) => (
-            <View key={i} style={[styles.dot, i === slideIdx && { backgroundColor: c.primary, width: 20 }]} />
-          ))}
-        </View>
-        <TouchableOpacity style={[styles.arrowBtn, { backgroundColor: c.primary }]} onPress={nextSlide}>
-          <Feather name="arrow-right" size={20} color="#FFF" />
-        </TouchableOpacity>
-      </View>
+    <View style={[styles.container, { backgroundColor: '#0A0D0D' }]}>
+      {/* Logo with breathing animation */}
+      <Animated.View style={[styles.logoWrap, logoAnimStyle]}>
+        <Image
+          source={require('@/assets/images/logo-icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </Animated.View>
+
+      {/* Brand name */}
+      <Animated.Text
+        entering={FadeIn.delay(1200).duration(600)}
+        style={styles.brandName}
+      >
+        SkillBuddy
+      </Animated.Text>
+
+      {/* Get Started button — fades in + slides up */}
+      {showButton && (
+        <Animated.View
+          entering={FadeInUp.delay(100).duration(500)}
+          style={[styles.btnWrap, { bottom: insets.bottom + 40 }]}
+        >
+          <Animated.View
+            entering={FadeInDown.delay(200).duration(400)}
+          >
+            <Text
+              style={styles.btnText}
+              onPress={() => router.replace('/(auth)/about' as any)}
+            >
+              {t('onb_splash_get_started')}
+            </Text>
+          </Animated.View>
+        </Animated.View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#FFF' },
-  skipBtn: { position: 'absolute', top: 60, right: 24, zIndex: 10 },
-  skipText: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.light.primary },
-  langContent: { flex: 1, paddingHorizontal: 24, paddingTop: 40 },
-  langTitle: { fontFamily: 'Manrope_700Bold', fontSize: 28, color: '#1A1A1A', marginBottom: 6 },
-  langSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', marginBottom: 32 },
-  langList: { gap: 14 },
-  langItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#E8E8E8',
-    backgroundColor: '#FAFAFA',
-  },
-  langFlag: { fontSize: 28 },
-  langName: { fontFamily: 'Manrope_500Medium', fontSize: 16, color: '#1A1A1A' },
-  slide: { width, alignItems: 'center', paddingTop: 80, paddingHorizontal: 28 },
-  slideIconWrap: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+  container: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 36,
   },
-  slideTitle: { fontFamily: 'Manrope_700Bold', fontSize: 26, color: '#1A1A1A', textAlign: 'center', lineHeight: 36, marginBottom: 12 },
-  slideSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, color: '#737373', textAlign: 'center', lineHeight: 22 },
-  dotsRow: {
-    flexDirection: 'row',
+  logoWrap: {
+    width: 180,
+    height: 180,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    marginTop: 24,
+    justifyContent: 'center',
+    marginBottom: 24,
   },
-  dots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#DDD' },
-  arrowBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  arrowBtnOutline: { borderWidth: 1.5, borderColor: colors.light.primary, backgroundColor: 'transparent' },
-  arrowPlaceholder: { width: 48 },
+  logo: {
+    width: 160,
+    height: 160,
+  },
+  brandName: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 32,
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  btnWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  btnText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 17,
+    color: '#FFFFFF',
+    backgroundColor: '#2E9E7A',
+    paddingHorizontal: 48,
+    paddingVertical: 16,
+    borderRadius: 30,
+    overflow: 'hidden',
+    textAlign: 'center',
+    minWidth: 200,
+    textAlignVertical: 'center',
+  },
 });

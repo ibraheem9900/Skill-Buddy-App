@@ -110,6 +110,9 @@ export const authApi = {
   updateUser: (data: Record<string, unknown>) => api.patch('/api/v1/users/update-user', data),
   logout: () => api.post('/api/v1/users/logout'),
   forgotPassword: (email: string) => api.post('/api/v1/users/forgot-password', { email }),
+  /** Exchange a social OAuth id_token (Google/Apple) for our JWT pair. */
+  socialLogin: (provider: 'google' | 'apple', idToken: string) =>
+    api.post('/api/v1/users/social-login', { provider, id_token: idToken }),
 };
 
 export default api;
