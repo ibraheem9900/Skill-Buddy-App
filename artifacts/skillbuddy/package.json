@@ -64,6 +64,7 @@
     "expo-crypto": "~15.0.9",
     "expo-secure-store": "~15.0.8",
     "expo-updates": "~29.0.19",
+    "expo-video": "~3.0.16",
     "react-native-maps": "1.20.1"
   }
 }

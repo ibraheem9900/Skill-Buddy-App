@@ -1,24 +1,31 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
   ActivityIndicator,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Feather, Ionicons } from '@expo/vector-icons';
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
+import LogoImage from '@/components/LogoImage';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
 type Mode = 'login' | 'signup';
 
@@ -58,9 +65,9 @@ const googleStyles = StyleSheet.create({
   g: { fontFamily: 'Manrope_700Bold', fontSize: 18, color: '#4285F4' },
 });
 
-// ── Apple logo ──────────────────────────────────────────────────────────────
+// ── Apple logo — real Apple glyph, per Sign in with Apple guidelines ───────
 function AppleLogo({ color }: { color: string }) {
-  return <Feather name="smartphone" size={20} color={color} />;
+  return <Ionicons name="logo-apple" size={22} color={color} />;
 }
 
 export default function LoginScreen() {
@@ -68,7 +75,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const { login, signup } = useAuth();
+  const { login, mockSignIn } = useAuth();
 
   const [mode, setMode] = useState<Mode>('login');
 
@@ -83,6 +90,18 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+
+  // Animated sliding pill behind the Login/Signup tab labels
+  const tabRowWidth = useSharedValue(0);
+  const tabPillX = useSharedValue(0);
+  const onTabRowLayout = (e: LayoutChangeEvent) => {
+    tabRowWidth.value = e.nativeEvent.layout.width;
+  };
+  const tabPillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tabPillX.value }],
+    width: tabRowWidth.value ? tabRowWidth.value / 2 - 4 : 0,
+  }));
 
   // Live validation on blur
   const validateField = useCallback((field: string, value: string) => {
@@ -121,37 +140,33 @@ export default function LoginScreen() {
   };
 
   const handleSignup = async () => {
-    const emailErr = validateEmail(email);
-    const pwErr = validatePassword(password);
-    const confirmErr = confirmPassword !== password ? 'onb_err_confirm_password' : undefined;
-    const nameErr = !firstName.trim() ? 'onb_err_name_required' : undefined;
-    const termsErr = !agreed ? 'onb_err_terms_required' : undefined;
-
-    setErrors({
-      email: emailErr,
-      password: pwErr,
-      confirmPassword: confirmErr,
-      firstName: nameErr,
-      terms: termsErr,
-    });
-    setTouched({ email: true, password: true, confirmPassword: true, firstName: true, terms: true });
-
-    if (emailErr || pwErr || confirmErr || nameErr || termsErr) return;
+    // TEMPORARY: validation intentionally disabled for now — whatever the
+    // user types gets used as-is and they're signed straight into the app.
+    // To re-enable real validation + the real backend signup flow later,
+    // swap this block back to the commented-out version below and use
+    // `signup` (from useAuth) instead of `mockSignIn`.
+    //
+    // const emailErr = validateEmail(email);
+    // const pwErr = validatePassword(password);
+    // const confirmErr = confirmPassword !== password ? 'onb_err_confirm_password' : undefined;
+    // const nameErr = !firstName.trim() ? 'onb_err_name_required' : undefined;
+    // const termsErr = !agreed ? 'onb_err_terms_required' : undefined;
+    // setErrors({ email: emailErr, password: pwErr, confirmPassword: confirmErr, firstName: nameErr, terms: termsErr });
+    // setTouched({ email: true, password: true, confirmPassword: true, firstName: true, terms: true });
+    // if (emailErr || pwErr || confirmErr || nameErr || termsErr) return;
+    // await signup({ email: email.trim(), password, confirm_password: confirmPassword, first_name: firstName.trim(), last_name: lastName.trim() });
 
     setLoading(true);
     try {
-      await signup({
-        email: email.trim(),
-        password,
-        confirm_password: confirmPassword,
-        first_name: firstName.trim(),
+      await mockSignIn({
+        first_name: firstName.trim() || 'User',
         last_name: lastName.trim(),
+        email: email.trim() || 'user@example.com',
       });
-      Alert.alert(t('signup_title'), t('ve_subtitle'));
-      setMode('login');
+      // RouteGate in app/_layout.tsx sees isAuthenticated flip to true and
+      // automatically redirects into (tabs) — no manual navigation needed.
     } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? t('signup_failed_msg');
-      Alert.alert(t('signup_failed_title'), typeof msg === 'string' ? msg : t('signup_failed_msg'));
+      Alert.alert(t('signup_failed_title'), t('signup_failed_msg'));
     } finally {
       setLoading(false);
     }
@@ -182,6 +197,14 @@ export default function LoginScreen() {
     }
   };
 
+  useEffect(() => {
+    const half = tabRowWidth.value / 2;
+    tabPillX.value = withTiming(mode === 'login' ? 4 : half, {
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [mode, tabRowWidth.value]);
+
   const isLogin = mode === 'login';
 
   // ── Error helper ──────────────────────────────────────────────────────────
@@ -202,12 +225,13 @@ export default function LoginScreen() {
   const mutedColor = c.mutedForeground;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+    <KeyboardAwareScrollViewCompat
+      contentContainerStyle={[styles.container, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bottomOffset={60}
+      style={{ flex: 1 }}
+    >
         {/* Back to onboarding */}
         <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/(auth)/language-select' as any)}>
           <Feather name="arrow-left" size={22} color={c.text} />
@@ -216,17 +240,25 @@ export default function LoginScreen() {
         {/* Logo */}
         <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.logoWrap}>
           <View style={[styles.logoCircle, { backgroundColor: c.primary }]}>
-            <Feather name="zap" size={32} color="#FFF" />
+            <LogoImage variant="white" height={26} animateOnMount={false} />
           </View>
           <Text style={[styles.brandName, { color: c.text }]}>SkillBuddy</Text>
         </Animated.View>
 
-        {/* Tab switcher: Login / Signup */}
-        <Animated.View entering={FadeInDown.delay(80).duration(350)} style={[styles.tabRow, { backgroundColor: c.muted }]}>
+        {/* Tab switcher: Login / Signup — animated sliding pill */}
+        <Animated.View
+          entering={FadeInDown.delay(80).duration(350)}
+          onLayout={onTabRowLayout}
+          style={[styles.tabRow, { backgroundColor: c.muted }]}
+        >
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.tabPill, { backgroundColor: c.primary }, tabPillStyle]}
+          />
           {(['login', 'signup'] as Mode[]).map((m) => (
             <TouchableOpacity
               key={m}
-              style={[styles.tab, mode === m && { backgroundColor: c.primary }]}
+              style={styles.tab}
               onPress={() => { setMode(m); setErrors({}); setTouched({}); }}
               activeOpacity={0.7}
             >
@@ -240,13 +272,13 @@ export default function LoginScreen() {
         {/* Social buttons */}
         <Animated.View entering={FadeInDown.delay(160).duration(350)} style={styles.socialWrap}>
           {/* Google — official branding: white bg, colored G, standard border */}
-          <TouchableOpacity style={[styles.socialBtn, styles.googleBtn]} onPress={handleGoogleSignIn} disabled={loading}>
+          <TouchableOpacity style={[styles.socialBtn, styles.googleBtn]} onPress={handleGoogleSignIn} disabled={loading} activeOpacity={0.8}>
             <GoogleLogo />
             <Text style={[styles.socialBtnText, { color: '#1F1F1F' }]}>{t('onb_google_signin')}</Text>
           </TouchableOpacity>
 
           {/* Apple — official branding: dark bg, white Apple logo */}
-          <TouchableOpacity style={[styles.socialBtn, styles.appleBtn]} onPress={handleAppleSignIn} disabled={loading}>
+          <TouchableOpacity style={[styles.socialBtn, styles.appleBtn]} onPress={handleAppleSignIn} disabled={loading} activeOpacity={0.8}>
             <AppleLogo color="#FFFFFF" />
             <Text style={[styles.socialBtnText, { color: '#FFFFFF' }]}>{t('onb_apple_signin')}</Text>
           </TouchableOpacity>
@@ -266,31 +298,33 @@ export default function LoginScreen() {
             <>
               <View style={styles.fieldWrap}>
                 <Text style={[styles.label, { color: c.text }]}>{t('onb_signup_first_name')}</Text>
-                <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: touched.firstName && errors.firstName ? c.destructive : inputBorder }]}>
-                  <Feather name="user" size={18} color={mutedColor} style={styles.inputIcon} />
+                <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: focusedField === 'firstName' ? c.primary : inputBorder, borderWidth: focusedField === 'firstName' ? 1.5 : 1 }]}>
+                  <Feather name="user" size={18} color={focusedField === 'firstName' ? c.primary : mutedColor} style={styles.inputIcon} />
                   <TextInput
                     style={[styles.input, { color: textColor }]}
                     placeholder={t('onb_signup_first_name')}
                     placeholderTextColor={mutedColor}
                     value={firstName}
                     onChangeText={setFirstName}
-                    onBlur={() => { markTouched('firstName'); validateField('firstName', firstName); }}
+                    onFocus={() => setFocusedField('firstName')}
+                    onBlur={() => setFocusedField(null)}
                     autoCapitalize="words"
                   />
                 </View>
-                {fieldError('firstName')}
               </View>
 
               <View style={styles.fieldWrap}>
                 <Text style={[styles.label, { color: c.text }]}>{t('onb_signup_last_name')}</Text>
-                <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: inputBorder }]}>
-                  <Feather name="user" size={18} color={mutedColor} style={styles.inputIcon} />
+                <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: focusedField === 'lastName' ? c.primary : inputBorder, borderWidth: focusedField === 'lastName' ? 1.5 : 1 }]}>
+                  <Feather name="user" size={18} color={focusedField === 'lastName' ? c.primary : mutedColor} style={styles.inputIcon} />
                   <TextInput
                     style={[styles.input, { color: textColor }]}
                     placeholder={t('onb_signup_last_name')}
                     placeholderTextColor={mutedColor}
                     value={lastName}
                     onChangeText={setLastName}
+                    onFocus={() => setFocusedField('lastName')}
+                    onBlur={() => setFocusedField(null)}
                     autoCapitalize="words"
                   />
                 </View>
@@ -301,61 +335,63 @@ export default function LoginScreen() {
           {/* Email */}
           <View style={styles.fieldWrap}>
             <Text style={[styles.label, { color: c.text }]}>{t('onb_login_email')}</Text>
-            <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: touched.email && errors.email ? c.destructive : inputBorder }]}>
-              <Feather name="mail" size={18} color={mutedColor} style={styles.inputIcon} />
+            <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: focusedField === 'email' ? c.primary : inputBorder, borderWidth: focusedField === 'email' ? 1.5 : 1 }]}>
+              <Feather name="mail" size={18} color={focusedField === 'email' ? c.primary : mutedColor} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, { color: textColor }]}
                 placeholder="example@email.com"
                 placeholderTextColor={mutedColor}
                 value={email}
                 onChangeText={setEmail}
-                onBlur={() => { markTouched('email'); validateField('email', email); }}
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField(null)}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
             </View>
-            {fieldError('email')}
+            {isLogin && fieldError('email')}
           </View>
 
           {/* Password */}
           <View style={styles.fieldWrap}>
             <Text style={[styles.label, { color: c.text }]}>{t('onb_login_password')}</Text>
-            <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: touched.password && errors.password ? c.destructive : inputBorder }]}>
-              <Feather name="lock" size={18} color={mutedColor} style={styles.inputIcon} />
+            <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: focusedField === 'password' ? c.primary : inputBorder, borderWidth: focusedField === 'password' ? 1.5 : 1 }]}>
+              <Feather name="lock" size={18} color={focusedField === 'password' ? c.primary : mutedColor} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, { color: textColor }]}
                 placeholder="••••••••••••"
                 placeholderTextColor={mutedColor}
                 value={password}
                 onChangeText={setPassword}
-                onBlur={() => { markTouched('password'); validateField('password', password); }}
+                onFocus={() => setFocusedField('password')}
+                onBlur={() => setFocusedField(null)}
                 secureTextEntry={!showPassword}
               />
               <Pressable onPress={() => setShowPassword(!showPassword)}>
                 <Feather name={showPassword ? 'eye' : 'eye-off'} size={18} color={mutedColor} />
               </Pressable>
             </View>
-            {fieldError('password')}
+            {isLogin && fieldError('password')}
           </View>
 
           {/* Signup-only: confirm password */}
           {!isLogin && (
             <View style={styles.fieldWrap}>
               <Text style={[styles.label, { color: c.text }]}>{t('onb_signup_confirm_password')}</Text>
-              <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: touched.confirmPassword && errors.confirmPassword ? c.destructive : inputBorder }]}>
-                <Feather name="lock" size={18} color={mutedColor} style={styles.inputIcon} />
+              <View style={[styles.inputRow, { backgroundColor: inputBg, borderColor: focusedField === 'confirmPassword' ? c.primary : inputBorder, borderWidth: focusedField === 'confirmPassword' ? 1.5 : 1 }]}>
+                <Feather name="lock" size={18} color={focusedField === 'confirmPassword' ? c.primary : mutedColor} style={styles.inputIcon} />
                 <TextInput
                   style={[styles.input, { color: textColor }]}
                   placeholder="••••••••••••"
                   placeholderTextColor={mutedColor}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  onBlur={() => { markTouched('confirmPassword'); validateField('confirmPassword', confirmPassword); }}
+                  onFocus={() => setFocusedField('confirmPassword')}
+                  onBlur={() => setFocusedField(null)}
                   secureTextEntry={!showPassword}
                 />
               </View>
-              {fieldError('confirmPassword')}
             </View>
           )}
 
@@ -408,8 +444,7 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
         </Animated.View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 
@@ -419,10 +454,11 @@ const styles = StyleSheet.create({
   logoWrap: { alignItems: 'center', marginBottom: 24 },
   logoCircle: { width: 64, height: 64, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   brandName: { fontFamily: 'Manrope_700Bold', fontSize: 24 },
-  tabRow: { flexDirection: 'row', borderRadius: 14, padding: 4, marginBottom: 24 },
-  tab: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  tabRow: { flexDirection: 'row', borderRadius: 14, padding: 4, marginBottom: 24, position: 'relative' },
+  tabPill: { position: 'absolute', top: 4, bottom: 4, borderRadius: 12 },
+  tab: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', zIndex: 1 },
   tabText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: '#737373' },
-  socialWrap: { gap: 12, marginBottom: 20 },
+  socialWrap: { gap: 12, marginBottom: 22 },
   socialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -430,17 +466,22 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 15,
     borderRadius: 14,
-    minHeight: 50,
+    minHeight: 52,
   },
   googleBtn: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
     borderColor: '#DADCE0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   appleBtn: {
     backgroundColor: '#000000',
   },
-  socialBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
+  socialBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15.5 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
   divLine: { flex: 1, height: 1 },
   divText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },

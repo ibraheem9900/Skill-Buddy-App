@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -24,7 +24,7 @@ interface MenuItem {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { colors: c, theme, toggleTheme } = useTheme();
   const { t } = useLanguage();
   const { activeRole, isBothRoles, toggleRole } = useRole();
@@ -32,11 +32,14 @@ export default function ProfileScreen() {
 
   const toggleBtnRef = useRef<View>(null);
 
-  // Consistent, single source of truth for the logged-in identity — matches
-  // Home's greeting and the Jobs client identity, so a name change anywhere
-  // (CURRENT_USER) reflects everywhere.
-  const name = CURRENT_USER.name;
-  const email = CURRENT_USER.email;
+  // Prefer the real signed-in user (from signup/login) for identity fields;
+  // fall back to mock data only for stats the auth flow doesn't provide yet
+  // (jobsDone/activeJobs/creditPoints) and as a last-resort safety net.
+  const firstName = user?.first_name || CURRENT_USER.firstName;
+  const lastName = user?.last_name || CURRENT_USER.lastName;
+  const name = user ? `${firstName} ${lastName}`.trim() : CURRENT_USER.name;
+  const email = user?.email || CURRENT_USER.email;
+  const profilePicture = user?.profile_picture;
 
   const handleLogout = () => {
     Alert.alert(t('profile_logout_title'), t('profile_logout_msg'), [
@@ -194,7 +197,11 @@ export default function ProfileScreen() {
 
         <View style={styles.avatarWrap}>
           <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'rgba(255,255,255,0.4)' }]}>
-            <Text style={styles.avatarText}>{CURRENT_USER.firstName.charAt(0)}</Text>
+            {profilePicture ? (
+              <Image source={{ uri: profilePicture }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+            )}
           </View>
           <TouchableOpacity style={[styles.editAvatarBtn, { backgroundColor: c.primary, borderColor: '#FFF' }]}>
             <Feather name="camera" size={14} color="#FFF" />
@@ -311,6 +318,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   avatarText: { fontFamily: 'Manrope_700Bold', fontSize: 36, color: '#FFF' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
   editAvatarBtn: {
     position: 'absolute',
     bottom: 0,

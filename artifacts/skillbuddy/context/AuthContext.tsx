@@ -18,6 +18,14 @@ interface AuthContextType {
   setOnboardingSeen: () => Promise<void>;
   /** Exchange a social OAuth token (Google/Apple) with our backend. */
   socialLogin: (provider: 'google' | 'apple', idToken: string) => Promise<void>;
+  /**
+   * TEMPORARY: signs the user straight in locally with whatever they typed,
+   * no backend call and no validation. This exists only because signup-form
+   * validation is intentionally disabled for now. Remove this and switch the
+   * signup screen back to the real `signup` above once validation (and the
+   * real signup → verify → login flow) is turned back on.
+   */
+  mockSignIn: (data: { first_name: string; last_name: string; email: string; profile_picture?: string }) => Promise<void>;
 }
 
 interface SignupData {
@@ -95,6 +103,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await authApi.signup(data);
   }, []);
 
+  // TEMPORARY (see AuthContextType.mockSignIn above): no backend call, no
+  // validation — just take whatever the user typed and sign them in with it.
+  const mockSignIn = useCallback(async (data: { first_name: string; last_name: string; email: string; profile_picture?: string }) => {
+    const localUser: User = {
+      id: `local-${Date.now()}`,
+      email: data.email,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      profile_picture: data.profile_picture,
+    };
+    setUser(localUser);
+  }, []);
+
   const socialLogin = useCallback(async (provider: 'google' | 'apple', idToken: string) => {
     const { data } = await authApi.socialLogin(provider, idToken);
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
@@ -128,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshUser,
         setOnboardingSeen,
         socialLogin,
+        mockSignIn,
       }}
     >
       {children}

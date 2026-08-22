@@ -1,84 +1,51 @@
-import React, { useEffect, useRef } from 'react';
-import { Dimensions, Image, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import Animated, {
-  FadeIn,
   FadeInDown,
   FadeInUp,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withTiming,
-  Easing,
 } from 'react-native-reanimated';
-import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+// Full-screen looping brand intro (logo + wordmark reveal, baked into the
+// video itself — see assets/videos/splash-intro.mp4). This replaces the
+// previous static-logo "breathing" animation.
+const SPLASH_VIDEO = require('@/assets/videos/splash-intro.mp4');
 
 export default function OnboardingSplash() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors: c } = useTheme();
   const { t } = useLanguage();
 
-  // Logo breathing animation
-  const logoScale = useSharedValue(1);
-  const logoOpacity = useSharedValue(0);
-
-  // Button visibility (appears after ~2.5s)
+  // Button visibility (appears after ~2.5s, same timing as before)
   const [showButton, setShowButton] = React.useState(false);
 
+  const player = useVideoPlayer(SPLASH_VIDEO, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+
   useEffect(() => {
-    // Fade in logo
-    logoOpacity.value = withTiming(1, { duration: 800 });
-
-    // Breathing loop: scale 1 → 1.05 → 1, repeating
-    logoScale.value = withDelay(
-      800,
-      withRepeat(
-        withSequence(
-          withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
-        ),
-        -1, // infinite
-        false,
-      ),
-    );
-
-    // Show button after 2.5 seconds
+    // Show button after 2.5 seconds — video keeps looping behind it.
     const timer = setTimeout(() => setShowButton(true), 2500);
     return () => clearTimeout(timer);
   }, []);
 
-  const logoAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: logoScale.value }],
-    opacity: logoOpacity.value,
-  }));
-
   return (
     <View style={[styles.container, { backgroundColor: '#0A0D0D' }]}>
-      {/* Logo with breathing animation */}
-      <Animated.View style={[styles.logoWrap, logoAnimStyle]}>
-        <Image
-          source={require('@/assets/images/logo-icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-      </Animated.View>
+      {/* Full-screen looping intro video */}
+      <VideoView
+        style={StyleSheet.absoluteFillObject}
+        player={player}
+        contentFit="cover"
+        nativeControls={false}
+        allowsPictureInPicture={false}
+      />
 
-      {/* Brand name */}
-      <Animated.Text
-        entering={FadeIn.delay(1200).duration(600)}
-        style={styles.brandName}
-      >
-        SkillBuddy
-      </Animated.Text>
-
-      {/* Get Started button — fades in + slides up */}
+      {/* Get Started button — fades in + slides up, same as before */}
       {showButton && (
         <Animated.View
           entering={FadeInUp.delay(100).duration(500)}
@@ -105,23 +72,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  logoWrap: {
-    width: 180,
-    height: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-  },
-  logo: {
-    width: 160,
-    height: 160,
-  },
-  brandName: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 32,
-    color: '#FFFFFF',
-    letterSpacing: 1,
   },
   btnWrap: {
     position: 'absolute',
