@@ -26,9 +26,10 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 // Route gate: directs users to onboarding, auth, or main app.
-// - New users (no onboarding flag) → (auth)/onboarding
-// - Authenticated users on any (auth) screen → (tabs)
-// - Unauthenticated users who completed onboarding → (auth)/login
+// The initial route is (auth), so all users start in the auth stack.
+// - Brand new user (no onboarding seen) → stays on (auth)/onboarding
+// - Authenticated user on any (auth) screen → redirect to (tabs)
+// - Unauthenticated user who completed onboarding → redirect to (auth)/login
 function RouteGate() {
   const router = useRouter();
   const segments = useSegments();
@@ -40,15 +41,17 @@ function RouteGate() {
     const inAuth = segments[0] === '(auth)';
     const inTabs = segments[0] === '(tabs)';
 
-    if (!isAuthenticated && !hasSeenOnboarding && !inAuth) {
-      // Brand new user → show onboarding
-      router.replace('/(auth)/onboarding');
-    } else if (!isAuthenticated && hasSeenOnboarding && inTabs) {
-      // Completed onboarding but not logged in → login
-      router.replace('/(auth)/login');
-    } else if (isAuthenticated && inAuth) {
-      // Already logged in, on an auth screen → go to app
+    if (isAuthenticated && inAuth) {
+      // Already logged in, on an auth screen → go to main app
       router.replace('/(tabs)');
+    } else if (!isAuthenticated && hasSeenOnboarding && inAuth) {
+      // Completed onboarding before but not logged in → go to login
+      router.replace('/(auth)/login');
+    } else if (!isAuthenticated && !hasSeenOnboarding && inTabs) {
+      // Somehow on tabs without auth or onboarding → back to onboarding
+      router.replace('/(auth)/onboarding');
+    } else if (isAuthenticated && inTabs) {
+      // Authenticated user on tabs → perfect, no redirect needed
     }
   }, [isAuthenticated, isLoading, hasSeenOnboarding, segments]);
 
@@ -62,14 +65,15 @@ function RootLayoutNav() {
     <>
       <RouteGate />
       <Stack
+        initialRouteName="(auth)"
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: c.background },
         }}
       >
-        <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="notifications"
           options={{ headerShown: false, animation: 'slide_from_right' }}
