@@ -88,10 +88,8 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli@21.8.0
 
-      - name: Authenticate EAS
-        run: eas login --non-interactive
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # eas-cli picks up EXPO_TOKEN from the job-level env automatically.
+      # Do NOT run 'eas login --non-interactive' — it fails in CI.
 
       - name: Build Android APK (preview profile)
         run: eas build --platform android --profile preview --non-interactive
