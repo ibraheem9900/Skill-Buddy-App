@@ -98,14 +98,19 @@ export const authApi = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
   },
+  /**
+   * POST /api/v1/auth/signup — creates the account and starts email
+   * verification. Returns 201 { message, user }. No tokens are returned or
+   * stored here; the user logs in only after verifying their email.
+   */
   signup: (data: {
     email: string;
-    password: string;
-    confirm_password: string;
+    personal_code: string;
     first_name: string;
     last_name: string;
-    personal_code?: string;
-  }) => api.post('/api/v1/users/signup', data),
+    password: string;
+    confirm_password: string;
+  }) => api.post('/api/v1/auth/signup', data),
   getMe: () => api.get('/api/v1/users/me'),
   updateUser: (data: Record<string, unknown>) => api.patch('/api/v1/users/update-user', data),
   logout: () => api.post('/api/v1/users/logout'),

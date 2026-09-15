@@ -30,11 +30,11 @@ interface AuthContextType {
 
 interface SignupData {
   email: string;
+  personal_code: string;
   password: string;
   confirm_password: string;
   first_name: string;
   last_name: string;
-  personal_code?: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
