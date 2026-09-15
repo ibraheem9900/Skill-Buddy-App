@@ -3,9 +3,11 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, LanguageCode } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
+import LogoImage from '@/components/LogoImage';
 import OnboardingProgress from '@/components/OnboardingProgress';
 
 type Lang = { code: LanguageCode; name: string; flag: string };
@@ -23,10 +25,13 @@ export default function OnboardingLanguageSelect() {
   const router = useRouter();
   const { colors: c } = useTheme();
   const { language, setLanguage, t } = useLanguage();
+  const { setOnboardingSeen } = useAuth();
 
   const handleSelect = (code: LanguageCode) => {
     setLanguage(code);
   };
+
+  const isDark = c.background === '#0A0D0D';
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -34,23 +39,23 @@ export default function OnboardingLanguageSelect() {
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 24 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Icon */}
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={[styles.iconWrap, { backgroundColor: c.primaryLight }]}>
-          <Feather name="globe" size={64} color={c.primary} />
+        {/* Standalone SkillBuddy logo */}
+        <Animated.View entering={FadeInDown.delay(80).duration(500)} style={styles.logoWrap}>
+          <LogoImage variant={isDark ? 'light' : 'green'} height={40} animateOnMount={false} />
         </Animated.View>
 
-        {/* Title */}
-        <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+        {/* Heading + description */}
+        <Animated.View entering={FadeInDown.delay(180).duration(500)} style={styles.textWrap}>
           <Text style={[styles.title, { color: c.text }]}>{t('onb_lang_title')}</Text>
           <Text style={[styles.subtitle, { color: c.mutedForeground }]}>{t('onb_lang_subtitle')}</Text>
         </Animated.View>
 
-        {/* Language list */}
+        {/* Language list — staggered slide-in */}
         <View style={styles.langList}>
           {LANGS.map((lang, i) => {
             const isSelected = language === lang.code;
             return (
-              <Animated.View key={lang.code} entering={FadeInDown.delay(300 + i * 80).duration(350)}>
+              <Animated.View key={lang.code} entering={FadeInDown.delay(320 + i * 80).duration(400)}>
                 <TouchableOpacity
                   style={[
                     styles.langItem,
@@ -85,15 +90,18 @@ export default function OnboardingLanguageSelect() {
       </ScrollView>
 
       {/* Bottom: progress dots + Next */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+      <Animated.View entering={FadeInUp.delay(600).duration(500)} style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
         <OnboardingProgress total={4} current={3} activeColor={c.primary} inactiveColor={c.border} />
         <TouchableOpacity
           style={[styles.nextBtn, { backgroundColor: c.primary }]}
-          onPress={() => router.replace('/(auth)/login' as any)}
+          onPress={async () => {
+            await setOnboardingSeen();
+            router.replace('/(auth)/choice' as any);
+          }}
         >
           <Text style={styles.nextText}>{t('onb_next')}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -101,13 +109,14 @@ export default function OnboardingLanguageSelect() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 24, alignItems: 'center' },
-  iconWrap: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+  logoWrap: {
     alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 28,
+  },
+  textWrap: {
+    alignItems: 'center',
+    marginBottom: 28,
+    paddingHorizontal: 4,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
@@ -120,7 +129,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 32,
   },
   langList: { width: '100%', gap: 14 },
   langItem: {

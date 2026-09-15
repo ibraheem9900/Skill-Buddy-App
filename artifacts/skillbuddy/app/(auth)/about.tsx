@@ -3,9 +3,10 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import LogoImage from '@/components/LogoImage';
 import OnboardingProgress from '@/components/OnboardingProgress';
 
 const POINTS = [
@@ -20,7 +21,9 @@ export default function OnboardingAbout() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
 
-  const skip = () => router.replace('/(auth)/login');
+  const skip = () => router.replace('/(auth)/choice');
+
+  const isDark = c.background === '#0A0D0D';
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -33,27 +36,27 @@ export default function OnboardingAbout() {
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 24 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Illustration — large icon in a circle */}
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={[styles.illustration, { backgroundColor: c.primaryLight }]}>
-          <Feather name="users" size={72} color={c.primary} />
+        {/* Standalone SkillBuddy logo */}
+        <Animated.View entering={FadeInDown.delay(80).duration(500)} style={styles.logoWrap}>
+          <LogoImage variant={isDark ? 'light' : 'green'} height={40} animateOnMount={false} />
         </Animated.View>
 
-        {/* Title */}
-        <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+        {/* Heading + description */}
+        <Animated.View entering={FadeInDown.delay(180).duration(500)} style={styles.textWrap}>
           <Text style={[styles.title, { color: c.text }]}>{t('onb_about_title')}</Text>
           <Text style={[styles.subtitle, { color: c.mutedForeground }]}>{t('onb_about_desc')}</Text>
         </Animated.View>
 
-        {/* Feature points */}
+        {/* Feature points — staggered slide-in */}
         <View style={styles.pointsWrap}>
           {POINTS.map((p, i) => (
             <Animated.View
               key={p.titleKey}
-              entering={FadeInDown.delay(300 + i * 120).duration(400)}
+              entering={FadeInDown.delay(320 + i * 120).duration(450)}
               style={[styles.pointRow, { backgroundColor: c.card, borderColor: c.border }]}
             >
               <View style={[styles.pointIcon, { backgroundColor: c.primaryLight }]}>
-                <Feather name={p.icon} size={22} color={c.primary} />
+                <Feather name={p.icon} size={20} color={c.primary} />
               </View>
               <View style={styles.pointText}>
                 <Text style={[styles.pointTitle, { color: c.text }]}>{t(p.titleKey)}</Text>
@@ -65,7 +68,7 @@ export default function OnboardingAbout() {
       </ScrollView>
 
       {/* Bottom: progress dots + Next */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+      <Animated.View entering={FadeInUp.delay(600).duration(500)} style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
         <OnboardingProgress total={4} current={1} activeColor={c.primary} inactiveColor={c.border} />
         <TouchableOpacity
           style={[styles.nextBtn, { backgroundColor: c.primary }]}
@@ -73,7 +76,7 @@ export default function OnboardingAbout() {
         >
           <Text style={styles.nextText}>{t('onb_next')}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -83,13 +86,14 @@ const styles = StyleSheet.create({
   skipBtn: { position: 'absolute', right: 24, zIndex: 10 },
   skipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   content: { paddingHorizontal: 24, alignItems: 'center' },
-  illustration: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+  logoWrap: {
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: 28,
+  },
+  textWrap: {
+    alignItems: 'center',
     marginBottom: 32,
+    paddingHorizontal: 4,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
@@ -102,8 +106,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 32,
-    paddingHorizontal: 8,
   },
   pointsWrap: { width: '100%', gap: 14 },
   pointRow: {
@@ -115,9 +117,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   pointIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },

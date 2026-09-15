@@ -722,6 +722,19 @@ const de = {
   onb_google_error: 'Google-Anmeldung fehlgeschlagen. Bitte versuchen Sie es erneut.',
   onb_apple_error: 'Apple-Anmeldung fehlgeschlagen. Bitte versuchen Sie es erneut.',
   onb_network_error: 'Netzwerkfehler. Bitte überprüfen Sie Ihre Verbindung.',
+
+  onb_choice_title: 'Willkommen bei SkillBuddy',
+  onb_choice_subtitle: 'Legen wir los — melden Sie sich an oder erstellen Sie ein neues Konto.',
+  onb_choice_login: 'Anmelden',
+  onb_choice_signup: 'Registrieren',
+  onb_choice_or: 'oder weiter mit',
+
+  onb_login_title_web: 'Willkommen zurück bei SkillBuddy',
+  onb_login_subtitle_web: 'Melden Sie sich an, um auf Ihr Dashboard zuzugreifen, Buchungen zu verwalten und sich mit Fachleuten zu verbinden.',
+  onb_login_new_here: 'Neu hier?',
+  onb_login_create_account: 'Konto erstellen',
+  onb_continue_google: 'Weiter mit Google',
+  onb_continue_apple: 'Weiter mit Apple',
 };
 
 export default de;

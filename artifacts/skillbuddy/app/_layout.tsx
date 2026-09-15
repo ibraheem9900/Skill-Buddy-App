@@ -40,13 +40,22 @@ function RouteGate() {
 
     const inAuth = segments[0] === '(auth)';
     const inTabs = segments[0] === '(tabs)';
+    // The specific screen inside (auth), e.g. 'choice', 'login', 'signup', etc.
+    const authScreen = inAuth ? segments[1] : null;
+
+    // Screens where an already-onboarded, unauthenticated user is "stuck"
+    // and should be redirected to the choice screen.
+    const onboardingScreens = ['onboarding', 'about', 'privacy', 'language-select'];
+    const isStuckInOnboarding = authScreen != null && onboardingScreens.includes(authScreen);
 
     if (isAuthenticated && inAuth) {
       // Already logged in, on an auth screen → go to main app
       router.replace('/(tabs)');
-    } else if (!isAuthenticated && hasSeenOnboarding && inAuth) {
-      // Completed onboarding before but not logged in → go to login
-      router.replace('/(auth)/login');
+    } else if (!isAuthenticated && hasSeenOnboarding && isStuckInOnboarding) {
+      // Completed onboarding before but not logged in and still on an onboarding screen
+      // → send them to the choice screen.  Do NOT fire when they're already on
+      // choice/login/signup/forgot-password/verify-email — those are intentional.
+      router.replace('/(auth)/choice');
     } else if (!isAuthenticated && !hasSeenOnboarding && inTabs) {
       // Somehow on tabs without auth or onboarding → back to onboarding
       router.replace('/(auth)/onboarding');

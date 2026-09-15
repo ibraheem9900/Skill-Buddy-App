@@ -3,9 +3,10 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import LogoImage from '@/components/LogoImage';
 import OnboardingProgress from '@/components/OnboardingProgress';
 
 export default function OnboardingPrivacy() {
@@ -15,24 +16,26 @@ export default function OnboardingPrivacy() {
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
 
+  const isDark = c.background === '#0A0D0D';
+
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 24 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Icon */}
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={[styles.iconWrap, { backgroundColor: c.primaryLight }]}>
-          <Feather name="shield" size={64} color={c.primary} />
+        {/* Standalone SkillBuddy logo */}
+        <Animated.View entering={FadeInDown.delay(80).duration(500)} style={styles.logoWrap}>
+          <LogoImage variant={isDark ? 'light' : 'green'} height={40} animateOnMount={false} />
         </Animated.View>
 
-        {/* Title */}
-        <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+        {/* Heading + description */}
+        <Animated.View entering={FadeInDown.delay(180).duration(500)} style={styles.textWrap}>
           <Text style={[styles.title, { color: c.text }]}>{t('onb_privacy_title')}</Text>
           <Text style={[styles.subtitle, { color: c.mutedForeground }]}>{t('onb_privacy_desc')}</Text>
         </Animated.View>
 
-        {/* Privacy points */}
+        {/* Privacy points — staggered slide-in */}
         <View style={styles.pointsWrap}>
           {[
             { icon: 'lock' as const, titleKey: 'onb_privacy_point_1' as const, descKey: 'onb_privacy_point_1_desc' as const },
@@ -41,7 +44,7 @@ export default function OnboardingPrivacy() {
           ].map((p, i) => (
             <Animated.View
               key={p.titleKey}
-              entering={FadeInDown.delay(300 + i * 100).duration(400)}
+              entering={FadeInDown.delay(320 + i * 120).duration(450)}
               style={[styles.pointRow, { backgroundColor: c.card, borderColor: c.border }]}
             >
               <View style={[styles.pointIcon, { backgroundColor: c.primaryLight }]}>
@@ -56,7 +59,7 @@ export default function OnboardingPrivacy() {
         </View>
 
         {/* Expandable full policy */}
-        <Animated.View entering={FadeInDown.delay(500).duration(400)}>
+        <Animated.View entering={FadeInDown.delay(700).duration(400)}>
           <TouchableOpacity
             style={[styles.expandBtn, { borderColor: c.border, backgroundColor: c.card }]}
             onPress={() => setExpanded(!expanded)}
@@ -84,7 +87,7 @@ export default function OnboardingPrivacy() {
       </ScrollView>
 
       {/* Bottom: progress dots + Next */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+      <Animated.View entering={FadeInUp.delay(600).duration(500)} style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
         <OnboardingProgress total={4} current={2} activeColor={c.primary} inactiveColor={c.border} />
         <TouchableOpacity
           style={[styles.nextBtn, { backgroundColor: c.primary }]}
@@ -92,7 +95,7 @@ export default function OnboardingPrivacy() {
         >
           <Text style={styles.nextText}>{t('onb_next')}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -100,13 +103,14 @@ export default function OnboardingPrivacy() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 24, alignItems: 'center' },
-  iconWrap: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+  logoWrap: {
     alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 28,
+  },
+  textWrap: {
+    alignItems: 'center',
+    marginBottom: 28,
+    paddingHorizontal: 4,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
@@ -119,7 +123,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 28,
   },
   pointsWrap: { width: '100%', gap: 12 },
   pointRow: {

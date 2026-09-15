@@ -765,6 +765,21 @@ const en = {
   onb_google_error: 'Google Sign-In failed. Please try again.',
   onb_apple_error: 'Apple Sign-In failed. Please try again.',
   onb_network_error: 'Network error. Please check your connection.',
+
+  // ── Choice screen (login or sign up) ──────────────────────────────────────
+  onb_choice_title: 'Welcome to SkillBuddy',
+  onb_choice_subtitle: "Let's get you started — log in to your account or create a new one.",
+  onb_choice_login: 'Log In',
+  onb_choice_signup: 'Sign Up',
+  onb_choice_or: 'or continue with',
+
+  // ── Updated auth headings (matching web copy) ─────────────────────────────
+  onb_login_title_web: 'Welcome back to SkillBuddy',
+  onb_login_subtitle_web: 'Sign in to access your dashboard, manage bookings, and connect with skilled professionals.',
+  onb_login_new_here: 'New here?',
+  onb_login_create_account: 'Create an account',
+  onb_continue_google: 'Continue with Google',
+  onb_continue_apple: 'Continue with Apple',
 };
 
 export default en;

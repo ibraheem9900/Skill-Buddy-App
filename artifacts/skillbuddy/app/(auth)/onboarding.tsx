@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fallbackBg: {
-    backgroundColor: '#0A0D0D',
+    backgroundColor: '#111916',
     alignItems: 'center',
     justifyContent: 'center',
   },

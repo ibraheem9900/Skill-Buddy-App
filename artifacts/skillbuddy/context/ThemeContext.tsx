@@ -28,8 +28,8 @@ interface ThemeContextType {
 const THEME_KEY = 'sb_theme';
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'dark',
-  colors: colors.dark,
+  theme: 'light',
+  colors: colors.light,
   toggleTheme: () => {},
 });
 
@@ -83,8 +83,8 @@ function PaintRevealOverlay({
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [overlayColor, setOverlayColor] = useState('#0A0D0D');
+  const [theme, setTheme] = useState<ThemeMode>('light');
+  const [overlayColor, setOverlayColor] = useState('#F8F8F8');
   const [origin, setOrigin] = useState({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
   const themeRef = useRef<ThemeMode>('dark');
   themeRef.current = theme;

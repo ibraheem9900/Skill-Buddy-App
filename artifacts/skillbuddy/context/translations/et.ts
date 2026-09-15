@@ -722,6 +722,19 @@ const et = {
   onb_google_error: 'Google sisselogimine ebaõnnestus. Palun proovige uuesti.',
   onb_apple_error: 'Apple sisselogimine ebaõnnestus. Palun proovige uuesti.',
   onb_network_error: 'Võrgu viga. Palun kontrollige oma ühendust.',
+
+  onb_choice_title: 'Tere tulemast SkillBuddysse',
+  onb_choice_subtitle: 'Alustame — logige sisse või looge uus konto.',
+  onb_choice_login: 'Logi sisse',
+  onb_choice_signup: 'Registreeru',
+  onb_choice_or: 'või jätkake',
+
+  onb_login_title_web: 'Tere tulemast tagasi SkillBuddysse',
+  onb_login_subtitle_web: 'Logi sisse, et pääseda oma juhtpaneelile, hallata broneeringuid ja ühenduda oskustega spetsialistidega.',
+  onb_login_new_here: 'Oled siin uus?',
+  onb_login_create_account: 'Loo konto',
+  onb_continue_google: 'Jätka Google\'iga',
+  onb_continue_apple: 'Jätka Apple\'iga',
 };
 
 export default et;

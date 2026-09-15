@@ -722,6 +722,19 @@ const lt = {
   onb_google_error: 'Google prisijungimas nepavyko. Prašome bandyti dar kartą.',
   onb_apple_error: 'Apple prisijungimas nepavyko. Prašome bandyti dar kartą.',
   onb_network_error: 'Tinklo klaida. Prašome patikrinti savo ryšį.',
+
+  onb_choice_title: 'Sveiki atvykę į SkillBuddy',
+  onb_choice_subtitle: 'Pradėkime — prisijunkite prie savo paskyros arba sukurkite naują.',
+  onb_choice_login: 'Prisijungti',
+  onb_choice_signup: 'Registruotis',
+  onb_choice_or: 'arba tęsti su',
+
+  onb_login_title_web: 'Sveiki atvykę atgal į SkillBuddy',
+  onb_login_subtitle_web: 'Prisijunkite, kad pasiektumėte savo valdymo skydą, tvarkytumėte rezervacijas ir susisiekumėte su kvalifikuotais specialistais.',
+  onb_login_new_here: 'Naujas čia?',
+  onb_login_create_account: 'Sukurti paskyrą',
+  onb_continue_google: 'Tęsti su Google',
+  onb_continue_apple: 'Tęsti su Apple',
 };
 
 export default lt;

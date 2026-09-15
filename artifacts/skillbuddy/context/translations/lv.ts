@@ -722,6 +722,19 @@ const lv = {
   onb_google_error: 'Google pierakstīšanās neizdevās. Lūdzu, mēģiniet vēlreiz.',
   onb_apple_error: 'Apple pierakstīšanās neizdevās. Lūdzu, mēģiniet vēlreiz.',
   onb_network_error: 'Tīkla kļūda. Lūdzu, pārbaudiet savu savienojumu.',
+
+  onb_choice_title: 'Laipni lūdzam SkillBuddy',
+  onb_choice_subtitle: 'Sāksim — pierakstieties vai izveidojiet jaunu kontu.',
+  onb_choice_login: 'Pierakstīties',
+  onb_choice_signup: 'Reģistrēties',
+  onb_choice_or: 'vai turpināt ar',
+
+  onb_login_title_web: 'Laipni lūdzam atpakaļ SkillBuddy',
+  onb_login_subtitle_web: 'Pierakstieties, lai piekļūtu savam informācijas panelim, pārvaldītu rezervācijas un sazinātos ar prasmīgiem profesionāļiem.',
+  onb_login_new_here: 'Jauns šeit?',
+  onb_login_create_account: 'Izveidot kontu',
+  onb_continue_google: 'Turpināt ar Google',
+  onb_continue_apple: 'Turpināt ar Apple',
 };
 
 export default lv;
