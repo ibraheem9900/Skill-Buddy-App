@@ -132,6 +132,13 @@ export const authApi = {
     confirm_password: string;
   }) => api.post('/api/v1/auth/signup', data),
   getMe: () => api.get('/api/v1/users/me'),
+  /**
+   * DELETE /api/v1/users/me — deactivates the logged-in user's account
+   * (deactivate, not erase: the record persists with deactivated=true).
+   * Requires a JSON body { reason } — axios carries a body on DELETE via the
+   * `data` config key. Protected endpoint, Bearer auto-attached.
+   */
+  deactivateAccount: (reason: string) => api.delete('/api/v1/users/me', { data: { reason } }),
   // PATCH /api/v1/users/profile — legacy /users/update-user now 404s.
   updateUser: (data: Record<string, unknown>) => api.patch('/api/v1/users/profile', data),
   /**

@@ -867,6 +867,33 @@ const en = {
   sess_all_done_title: 'Signed out everywhere',
   sess_all_done_msg: 'You have been signed out of all devices. Please sign in again to continue.',
   sess_all_err: 'Could not sign you out of all devices. Please try again.',
+
+  // ── Deactivate account (Settings → Account → Danger zone) ────────────────
+  da_danger_zone: 'Danger Zone',
+  da_title: 'Deactivate Account',
+  da_subtitle: 'This will deactivate your SkillBuddy account. Please read the details below before continuing.',
+  da_point_1: 'You will lose access to your account, bookings, and messages.',
+  da_point_2: 'Your profile will be marked inactive and hidden from other users.',
+  da_point_3: 'Your account can be reactivated by contacting support — it is not permanently deleted.',
+  da_reason_label: 'Why are you leaving? (required)',
+  da_reason_not_useful: 'I don\'t find the app useful',
+  da_reason_privacy: 'Privacy concerns',
+  da_reason_too_few_providers: 'Too few providers in my area',
+  da_reason_switching: 'I\'m switching to another service',
+  da_reason_support: 'I had an unresolved support issue',
+  da_reason_other: 'Other (please describe)',
+  da_reason_custom_label: 'Your reason',
+  da_reason_custom_placeholder: 'Tell us why you\'re leaving (optional details help us improve)',
+  da_confirm_text: 'I understand that my account will be deactivated and I will be signed out. I want to continue.',
+  da_submit: 'Deactivate My Account',
+  da_keep: 'Keep My Account',
+  da_success_title: 'Account Deactivated',
+  da_success_msg: 'Your account has been deactivated. If you change your mind, contact SkillBuddy support to reactivate it.',
+  da_success_btn: 'Back to Start',
+  da_err_reason_required: 'Please select or enter a reason before continuing.',
+  da_err_confirm: 'Please confirm you understand what deactivation means.',
+  da_err_reason_rejected: 'The reason could not be accepted. Please adjust it and try again.',
+  da_err_generic: 'Could not deactivate your account. Please try again.',
 };
 
 export default en;
