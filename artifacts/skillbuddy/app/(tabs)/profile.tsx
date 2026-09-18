@@ -44,7 +44,18 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     Alert.alert(t('profile_logout_title'), t('profile_logout_msg'), [
       { text: t('action_cancel'), style: 'cancel' },
-      { text: t('profile_logout_title'), style: 'destructive', onPress: logout },
+      {
+        text: t('profile_logout_title'),
+        style: 'destructive',
+        onPress: async () => {
+          // POST /api/v1/auth/logout revokes this device's session server-side.
+          // AuthContext.logout() clears local tokens no matter what (401 or
+          // network failure still ends in a local logout — routine-action
+          // fallback), then we send the user to Login.
+          await logout();
+          router.replace('/(auth)/login' as any);
+        },
+      },
     ]);
   };
 

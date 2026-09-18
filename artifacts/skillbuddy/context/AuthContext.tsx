@@ -1,7 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authApi, ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, setSessionExpiredHandler } from '@/services/api';
+import {
+  authApi,
+  ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+  setSessionExpiredHandler,
+  setUserRefreshedHandler,
+} from '@/services/api';
 import type { User } from '@/types';
 
 const ONBOARDING_KEY = 'sb_onboarding_seen';
@@ -13,6 +19,9 @@ interface AuthContextType {
   hasSeenOnboarding: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Local-only session wipe (no API call) — for flows where the server has
+   * already invalidated the session (e.g. DELETE /auth/logout-all). */
+  clearSession: () => Promise<void>;
   signup: (data: SignupData) => Promise<void>;
   refreshUser: () => Promise<void>;
   setOnboardingSeen: () => Promise<void>;
@@ -58,6 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // during silent refresh clears the user state immediately.
   useEffect(() => {
     setSessionExpiredHandler(() => setUser(null));
+    // POST /auth/refresh returns a fresh user alongside the rotated tokens —
+    // keep the cached user in sync so profile data never goes stale.
+    setUserRefreshedHandler((incoming) => {
+      if (incoming && typeof incoming === 'object' && 'id' in (incoming as object)) {
+        setUser(incoming as User);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -92,12 +108,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchUser]);
 
-  const logout = useCallback(async () => {
-    try { await authApi.logout(); } catch { /* ignore */ }
+  // Local-only wipe — shared by logout() and by server-initiated invalidation
+  // flows (logout-all, session expiry) where no further API call makes sense.
+  const clearSession = useCallback(async () => {
     await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     setUser(null);
   }, []);
+
+  const logout = useCallback(async () => {
+    try { await authApi.logout(); } catch { /* ignore */ }
+    await clearSession();
+  }, [clearSession]);
 
   const signup = useCallback(async (data: SignupData) => {
     await authApi.signup(data);
@@ -145,6 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         hasSeenOnboarding,
         login,
         logout,
+        clearSession,
         signup,
         refreshUser,
         setOnboardingSeen,

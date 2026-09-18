@@ -74,10 +74,17 @@ export default function SettingsScreen() {
 
         <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('settings_account')}</Text>
         <TouchableOpacity
-          style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border }]}
-          onPress={() => router.push('/profile/edit' as any)}
+          style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border, borderBottomWidth: 1, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
+          onPress={() => router.push('/profile/change-password' as any)}
         >
           <Text style={[styles.rowLabel, { color: c.text }]}>{t('settings_change_password')}</Text>
+          <Feather name="chevron-right" size={18} color={c.border} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border, borderTopWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }]}
+          onPress={() => router.push('/profile/sessions' as any)}
+        >
+          <Text style={[styles.rowLabel, { color: c.text }]}>{t('sess_title')}</Text>
           <Feather name="chevron-right" size={18} color={c.border} />
         </TouchableOpacity>
       </ScrollView>
