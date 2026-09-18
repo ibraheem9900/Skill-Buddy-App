@@ -87,6 +87,16 @@ export default function SettingsScreen() {
           <Text style={[styles.rowLabel, { color: c.text }]}>{t('sess_title')}</Text>
           <Feather name="chevron-right" size={18} color={c.border} />
         </TouchableOpacity>
+
+        {/* Danger zone */}
+        <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('da_danger_zone')}</Text>
+        <TouchableOpacity
+          style={[styles.card, styles.row, { backgroundColor: c.card, borderColor: c.border }]}
+          onPress={() => router.push('/profile/deactivate-account' as any)}
+        >
+          <Text style={[styles.rowLabel, { color: c.destructive }]}>{t('da_title')}</Text>
+          <Feather name="chevron-right" size={18} color={c.border} />
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
