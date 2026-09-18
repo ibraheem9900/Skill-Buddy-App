@@ -48,6 +48,20 @@ interface SignupData {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Normalize a raw GET /users/me (or POST /auth/refresh) user object into the
+ * app's User shape: profile_picture_url → profile_picture, phone_number →
+ * phone. Done once here so every screen consumer keeps reading the same
+ * fields regardless of which endpoint produced the object.
+ */
+function normalizeUser(raw: any): User {
+  return {
+    ...raw,
+    profile_picture: raw?.profile_picture || raw?.profile_picture_url || undefined,
+    phone: raw?.phone || raw?.phone_number || undefined,
+  } as User;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,8 +69,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUser = useCallback(async () => {
     try {
+      // GET /api/v1/users/me — Bearer auto-attached by the shared instance;
+      // a 401 here flows through the silent-refresh interceptor before this
+      // catch ever sees it. Stored once in context — screens read the cache.
       const { data } = await authApi.getMe();
-      setUser(data);
+      setUser(normalizeUser(data));
       return true;
     } catch {
       return false;
@@ -71,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // keep the cached user in sync so profile data never goes stale.
     setUserRefreshedHandler((incoming) => {
       if (incoming && typeof incoming === 'object' && 'id' in (incoming as object)) {
-        setUser(incoming as User);
+        setUser(normalizeUser(incoming));
       }
     });
   }, []);

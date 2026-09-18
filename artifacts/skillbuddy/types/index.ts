@@ -6,12 +6,20 @@ export interface User {
   username?: string;
   phone?: string;
   profile_picture?: string;
+  /** Raw API field (GET /users/me) — normalized into profile_picture by AuthContext. */
+  profile_picture_url?: string;
+  /** Raw API field — normalized into phone by AuthContext. */
+  phone_number?: string;
   personal_code?: string;
   role?: 'CLIENT' | 'PROVIDER';
   active_role?: 'CLIENT' | 'PROVIDER';
+  /** Roles from GET /users/me (e.g. ["CLIENT"]). Available for future role-driven UI. */
+  roles?: string[];
   address?: Address;
   is_verified?: boolean;
   is_active?: boolean;
+  deactivated?: boolean;
+  created_at?: string;
   credit_points?: number;
   jobs_done?: number;
   active_jobs?: number;
