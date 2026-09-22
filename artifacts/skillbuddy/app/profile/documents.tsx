@@ -1,34 +1,41 @@
-import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/context/ThemeContext';
-import { useLanguage } from '@/context/LanguageContext';
+import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { CURRENT_USER } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
+import useResidencePermitUpload from '@/hooks/useResidencePermitUpload';
+import useFaceVideoUpload from '@/hooks/useFaceVideoUpload';
 
 type DocStatus = 'verified' | 'pending' | 'rejected';
 
-const STATUS_META: Record<DocStatus, { labelKey: string; icon: keyof typeof Feather.glyphMap }> = {
+const STATUS_META: Record<DocStatus, { labelKey: TranslationKey; icon: keyof typeof Feather.glyphMap }> = {
   verified: { labelKey: 'documents_verified', icon: 'check-circle' },
   pending: { labelKey: 'documents_pending', icon: 'clock' },
   rejected: { labelKey: 'documents_rejected', icon: 'alert-circle' },
 };
 
-function DocumentRow({ title, titleKey, status }: { title: string; titleKey: string; status: DocStatus }) {
+/**
+ * Residence-permit row: local status starts from mock data and switches to
+ * "Pending Review" as soon as an upload succeeds (the API returns no status
+ * field — upload = submitted for review). TODO: replace the mock seed with
+ * the real verification-status endpoint when one exists.
+ */
+function ResidencePermitRow() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  const [status, setStatus] = useState<DocStatus>(CURRENT_USER.residencePermit);
+  const [previews, setPreviews] = useState<{ front: string | null; back: string | null }>({ front: null, back: null });
+  const { pickAndUpload, uploading } = useResidencePermitUpload((frontUrl, backUrl) => {
+    setPreviews({ front: frontUrl, back: backUrl });
+    setStatus('pending');
+  });
+
   const meta = STATUS_META[status];
   const accent = status === 'verified' ? c.success : status === 'pending' ? c.warning : c.destructive;
   const accentLight = status === 'verified' ? c.successLight : status === 'pending' ? '#FFF6E8' : c.urgentLight;
-
-  const handleAction = async () => {
-    if (status === 'verified') return;
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    Alert.alert(t('documents_reupload_title'), t('documents_reupload_msg', { title: t(titleKey as any) }));
-  };
 
   return (
     <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -36,16 +43,29 @@ function DocumentRow({ title, titleKey, status }: { title: string; titleKey: str
         <Feather name="file-text" size={18} color={c.primary} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.docTitle, { color: c.text }]}>{t(titleKey as any)}</Text>
+        <Text style={[styles.docTitle, { color: c.text }]}>{t('documents_residence')}</Text>
         <View style={[styles.statusChip, { backgroundColor: accentLight }]}>
           <Feather name={meta.icon} size={11} color={accent} />
-          <Text style={[styles.statusText, { color: accent }]}>{t(meta.labelKey as any)}</Text>
+          <Text style={[styles.statusText, { color: accent }]}>{t(meta.labelKey)}</Text>
         </View>
+        {(previews.front || previews.back) ? (
+          <Text style={[styles.previewNote, { color: c.mutedForeground }]}>
+            {t('documents_rp_submitted_note')}
+          </Text>
+        ) : null}
       </View>
-      <TouchableOpacity style={[styles.docAction, { borderColor: c.border }]} onPress={handleAction}>
-        <Text style={[styles.docActionText, { color: c.text }]}>
-          {status === 'verified' ? t('documents_view') : t('documents_reupload')}
-        </Text>
+      <TouchableOpacity
+        style={[styles.docAction, { borderColor: c.border, opacity: uploading ? 0.6 : 1 }]}
+        onPress={pickAndUpload}
+        disabled={uploading}
+      >
+        {uploading ? (
+          <ActivityIndicator size="small" color={c.primary} />
+        ) : (
+          <Text style={[styles.docActionText, { color: c.text }]}>
+            {status === 'verified' ? t('documents_view') : t('documents_reupload')}
+          </Text>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -68,9 +88,62 @@ export default function DocumentsScreen() {
         <Text style={[styles.hint, { color: c.mutedForeground }]}>
           {t('documents_hint')}
         </Text>
-        <DocumentRow title="face" titleKey="documents_face" status={CURRENT_USER.faceVerification} />
-        <DocumentRow title="residence" titleKey="documents_residence" status={CURRENT_USER.residencePermit} />
+        <FaceVerificationRow />
+        <ResidencePermitRow />
       </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * Face-verification row: LIVE front-camera video upload (POST /users/face-video).
+ * Gallery upload deliberately not offered (liveness standard — flagged).
+ * Status switches to Pending Review on successful upload; TODO: real
+ * verification-status endpoint when one exists.
+ */
+function FaceVerificationRow() {
+  const { colors: c } = useTheme();
+  const { t } = useLanguage();
+  const [status, setStatus] = useState<DocStatus>(CURRENT_USER.faceVerification);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const { recordAndUpload, uploading } = useFaceVideoUpload((url) => {
+    setVideoUrl(url);
+    setStatus('pending');
+  });
+  const meta = STATUS_META[status];
+  const accent = status === 'verified' ? c.success : status === 'pending' ? c.warning : c.destructive;
+  const accentLight = status === 'verified' ? c.successLight : status === 'pending' ? '#FFF6E8' : c.urgentLight;
+
+  return (
+    <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>
+      <View style={[styles.docIcon, { backgroundColor: c.accent }]}>
+        <Feather name="video" size={18} color={c.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.docTitle, { color: c.text }]}>{t('documents_face')}</Text>
+        <View style={[styles.statusChip, { backgroundColor: accentLight }]}>
+          <Feather name={meta.icon} size={11} color={accent} />
+          <Text style={[styles.statusText, { color: accent }]}>{t(meta.labelKey)}</Text>
+        </View>
+        {videoUrl ? (
+          <Text style={[styles.previewNote, { color: c.mutedForeground }]}>
+            {t('documents_fv_submitted_note')}
+          </Text>
+        ) : null}
+      </View>
+      <TouchableOpacity
+        style={[styles.docAction, { borderColor: c.border, opacity: uploading ? 0.6 : 1 }]}
+        onPress={recordAndUpload}
+        disabled={uploading}
+      >
+        {uploading ? (
+          <ActivityIndicator size="small" color={c.primary} />
+        ) : (
+          <Text style={[styles.docActionText, { color: c.text }]}>
+            {status === 'verified' ? t('documents_view') : t('documents_fv_record')}
+          </Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
@@ -85,6 +158,7 @@ const styles = StyleSheet.create({
   docTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 6 },
   statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
-  docAction: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  previewNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
+  docAction: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, minWidth: 70, alignItems: 'center' },
   docActionText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
 });

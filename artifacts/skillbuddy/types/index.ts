@@ -1,3 +1,50 @@
+/** POST /api/v1/providers/status response — the new current status entry.
+ * Also the item shape of GET /providers/status-history (which additionally
+ * LACKS id and timestamp fields — see getProviderStatusHistory).
+ */
+export interface ProviderStatusResponse {
+  status: string;
+  reason?: string | null;
+  is_current?: boolean;
+}
+
+/** GET /api/v1/providers/dashboard response — lightweight, READ-ONLY summary
+ * (job counts + status flags only). Deliberately NOT the full profile and
+ * never used to pre-fill/overwrite the editable provider-profile cache —
+ * that is GET /providers/profile (ProviderProfile above).
+ */
+export interface ProviderDashboardSummary {
+  user_id: number;
+  total_jobs_completed: number;
+  total_jobs_inprogress: number;
+  is_available: boolean;
+  is_active: boolean;
+}
+
+/** GET /api/v1/providers/profile response (raw API shape). */
+export interface ProviderProfile {
+  id: number;
+  user_id: number;
+  bio?: string | null;
+  /** Decimal STRING per schema (can be huge) — parse before display. */
+  hourly_rate?: string | null;
+  provider_type: string;
+  is_available: boolean;
+  is_active: boolean;
+  total_jobs_completed: number;
+  total_jobs_cancelled_by_provider: number;
+  total_jobs_cancelled_by_client: number;
+  total_jobs_inprogress: number;
+  total_reviews: number;
+  star_rating: number;
+  badge_count: number;
+  credibility_score: number;
+  acceptance_rate: number;
+  response_time_avg: number;
+  service_radius: number;
+  current_status?: { status: string; reason?: string | null; is_current?: boolean } | null;
+}
+
 export interface User {
   id: string;
   email: string;
