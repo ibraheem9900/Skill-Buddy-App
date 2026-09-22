@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER } from '@/data/mockData';
 import LogoImage from '@/components/LogoImage';
+import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -28,6 +29,7 @@ export default function ProfileScreen() {
   const { colors: c, theme, toggleTheme } = useTheme();
   const { t } = useLanguage();
   const { activeRole, isBothRoles, toggleRole } = useRole();
+  const { pickAndUpload, uploading, removePicture, deleting } = useProfilePictureUpload(!!user?.profile_picture);
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
   const toggleBtnRef = useRef<View>(null);
@@ -40,6 +42,19 @@ export default function ProfileScreen() {
   const name = user ? `${firstName} ${lastName}`.trim() : CURRENT_USER.name;
   const email = user?.email || CURRENT_USER.email;
   const profilePicture = user?.profile_picture;
+
+  /** Avatar edit button: with a picture → Change/Remove menu; without → straight to the picker. */
+  const handleAvatarAction = () => {
+    if (!profilePicture) {
+      void pickAndUpload();
+      return;
+    }
+    Alert.alert(t('pp_change_photo'), undefined, [
+      { text: t('pp_change_photo'), onPress: () => void pickAndUpload() },
+      { text: t('pp_remove_menu'), style: 'destructive', onPress: () => void removePicture() },
+      { text: t('action_cancel'), style: 'cancel' },
+    ]);
+  };
 
   const handleLogout = () => {
     Alert.alert(t('profile_logout_title'), t('profile_logout_msg'), [
@@ -214,8 +229,17 @@ export default function ProfileScreen() {
               <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
             )}
           </View>
-          <TouchableOpacity style={[styles.editAvatarBtn, { backgroundColor: c.primary, borderColor: '#FFF' }]}>
-            <Feather name="camera" size={14} color="#FFF" />
+          <TouchableOpacity
+            style={[styles.editAvatarBtn, { backgroundColor: c.primary, borderColor: '#FFF', opacity: uploading || deleting ? 0.6 : 1 }]}
+            onPress={handleAvatarAction}
+            disabled={uploading || deleting}
+            accessibilityLabel={t('pp_change_photo')}
+          >
+            {uploading || deleting ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Feather name="camera" size={14} color="#FFF" />
+            )}
           </TouchableOpacity>
         </View>
         <Text style={styles.name}>{name}</Text>

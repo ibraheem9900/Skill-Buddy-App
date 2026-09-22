@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse } from '@/types';
 
 export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
 
@@ -133,6 +134,160 @@ export const authApi = {
   }) => api.post('/api/v1/auth/signup', data),
   getMe: () => api.get('/api/v1/users/me'),
   /**
+   * GET /api/v1/users/profile-picture — returns { url: string | null } for the
+   * authenticated user. Sibling read of POST/DELETE /users/profile-picture.
+   * NOT for general avatar display: screens render user.profile_picture from
+   * the cached GET /users/me response (AuthContext) — calling this per-screen
+   * would duplicate data already in context. Intended uses: confirming the
+   * server state right after an upload or delete succeeds (see
+   * AuthContext.syncProfilePicture), or any future spot that needs only the
+   * URL before the full profile is loaded. "No picture set" arrives as a 200
+   * with url: null (schema), not a 404 — callers must null-check.
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  getProfilePicture: () => api.get<{ url: string | null }>('/api/v1/users/profile-picture'),
+  /**
+   * POST /api/v1/users/profile-picture — multipart/form-data upload (NOT JSON).
+   * The instance default Content-Type (application/json) MUST be overridden
+   * per-request; axios in React Native then lets the native networking layer
+   * set the full multipart header incl. boundary. Timeout raised to 60s —
+   * image uploads can be slow on poor connections vs the 15s JSON default.
+   * Returns { message, url } — callers should update the avatar from `url`
+   * immediately (AuthContext.setProfilePicture) without a re-fetch.
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  uploadProfilePicture: (asset: { uri: string; name: string; mimeType: string }) => {
+    const formData = new FormData();
+    // React Native file part: { uri, name, type } (uri points at the local file).
+    formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType } as unknown as Blob);
+    return api.post<{ message: string; url: string }>('/api/v1/users/profile-picture', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+  },
+  /**
+   * DELETE /api/v1/users/profile-picture — removes the current profile
+   * picture; only { message } comes back (MessageResponse). Only 200 is
+   * documented — the no-picture-set case is not specified, so callers gate
+   * on a picture existing before offering/invoking this (the avatar menu
+   * only shows "Remove Photo" when user.profile_picture is set).
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  deleteProfilePicture: () => api.delete<{ message: string }>('/api/v1/users/profile-picture'),
+  /**
+   * POST /api/v1/users/residence-permits — KYC document upload as
+   * multipart/form-data (NOT JSON). front_file / back_file are both optional
+   * in the API schema, but the app enforces AT LEAST ONE side client-side
+   * (a one-sided permit is meaningless for verification); the UI encourages
+   * both. Instance-default Content-Type overridden per-request so RN's
+   * networking layer sets the multipart boundary. Timeout raised to 60s for
+   * two-image uploads on poor connections.
+   * Returns { message, front_url, back_url } (urls nullable per schema).
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  uploadResidencePermits: (files: { front?: { uri: string; name: string; mimeType: string }; back?: { uri: string; name: string; mimeType: string } }) => {
+    const formData = new FormData();
+    if (files.front) formData.append('front_file', { uri: files.front.uri, name: files.front.name, type: files.front.mimeType } as unknown as Blob);
+    if (files.back) formData.append('back_file', { uri: files.back.uri, name: files.back.name, type: files.back.mimeType } as unknown as Blob);
+    return api.post<{ message: string; front_url: string | null; back_url: string | null }>('/api/v1/users/residence-permits', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+  },
+  /**
+   * POST /api/v1/users/face-video — liveness/face-auth video upload as
+   * multipart/form-data (NOT JSON), field name `file` (required per schema).
+   * Video is captured LIVE in-app via the front camera (liveness standard —
+   * gallery upload is deliberately NOT offered; flagged for team review).
+   * Client-side limits enforced before upload: ≤15s, ≤50 MB, video/* MIME.
+   * Instance-default Content-Type overridden per-request so RN's networking
+   * layer sets the multipart boundary. 120s timeout — videos are large and
+   * slow on poor connections. Returns { message, url }.
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  uploadFaceVideo: (video: { uri: string; name: string; mimeType: string }) => {
+    const formData = new FormData();
+    formData.append('file', { uri: video.uri, name: video.name, type: video.mimeType } as unknown as Blob);
+    return api.post<{ message: string; url: string }>('/api/v1/users/face-video', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+  },
+  /**
+   * GET /api/v1/providers/profile — the authenticated user's provider
+   * profile (stats, rating, availability, current_status). Only 200 is
+   * documented; the "user has no provider profile yet" case is NOT specified
+   * — callers treat 404-style errors as "no profile" (see
+   * useProviderProfile). Call on dashboard entry, after profile create/
+   * update, or manual refresh — never per-screen-render (cache in the hook).
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  getProviderProfile: () => api.get<ProviderProfile>('/api/v1/providers/profile'),
+  /**
+   * POST /api/v1/providers/profile — creates the authenticated user's
+   * provider profile. ONE-TIME creation call (201) — editing an existing
+   * profile is PATCH (separate task); the UI only reaches this from the
+   * "no provider profile yet" state. hourly_rate is sent as a NUMBER per
+   * the request schema (≥0) — the 201 response returns it back as a STRING
+   * (ProviderProfile), which formatHourlyRate handles. service_radius is
+   * 1–100 integer (schema bounds). JSON body, Bearer auto-attached.
+   */
+  createProviderProfile: (data: { bio: string; hourly_rate: number; provider_type: string; service_radius: number }) =>
+    api.post<ProviderProfile>('/api/v1/providers/profile', data),
+  /**
+   * PATCH /api/v1/providers/profile — updates an EXISTING provider profile
+   * (creation is POST, above). Full body per spec: bio, hourly_rate,
+   * provider_type, is_available, is_active, service_radius — hourly_rate as
+   * a NUMBER on the wire, string back in the 200 response. 200 returns the
+   * complete ProviderProfile — the source of truth that replaces the cached
+   * object (never merge guessed values). JSON, Bearer auto-attached.
+   */
+  updateProviderProfile: (data: { bio: string; hourly_rate: number; provider_type: string; is_available: boolean; is_active: boolean; service_radius: number }) =>
+    api.patch<ProviderProfile>('/api/v1/providers/profile', data),
+  /**
+   * GET /api/v1/providers/dashboard — lightweight READ-ONLY summary (jobs
+   * completed / in-progress, is_available, is_active). NOT the profile —
+   * deliberately lacks bio/rate/type/radius and must never pre-fill the edit
+   * form or overwrite the ProviderProfile cache (kept separate in
+   * useProviderDashboard). Fetch on dashboard entry / manual refresh only.
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  getProviderDashboard: () => api.get<ProviderDashboardSummary>('/api/v1/providers/dashboard'),
+  /**
+   * POST /api/v1/providers/status — sets the provider's current status entry
+   * (status history head). `status` is a free string per the live schema
+   * (1–30 chars, NO server-side enum) — the app uses the same value set the
+   * web app already ships against this endpoint: active / on_leave /
+   * unavailable (lowercase snake_case convention, flagged for team review).
+   * `reason` is OPTIONAL/nullable per schema (≤500) — omitted when empty.
+   * 200 returns { status, reason, is_current } — the server-confirmed new
+   * current status; callers seed it into the cached profile's current_status.
+   * JSON, protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  updateProviderStatus: (status: string, reason?: string) =>
+    api.post<ProviderStatusResponse>('/api/v1/providers/status', { status, reason: reason || undefined }),
+  /**
+   * GET /api/v1/providers/status-current — the provider's current status
+   * history head ({ status, reason, is_current }). Only 200 is documented;
+   * the "no status set yet" case is NOT specified — callers treat 404-style
+   * errors as "not set" (see useProviderProfile.currentStatus sync) and
+   * fall back to the profile's current_status/is_available. Same value
+   * vocabulary as POST /providers/status (no server enum). Call on dashboard
+   * entry only — POST success seeds the cache directly (no re-fetch needed).
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  getCurrentProviderStatus: () => api.get<ProviderStatusResponse>('/api/v1/providers/status-current'),
+  /**
+   * GET /api/v1/providers/status-history — the provider's status change log
+   * as an ARRAY of ProviderStatusResponse. Live-spec verified: NO pagination
+   * parameters exist (parameters: []), and items carry NO id and NO
+   * timestamp — consumers key by array index and cannot show when a change
+   * happened (flagged to the team). Only 200 documented; 401/5xx handled
+   * generically by callers. Call on dashboard entry / manual refresh only.
+   * Protected endpoint, Bearer auto-attached by the interceptor.
+   */
+  getProviderStatusHistory: () => api.get<ProviderStatusResponse[]>('/api/v1/providers/status-history'),
+  /**
    * DELETE /api/v1/users/me — deactivates the logged-in user's account
    * (deactivate, not erase: the record persists with deactivated=true).
    * Requires a JSON body { reason } — axios carries a body on DELETE via the
@@ -140,7 +295,15 @@ export const authApi = {
    */
   deactivateAccount: (reason: string) => api.delete('/api/v1/users/me', { data: { reason } }),
   // PATCH /api/v1/users/profile — legacy /users/update-user now 404s.
-  updateUser: (data: Record<string, unknown>) => api.patch('/api/v1/users/profile', data),
+  /**
+   * PATCH /api/v1/users/profile — partial profile update. All four fields
+   * are optional in the schema (names/username ≤100 chars, phone ≤20); only
+   * fields present (not undefined) are sent — a true partial update. Email,
+   * personal_code, roles, is_verified etc. are NOT accepted by this endpoint.
+   * Protected: Bearer auto-attached by the interceptor.
+   */
+  updateUser: (data: { first_name?: string; last_name?: string; username?: string; phone_number?: string }) =>
+    api.patch('/api/v1/users/profile', Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))),
   /**
    * POST /api/v1/auth/logout — revokes the session tied to the caller's
    * access token (signs out the CURRENT device only). Protected endpoint,

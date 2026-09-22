@@ -24,6 +24,26 @@ interface AuthContextType {
   clearSession: () => Promise<void>;
   signup: (data: SignupData) => Promise<void>;
   refreshUser: () => Promise<void>;
+  /**
+   * Confirm/refresh the avatar from GET /users/profile-picture after an
+   * upload or delete succeeds — the ONLY sanctioned use of that endpoint
+   * (general display reads the cached /users/me profile_picture). Merges the
+   * server's url (null when no picture is set) into the cached user so the
+   * avatar updates app-wide without a full profile refetch.
+   */
+  syncProfilePicture: () => Promise<void>;
+  /**
+   * Update the avatar instantly from a successful upload's response url —
+   * merges into the cached user so every screen re-renders without a refetch.
+   * Pairs with syncProfilePicture() (server-confirmed refresh).
+   */
+  setProfilePicture: (url: string) => void;
+  /**
+   * Clear the avatar locally — call ONLY after DELETE /users/profile-picture
+   * confirms success (never optimistically). Reverts every screen to the
+   * default initial-letter avatar instantly.
+   */
+  clearProfilePicture: () => void;
   setOnboardingSeen: () => Promise<void>;
   /** Exchange a social OAuth token (Google/Apple) with our backend. */
   socialLogin: (provider: 'google' | 'apple', idToken: string) => Promise<void>;
@@ -171,9 +191,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await fetchUser();
   }, [fetchUser]);
 
+  /**
+   * Post-upload/delete avatar confirmation: GET /users/profile-picture →
+   * merge { url } into the cached user. Display code keeps reading
+   * user.profile_picture from context — no extra network traffic anywhere.
+   * url can legitimately be null ("no picture set") — that clears the avatar
+   * to the fallback rather than erroring. A network failure here is non-
+   * fatal: the upload/delete already succeeded, and refreshUser() can resync.
+   */
+  const syncProfilePicture = useCallback(async () => {
+    try {
+      const { data } = await authApi.getProfilePicture();
+      setUser((prev) => (prev ? { ...prev, profile_picture: data?.url ?? undefined } : prev));
+    } catch {
+      // Non-fatal by design — see doc comment.
+    }
+  }, []);
+
   const setOnboardingSeen = useCallback(async () => {
     await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
     setHasSeenOnboarding(true);
+  }, []);
+
+  /** Instant avatar update from POST /users/profile-picture's response url. */
+  const setProfilePicture = useCallback((url: string) => {
+    setUser((prev) => (prev ? { ...prev, profile_picture: url } : prev));
+  }, []);
+
+  /** Local avatar clear — post-DELETE success only (see interface doc). */
+  const clearProfilePicture = useCallback(() => {
+    setUser((prev) => (prev ? { ...prev, profile_picture: undefined } : prev));
   }, []);
 
   return (
@@ -187,6 +234,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearSession,
         signup,
         refreshUser,
+        syncProfilePicture,
+        setProfilePicture,
+        clearProfilePicture,
         setOnboardingSeen,
         socialLogin,
         mockSignIn,
