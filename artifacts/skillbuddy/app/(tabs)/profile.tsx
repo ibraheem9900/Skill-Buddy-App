@@ -1,7 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Alert, ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
@@ -11,6 +11,7 @@ import { useRole } from '@/context/RoleContext';
 import { CURRENT_USER } from '@/data/mockData';
 import LogoImage from '@/components/LogoImage';
 import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
+import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -30,7 +31,27 @@ export default function ProfileScreen() {
   const { t } = useLanguage();
   const { activeRole, isBothRoles, toggleRole } = useRole();
   const { pickAndUpload, uploading, removePicture, deleting } = useProfilePictureUpload(!!user?.profile_picture);
+  // Client activity stats (GET /api/v1/clients/profile) — fetched only while
+  // the CLIENT role is active so provider sessions never hit this endpoint.
+  const clientStats = useClientProfile();
+  const { activeRole: statsRole } = useRole();
+  const statsLoadedFor = useRef<'CLIENT' | 'PROVIDER' | null>(null);
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
+
+  // Load once per session per role; refetch when returning to the tab with the
+  // CLIENT role active (stats change as bookings progress).
+  useFocusEffect(
+    useCallback(() => {
+      if (statsRole === 'CLIENT') {
+        if (statsLoadedFor.current !== 'CLIENT') {
+          statsLoadedFor.current = 'CLIENT';
+          void clientStats.load();
+        }
+      } else {
+        statsLoadedFor.current = null; // re-arm for the next CLIENT entry
+      }
+    }, [statsRole]),
+  );
 
   const toggleBtnRef = useRef<View>(null);
 
@@ -93,6 +114,7 @@ export default function ProfileScreen() {
         { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
         { icon: 'briefcase', label: t('profile_professional_info'), route: '/profile/professional' },
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
+        { icon: 'heart', label: t('cf_title'), route: '/profile/favorites' },
         { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: t('profile_pts', { n: CURRENT_USER.creditPoints }) },
       ],
     },
@@ -142,6 +164,7 @@ export default function ProfileScreen() {
         { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
         { icon: 'award', label: t('profile_professional_info'), route: '/profile/professional' },
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
+        { icon: 'shield', label: t('cert_title'), route: '/profile/certifications' },
       ],
     },
     {
@@ -249,16 +272,52 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Stats Row */}
+      {/* Stats Row — live client activity stats from GET /api/v1/clients/profile
+          while the CLIENT role is active (loading spinner instead of fake
+          zeros; retry banner on error). The provider role keeps the mock
+          fallback until a provider-stats endpoint is wired. */}
       <Animated.View entering={FadeInDown.delay(80).duration(400)}>
         <View style={[styles.statsRow, { backgroundColor: c.card, shadowColor: '#000' }]}>
+          {activeRole === 'CLIENT' && clientStats.status === 'error' && (
+            <TouchableOpacity style={styles.statsErrorBar} onPress={clientStats.refresh}>
+              <Text style={[styles.statsErrorText, { color: c.destructive }]}>
+                {t(clientStats.errorMessage ?? 'cstat_err_network')}
+              </Text>
+              <Text style={[styles.statsRetryText, { color: c.primary }]}>{t('cstat_retry')}</Text>
+            </TouchableOpacity>
+          )}
           {[
-            { label: t('profile_stat_jobs_done'), value: CURRENT_USER.jobsDone },
-            { label: t('profile_stat_active_jobs'), value: CURRENT_USER.activeJobs },
-            { label: t('profile_stat_credit_pts'), value: CURRENT_USER.creditPoints },
+            activeRole === 'CLIENT' && clientStats.status === 'loading'
+              ? { label: t('profile_stat_jobs_done'), loading: true }
+              : activeRole === 'CLIENT'
+                ? {
+                    label: t('profile_stat_jobs_done'),
+                    value: clientStats.profile?.total_completed_jobs ?? CURRENT_USER.jobsDone,
+                  }
+                : { label: t('profile_stat_jobs_done'), value: CURRENT_USER.jobsDone },
+            activeRole === 'CLIENT' && clientStats.status === 'loading'
+              ? { label: t('profile_stat_active_jobs'), loading: true }
+              : activeRole === 'CLIENT'
+                ? {
+                    label: t('profile_stat_active_jobs'),
+                    value: clientStats.profile?.total_active_jobs ?? CURRENT_USER.activeJobs,
+                  }
+                : { label: t('profile_stat_active_jobs'), value: CURRENT_USER.activeJobs },
+            activeRole === 'CLIENT' && clientStats.status === 'loading'
+              ? { label: t('cstat_spent'), loading: true }
+              : activeRole === 'CLIENT'
+                ? {
+                    label: t('cstat_spent'),
+                    value: formatAmountSpent(clientStats.profile?.total_amount_spent),
+                  }
+                : { label: t('profile_stat_credit_pts'), value: CURRENT_USER.creditPoints },
           ].map((stat, i) => (
             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
-              <Text style={[styles.statValue, { color: c.primary }]}>{stat.value}</Text>
+              {'loading' in stat && stat.loading ? (
+                <ActivityIndicator size="small" color={c.primary} style={styles.statSpinner} />
+              ) : (
+                <Text style={[styles.statValue, { color: c.primary }]}>{stat.value}</Text>
+              )}
               <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{stat.label}</Text>
             </View>
           ))}
@@ -387,6 +446,18 @@ const styles = StyleSheet.create({
   statItem: { flex: 1, alignItems: 'center', paddingVertical: 16 },
   statValue: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
   statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+  statSpinner: { height: 24, marginBottom: 0 },
+  statsErrorBar: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  statsErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+  statsRetryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
   sectionTitle: {
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 12,
