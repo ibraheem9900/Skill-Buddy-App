@@ -1,6 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
 
 export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
 
@@ -253,6 +253,138 @@ export const authApi = {
    * Protected endpoint, Bearer auto-attached by the interceptor.
    */
   getProviderDashboard: () => api.get<ProviderDashboardSummary>('/api/v1/providers/dashboard'),
+  /**
+   * GET /api/v1/clients/profile — the signed-in client's activity stats
+   * (bookings / completed / in-progress / cancelled / star rating / reviews
+   * given / total spent). `total_amount_spent` is a decimal STRING per the
+   * live schema — parse before display (see useClientProfile). Protected
+   * endpoint, Bearer auto-attached by the interceptor.
+   */
+  getClientProfile: () => api.get<ClientProfileResponse>('/api/v1/clients/profile'),
+  /**
+   * PATCH /api/v1/clients/profile — updates the client profile's
+   * `preferred_language` (the ONLY editable field per the request schema,
+   * string 2–20 chars or null; no server-side enum). The 200 response is the
+   * full ClientProfileResponse — stats fields are read-only convenience data,
+   * sent back for caching, never editable. JSON, Bearer auto-attached.
+   */
+  updateClientProfile: (data: { preferred_language: string | null }) =>
+    api.patch<ClientProfileResponse>('/api/v1/clients/profile', data),
+  /**
+   * GET /api/v1/clients/dashboard — the client's lightweight activity
+   * summary (bookings / completed / in-progress / total spent). READ-ONLY:
+   * fetch fresh on dashboard entry and pull-to-refresh — these stats change
+   * frequently and must not be aggressively cached. `total_amount_spent` is
+   * a decimal STRING. Protected endpoint, Bearer auto-attached.
+   */
+  getClientDashboard: () => api.get<ClientDashboardSummary>('/api/v1/clients/dashboard'),
+  /**
+   * GET /api/v1/clients/bookings — the signed-in client's bookings list.
+   * NO query params exist (live OpenAPI: parameters: []) — the response's
+   * `total` is the full count, no pagination. Booking items are OPAQUE per
+   * the schema (no named fields) — consume via lib/bookingFields.ts helpers
+   * (mirrors the web app's defensive extraction; no guessed field names).
+   * Protected endpoint, Bearer auto-attached.
+   */
+  getClientBookings: () => api.get<ClientBookingsResponse>('/api/v1/clients/bookings'),
+  /**
+   * GET /api/v1/clients/favorites — the signed-in client's saved services
+   * (bookmarks). Items carry ONLY { id, service_id, notes?, created_at } —
+   * service display data (title/price/image) is joined client-side from the
+   * local services catalog (no per-favorite detail calls). NO query params
+   * exist (live OpenAPI: parameters: []) — `total` is the full count.
+   * Protected endpoint, Bearer auto-attached.
+   */
+  getClientFavorites: () => api.get<FavoriteListResponse>('/api/v1/clients/favorites'),
+  /**
+   * GET /api/v1/certifications — the authenticated provider's uploaded
+   * certifications (token-scoped; no query params per the live schema —
+   * `parameters: []`, `total` is the full count). Response is a WRAPPED
+   * object { certifications: [...], total } — never a bare array. Protected
+   * endpoint, Bearer auto-attached.
+   */
+  getCertifications: () => api.get<CertificationListResponse>('/api/v1/certifications'),
+  /**
+   * GET /api/v1/certifications/{certification_id} — fetches ONE certification
+   * by its own id (integer path param per the live schema). 200 returns a
+   * bare CertificationResponse — the SAME shape as a list item (live OpenAPI:
+   * $ref CertificationResponse), so a cached list entry already carries every
+   * field and the network call is only needed as a fallback/deep-link fetch
+   * when no cached record exists. Responses: 200 + 422 only; 404 is NOT
+   * documented — treated as a graceful "not found" state (web precedent).
+   * Protected endpoint, Bearer auto-attached.
+   */
+  getCertification: (certificationId: number) =>
+    api.get<CertificationResponse>(`/api/v1/certifications/${certificationId}`),
+  /**
+   * DELETE /api/v1/certifications/{certification_id} — removes an uploaded
+   * certification (integer path param per the live schema; responses 200 +
+   * 422 ONLY, 404 undocumented → treated as already-removed, web precedent).
+   * UNUSUAL: the 200 body is a bare string (live OpenAPI schema {}), NOT an
+   * object with a "message" field — typed as `string`, never read as an
+   * object. Ownership of another provider's id is undocumented — errors
+   * surface generically. Protected endpoint, Bearer auto-attached.
+   */
+  deleteCertification: (certificationId: number) =>
+    api.delete<string>(`/api/v1/certifications/${certificationId}`),
+  /**
+   * POST /api/v1/certifications — uploads a certification file as
+   * multipart/form-data (NOT JSON), field `file` (required per the live
+   * schema). provider_id/created_by are derived server-side from the Bearer
+   * token — never sent. Returns { message, certification } (201) — the full
+   * CertificationResponse the caller seeds into the list cache. Same
+   * multipart pattern as the other uploads (boundary set by RN's networking
+   * layer; 60s timeout). Protected endpoint, Bearer auto-attached.
+   */
+  uploadCertification: (file: { uri: string; name: string; mimeType: string }) => {
+    const formData = new FormData();
+    formData.append('file', { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+    return api.post<CertificationUploadResponse>('/api/v1/certifications', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+  },
+  /**
+   * POST /api/v1/clients/favorites — saves a service as a favorite for the
+   * signed-in client. Body is ONLY { service_id } (integer, required per the
+   * live schema) — notes are NOT settable at creation (they come later via
+   * PATCH /clients/favorites/{id}, a separate task). The 200 response is
+   * { message, service_id } — NOTE: no favorite id is returned, so the new
+   * entry's id is only learned from the next list fetch. JSON, Bearer
+   * auto-attached.
+   */
+  addClientFavorite: (serviceId: number) =>
+    api.post<FavoriteResponse>('/api/v1/clients/favorites', { service_id: serviceId }),
+  /**
+   * GET /api/v1/clients/favorites/{favorite_id} — fetches ONE favorite record
+   * by its own id (NOT the service_id). 200 returns FavoriteItemResponse
+   * ({ id, service_id, notes?, created_at }) — service display data must be
+   * joined client-side. 422 documented for invalid path values; 404 is NOT
+   * documented — treated as a graceful "not found" state (web precedent).
+   * Bearer auto-attached.
+   */
+  getClientFavorite: (favoriteId: number) =>
+    api.get<FavoriteItemResponse>(`/api/v1/clients/favorites/${favoriteId}`),
+  /**
+   * PATCH /api/v1/clients/favorites/{favorite_id} — updates a favorite's
+   * notes (the ONLY editable field per the live schema: string ≤500 chars or
+   * null; service_id is not editable). 200 returns the full
+   * FavoriteItemResponse — the source of truth that replaces the cached
+   * record (never a local merge). 422 documented for validation; 404
+   * undocumented (web precedent: graceful not-found). Bearer auto-attached.
+   */
+  updateClientFavorite: (favoriteId: number, notes: string | null) =>
+    api.patch<FavoriteItemResponse>(`/api/v1/clients/favorites/${favoriteId}`, { notes }),
+  /**
+   * DELETE /api/v1/clients/favorites/{favorite_id} — removes a saved
+   * favorite. Success is 204 NO CONTENT — there is no response body and no
+   * JSON must be parsed (axios returns empty data; only the status matters).
+   * 422 documented for validation; 404 undocumented — treated as
+   * already-removed (web precedent) so stale rows still clear. Bearer
+   * auto-attached.
+   */
+  deleteClientFavorite: (favoriteId: number) =>
+    api.delete<void>(`/api/v1/clients/favorites/${favoriteId}`),
   /**
    * POST /api/v1/providers/status — sets the provider's current status entry
    * (status history head). `status` is a free string per the live schema

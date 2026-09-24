@@ -8,6 +8,119 @@ export interface ProviderStatusResponse {
   is_current?: boolean;
 }
 
+/** GET /api/v1/clients/profile response — the client's activity stats
+ * ("My Activity" set, mirroring the web app's mapping). `total_amount_spent`
+ * is a decimal STRING per schema — parse before display.
+ */
+export interface ClientProfileResponse {
+  id: number;
+  user_id: number;
+  preferred_language: string;
+  total_bookings: number;
+  total_completed_jobs: number;
+  total_cancelled_jobs: number;
+  total_active_jobs: number;
+  total_reviews: number;
+  star_rating: number;
+  /** Decimal STRING per schema — Number() it for display, never render raw. */
+  total_amount_spent: string;
+}
+
+/** One item of GET /api/v1/certifications — an uploaded provider
+ * certification. `certification_url` points to the uploaded file (image or
+ * PDF) — rendered as an external link/viewer on mobile.
+ */
+export interface CertificationResponse {
+  id: number;
+  provider_id: number;
+  certification_url: string;
+  created_at: string;
+  updated_at?: string | null;
+  created_by?: number | null;
+  updated_by?: number | null;
+}
+
+/** POST /api/v1/certifications success body (201) — the created record as
+ * a full CertificationResponse (source of truth for the list cache).
+ */
+export interface CertificationUploadResponse {
+  message: string;
+  certification: CertificationResponse;
+}
+
+/** GET /api/v1/certifications response — WRAPPED list (not a bare array).
+ * No pagination/filter parameters exist (live OpenAPI: parameters: []) — the
+ * endpoint scopes to the authenticated provider via the token; `total` is
+ * the full count.
+ */
+export interface CertificationListResponse {
+  certifications: CertificationResponse[];
+  total: number;
+}
+
+/** One item of GET /api/v1/clients/favorites — a saved-service bookmark.
+ * Only stores service_id (NOT the service's title/price/image) — the screen
+ * joins with the local services catalog for display.
+ */
+export interface FavoriteItemResponse {
+  id: number;
+  service_id: number;
+  notes?: string | null;
+  created_at: string;
+}
+
+/** POST /api/v1/clients/favorites success body — NOTE: no favorite id is
+ * returned, only the echoed service_id (same shape the web app documents).
+ * The new entry's real favorite id is learned from the next list fetch.
+ */
+export interface FavoriteResponse {
+  message: string;
+  service_id: number;
+}
+
+/** GET /api/v1/clients/favorites response. No pagination/filter parameters
+ * exist (live OpenAPI: parameters: []) — `total` is the full count.
+ */
+export interface FavoriteListResponse {
+  favorites?: FavoriteItemResponse[];
+  total: number;
+}
+
+/** One item of GET /api/v1/clients/bookings' `bookings` array. The OpenAPI
+ * schema is OPAQUE (additionalProperties: true, no named fields) — per the
+ * task spec the real shape must NOT be guessed. The web app already ships
+ * against this endpoint with defensive field-extraction helpers trying
+ * candidate key names (see lib/bookingFields.ts) — mobile mirrors that.
+ */
+export interface ClientBooking {
+  /** Present per the web app's ClientBooking type — also the list key. */
+  id?: string | number;
+  [key: string]: unknown;
+}
+
+/** GET /api/v1/clients/bookings response. No pagination/filter parameters
+ * exist (live OpenAPI: parameters: []) — `total` is the full count.
+ */
+export interface ClientBookingsResponse {
+  bookings?: ClientBooking[];
+  total: number;
+}
+
+/** GET /api/v1/clients/dashboard response — the client's lightweight activity
+ * summary (client counterpart of ProviderDashboardSummary). READ-ONLY display
+ * data — refresh on dashboard entry / pull-to-refresh; never the profile and
+ * never cached aggressively (stats change frequently). `total_amount_spent`
+ * is a decimal STRING — parse before display.
+ */
+export interface ClientDashboardSummary {
+  user_id: number;
+  total_bookings: number;
+  total_completed_jobs: number;
+  total_active_jobs: number;
+  /** Decimal STRING per schema (default "0.00") — format via formatAmountSpent. */
+  total_amount_spent?: string;
+}
+
 /** GET /api/v1/providers/dashboard response — lightweight, READ-ONLY summary
  * (job counts + status flags only). Deliberately NOT the full profile and
  * never used to pre-fill/overwrite the editable provider-profile cache —
