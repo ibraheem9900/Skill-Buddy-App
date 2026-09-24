@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Platform,
@@ -20,6 +21,19 @@ import { useTheme } from '@/context/ThemeContext';
 import { Image } from 'expo-image';
 import { BLOG_POSTS } from '@/data/blogData';
 import { useLanguage } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
+import { useRole } from '@/context/RoleContext';
+import useClientDashboard from '@/hooks/useClientDashboard';
+import useClientBookings from '@/hooks/useClientBookings';
+import { formatAmountSpent } from '@/hooks/useClientProfile';
+import {
+  getBookingStatus,
+  getBookingTitle,
+  getBookingDate,
+  getBookingPrice,
+  getBookingProvider,
+  getBookingKey,
+} from '@/lib/bookingFields';
 import {
   CATEGORIES,
   CURRENT_USER,
@@ -87,6 +101,15 @@ export default function HomeScreen() {
   const router = useRouter();
   const { theme, colors: c } = useTheme();
   const { t } = useLanguage();
+  const { user } = useAuth();
+  const { activeRole } = useRole();
+  // Client dashboard summary (GET /api/v1/clients/dashboard) — CLIENT role
+  // only; fresh fetch on every entry + pull-to-refresh (never cached).
+  const clientDash = useClientDashboard();
+  // Client bookings list (GET /api/v1/clients/bookings) — same role gating;
+  // fresh fetch per entry + pull-to-refresh, no stale cache.
+  const clientBookings = useClientBookings();
+  const dashLoaded = useRef(false);
   const isDark = theme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
   const [offerIdx, setOfferIdx] = useState(0);
@@ -98,13 +121,39 @@ export default function HomeScreen() {
     return () => clearTimeout(t);
   }, []);
 
+  // Fetch the summary when a signed-in CLIENT enters the dashboard
+  React.useEffect(() => {
+    if (user && activeRole === 'CLIENT') {
+      dashLoaded.current = true;
+      void clientDash.load();
+      void clientBookings.load();
+    } else {
+      dashLoaded.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, activeRole]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setLoading(true);
-    setTimeout(() => {
-      setRefreshing(false);
-      setLoading(false);
-    }, 1500);
+    const tasks: Promise<unknown>[] = [];
+    // Real refresh for the client stats + bookings (spec: pull-to-refresh)
+    if (dashLoaded.current) {
+      tasks.push(clientDash.refresh());
+      tasks.push(clientBookings.refresh());
+    }
+    // Plus the original simulated settle for the rest of the sections
+    tasks.push(
+      new Promise((resolve) =>
+        setTimeout(() => {
+          setRefreshing(false);
+          setLoading(false);
+          resolve(null);
+        }, 1500),
+      ),
+    );
+    void Promise.all(tasks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
@@ -206,6 +255,155 @@ export default function HomeScreen() {
             </Text>
           </View>
         </Animated.View>
+
+        {/* Client Activity Summary — live GET /api/v1/clients/dashboard data
+            (CLIENT role + signed-in only). Fresh fetch per entry + via
+            pull-to-refresh; spinner while loading, inline retry on error —
+            never cached stale. */}
+        {user && activeRole === 'CLIENT' && (
+          <Animated.View entering={FadeInDown.delay(50).duration(380)} style={{ paddingHorizontal: 16, marginTop: 12 }}>
+            <View style={[styles.activityCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              {clientDash.status === 'error' ? (
+                <TouchableOpacity style={styles.activityErrorRow} onPress={clientDash.refresh}>
+                  <MaterialCommunityIcons name="wifi-off" size={16} color={c.destructive} />
+                  <Text style={[styles.activityErrorText, { color: c.destructive }]}>
+                    {t(clientDash.errorMessage ?? 'cd_err_network')}
+                  </Text>
+                  <Text style={[styles.activityRetryText, { color: c.primary }]}>{t('cd_retry')}</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  {[
+                    {
+                      icon: 'calendar-check-outline' as const,
+                      label: t('cd_bookings'),
+                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_bookings,
+                    },
+                    {
+                      icon: 'check-circle-outline' as const,
+                      label: t('cd_completed'),
+                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_completed_jobs,
+                    },
+                    {
+                      icon: 'progress-clock' as const,
+                      label: t('cd_active'),
+                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_active_jobs,
+                    },
+                    {
+                      icon: 'cash' as const,
+                      label: t('cd_spent'),
+                      value:
+                        clientDash.status === 'loading'
+                          ? null
+                          : formatAmountSpent(clientDash.summary?.total_amount_spent),
+                    },
+                  ].map((cell, i) => (
+                    <View
+                      key={cell.label}
+                      style={[styles.activityCell, i < 3 && { borderRightWidth: 1, borderRightColor: c.border }]}
+                    >
+                      <MaterialCommunityIcons name={cell.icon} size={15} color={c.primary} />
+                      {cell.value === null ? (
+                        <ActivityIndicator size="small" color={c.primary} style={styles.activitySpinner} />
+                      ) : (
+                        <Text style={[styles.activityValue, { color: c.text }]} numberOfLines={1}>
+                          {cell.value}
+                        </Text>
+                      )}
+                      <Text style={[styles.activityLabel, { color: c.mutedForeground }]} numberOfLines={1}>
+                        {cell.label}
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              )}
+            </View>
+          </Animated.View>
+        )}
+
+        {/* My Bookings — live GET /api/v1/clients/bookings list (CLIENT role
+            + signed-in only). Booking items are OPAQUE per the API schema, so
+            fields are extracted defensively via lib/bookingFields.ts (the web
+            app's candidate-key strategy — no guessed field names). Shows the
+            3 most recent; loading skeletons, empty state, inline retry. */}
+        {user && activeRole === 'CLIENT' && (
+          <Animated.View entering={FadeInDown.delay(55).duration(380)} style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_my_bookings')}</Text>
+              {clientBookings.status === 'ready' && (
+                <Text style={[styles.bookingsCount, { color: c.mutedForeground }]}>
+                  {t('cb_count', { n: clientBookings.total })}
+                </Text>
+              )}
+            </View>
+            <View style={[styles.bookingsCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              {clientBookings.status === 'loading' ? (
+                [0, 1].map((i) => (
+                  <View key={i} style={[styles.bookingRow, i === 0 && { borderTopWidth: 0 }, { borderBottomColor: c.border }]}>
+                    <View style={[styles.bookingIconWrap, { backgroundColor: c.primaryLight }]}>
+                      <MaterialCommunityIcons name="calendar-blank" size={18} color={c.primary} />
+                    </View>
+                    <ActivityIndicator size="small" color={c.primary} />
+                  </View>
+                ))
+              ) : clientBookings.status === 'error' ? (
+                <TouchableOpacity style={styles.bookingErrorRow} onPress={clientBookings.refresh}>
+                  <MaterialCommunityIcons name="wifi-off" size={16} color={c.destructive} />
+                  <Text style={[styles.bookingErrorText, { color: c.destructive }]}>
+                    {t(clientBookings.errorMessage ?? 'cb_err_network')}
+                  </Text>
+                  <Text style={[styles.bookingRetryText, { color: c.primary }]}>{t('cb_retry')}</Text>
+                </TouchableOpacity>
+              ) : clientBookings.bookings.length === 0 ? (
+                <View style={styles.bookingEmptyWrap}>
+                  <MaterialCommunityIcons name="calendar-plus" size={22} color={c.mutedForeground} />
+                  <Text style={[styles.bookingEmptyText, { color: c.mutedForeground }]}>{t('cb_empty')}</Text>
+                  <TouchableOpacity onPress={() => router.push('/(tabs)/services' as any)}>
+                    <Text style={[styles.bookingBrowseText, { color: c.primary }]}>{t('home_browse_services')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                clientBookings.bookings.slice(0, 3).map((booking, i, arr) => {
+                  const title = getBookingTitle(booking) || t('cb_fallback_title');
+                  const status = getBookingStatus(booking);
+                  const rawDate = getBookingDate(booking);
+                  const parsed = rawDate ? new Date(rawDate) : null;
+                  const date = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : rawDate;
+                  const price = getBookingPrice(booking);
+                  const provider = getBookingProvider(booking);
+                  return (
+                    <View
+                      key={getBookingKey(booking, i)}
+                      style={[styles.bookingRow, i === 0 && { borderTopWidth: 0 }, { borderBottomColor: c.border }]}
+                    >
+                      <View style={[styles.bookingIconWrap, { backgroundColor: c.primaryLight }]}>
+                        <MaterialCommunityIcons name="calendar-check-outline" size={18} color={c.primary} />
+                      </View>
+                      <View style={styles.bookingBody}>
+                        <Text style={[styles.bookingTitle, { color: c.text }]} numberOfLines={1}>{title}</Text>
+                        {(provider || date) && (
+                          <Text style={[styles.bookingSub, { color: c.mutedForeground }]} numberOfLines={1}>
+                            {[provider, date].filter(Boolean).join(' · ')}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.bookingRight}>
+                        {!!price && <Text style={[styles.bookingPrice, { color: c.text }]}>€{price}</Text>}
+                        {!!status && (
+                          <View style={[styles.bookingStatusBadge, { backgroundColor: c.primaryLight }]}>
+                            <Text style={[styles.bookingStatusText, { color: c.primary }]} numberOfLines={1}>
+                              {status}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          </Animated.View>
+        )}
 
         {/* Quick-access tiles */}
         <Animated.View entering={FadeInDown.delay(60).duration(380)} style={styles.section}>
@@ -527,7 +725,49 @@ const styles = StyleSheet.create({
   creditValue: { fontFamily: 'Manrope_700Bold', fontSize: 20, marginTop: 1 },
   creditNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
 
-  // ── Quick tiles ───────────────────────────────────────────────────────────
+  // ── Client activity summary strip ────────────────────────────────
+  activityCard: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  activityCell: { flex: 1, alignItems: 'center', gap: 3, paddingHorizontal: 2 },
+  activityValue: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  activityLabel: { fontFamily: 'Manrope_400Regular', fontSize: 10, textAlign: 'center' },
+  activitySpinner: { height: 18 },
+  activityErrorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 6 },
+  activityErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 11, flex: 1 },
+  activityRetryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+
+  // ── My Bookings section ──────────────────────────────────────────
+  bookingsCount: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  bookingsCard: { borderWidth: 1, borderRadius: 16, overflow: 'hidden' },
+  bookingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+  },
+  bookingIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  bookingBody: { flex: 1, minWidth: 0 },
+  bookingTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  bookingSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 1 },
+  bookingRight: { alignItems: 'flex-end', gap: 3, maxWidth: 110 },
+  bookingPrice: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  bookingStatusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  bookingStatusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, textTransform: 'capitalize' },
+  bookingErrorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, paddingHorizontal: 14 },
+  bookingErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 12, flex: 1 },
+  bookingRetryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  bookingEmptyWrap: { alignItems: 'center', gap: 6, paddingVertical: 20, paddingHorizontal: 14 },
+  bookingEmptyText: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
+  bookingBrowseText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+
+  // ── Quick tiles ──────────────────────────────────────────────────
   quickGrid: {
     flexDirection: 'row',
     paddingHorizontal: 16,

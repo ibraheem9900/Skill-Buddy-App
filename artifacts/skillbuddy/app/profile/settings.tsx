@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -7,6 +7,9 @@ import { useTheme } from '@/context/ThemeContext';
 import BackButton from '@/components/BackButton';
 import { useLanguage } from '@/context/LanguageContext';
 import type { LanguageCode } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
+import { useRole } from '@/context/RoleContext';
+import { useClientProfile } from '@/hooks/useClientProfile';
 
 const LANGUAGES: { code: LanguageCode; name: string }[] = [
   { code: 'en', name: 'English' },
@@ -24,6 +27,46 @@ export default function SettingsScreen() {
   const [notifOffers, setNotifOffers] = useState(true);
   const [notifChat, setNotifChat] = useState(true);
   const { language, setLanguage, t } = useLanguage();
+  const { user } = useAuth();
+  const { activeRole } = useRole();
+  const { updateLanguage } = useClientProfile();
+  const [langSaving, setLangSaving] = useState<LanguageCode | null>(null);
+
+  /**
+   * Language row tap: for signed-in CLIENT-role users the choice is persisted
+   * to the backend first (PATCH /api/v1/clients/profile — preferred_language
+   * is its ONLY editable field); the app's UI language switches only after a
+   * confirmed 200 (mirrors the web app's handleLanguageChange). Provider-role
+   * or signed-out users keep the local-only switch. `langSaving` disables the
+   * other rows meanwhile — no double submissions.
+   */
+  const handleLanguagePress = (code: LanguageCode) => {
+    if (langSaving || language === code) return;
+    setLangSaving(code);
+    (async () => {
+      try {
+        if (user && activeRole === 'CLIENT') {
+          await updateLanguage(code);
+        }
+        setLanguage(code);
+        Alert.alert(t('settings_language'), t('clang_saved'));
+      } catch (err: any) {
+        if (err?.response?.status === 422) {
+          console.warn('clients/profile 422:', JSON.stringify(err.response.data));
+          Alert.alert(t('settings_language'), t('clang_err_invalid'));
+        } else if (err?.response) {
+          Alert.alert(t('settings_language'), t('clang_err_generic'));
+        } else {
+          Alert.alert(t('settings_language'), t('clang_err_network'), [
+            { text: t('clang_retry'), onPress: () => handleLanguagePress(code) },
+            { text: t('action_cancel'), style: 'cancel' },
+          ]);
+        }
+      } finally {
+        setLangSaving(null);
+      }
+    })();
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -64,10 +107,15 @@ export default function SettingsScreen() {
             <TouchableOpacity
               key={lang.code}
               style={[styles.row, i < LANGUAGES.length - 1 && { borderBottomWidth: 1, borderBottomColor: c.border }]}
-              onPress={() => setLanguage(lang.code)}
+              onPress={() => handleLanguagePress(lang.code)}
+              disabled={langSaving !== null}
             >
               <Text style={[styles.rowLabel, { color: c.text }]}>{lang.name}</Text>
-              {language === lang.code && <Feather name="check" size={18} color={c.primary} />}
+              {langSaving === lang.code ? (
+                <ActivityIndicator size="small" color={c.primary} />
+              ) : (
+                language === lang.code && <Feather name="check" size={18} color={c.primary} />
+              )}
             </TouchableOpacity>
           ))}
         </View>
