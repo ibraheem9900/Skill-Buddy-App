@@ -1,6 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
 
 export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
 
@@ -304,6 +304,189 @@ export const authApi = {
    * endpoint, Bearer auto-attached.
    */
   getCertifications: () => api.get<CertificationListResponse>('/api/v1/certifications'),
+  /**
+   * GET /api/v1/categories — the full categories list (no parameters, no
+   * pagination per the live OpenAPI). VERIFIED LIVE: PUBLIC (no auth header
+   * needed — the docs' lock icon does not match the API; requests without
+   * any Authorization return 200) and currently returns an EMPTY array —
+   * the backend has no seeded categories yet. 200 items are
+   * CategoryResponse { id, name, description?, icon_url? } with only
+   * id+name required (icon rendering must tolerate missing/broken
+   * icon_url). Cache-friendly: fetched once per session via useCountries-
+   * style module cache; refresh() for pull-to-refresh. The categories
+   * screen falls back to the curated local list while the API is empty —
+   * server data replaces it as soon as the backend seeds categories.
+   */
+  getCategories: () => api.get<CategoryResponse[]>('/api/v1/categories'),
+  /**
+   * GET /api/v1/categories/{category_id} — ONE category with detail fields
+   * (integer path param per the live schema). VERIFIED LIVE (public — no
+   * auth header needed despite the docs' lock icon): a nonexistent id →
+   * 404 {"detail":"Category not found."} (plain-string detail);
+   * non-integer id → 422 int_parsing with detail[].loc
+   * ["path","category_id"]. 200 = CategoryDetailResponse — a RICHER schema
+   * than list items (is_active/status/timestamps REQUIRED here, absent in
+   * the list response), so a cached list entry can never satisfy a detail
+   * view; the hook caches full detail records separately. UI gates
+   * browsability on is_active (status semantics undocumented — never
+   * guessed); created_at/updated_at are informational only.
+   */
+  getCategory: (categoryId: number) =>
+    api.get<CategoryDetailResponse>(`/api/v1/categories/${categoryId}`),
+  /**
+   * GET /api/v1/addresses — the signed-in user's saved address. COUNTER-
+   * INTUITIVE: the live OpenAPI Schema tab shows the 200 schema is $ref
+   * AddressResponse — a SINGLE object ("type": "object"), NOT an array and
+   * NOT a { addresses: [...] } wrapper, despite the plural endpoint name
+   * (the Example Value panel also renders one object, consistent with this).
+   * Fields match that object exactly: id, user_id, latitude/longitude as
+   * numeric STRINGS, house_number/street_address/postal_code/landmark/
+   * formatted_address (nullable strings), is_default (bool), nested country
+   * {id,name,iso2,iso3,phone_code} / county {id,name} / city {id,name}, and
+   * created_at/updated_at date-times. No parameters (parameters: []) —
+   * token-scoped. The runtime shape may still evolve (Create/Get-single/
+   * Update/Delete siblings + web precedent suggest one-per-user data), so
+   * the hook defensively normalizes a bare-array/wrapper body to its first
+   * element. 401 when unauthenticated; no 422 (no params). Protected
+   * endpoint, Bearer auto-attached by the shared instance.
+   */
+  getAddresses: () => api.get<AddressResponse>('/api/v1/addresses'),
+  /**
+   * GET /api/v1/addresses/{address_id} — fetches ONE address by its own id
+   * (integer path param per the live schema; responses 200 + 422 only, 404
+   * undocumented → treated as a graceful "not found", web precedent). 200
+   * returns a bare AddressResponse — the SAME shape GET /api/v1/addresses
+   * returns, so a cached single entry already carries every field and the
+   * network call only fires when no cached record exists (deep-link /
+   * booking-summary resolution). Protected endpoint, Bearer auto-attached.
+   */
+  getAddress: (addressId: number) =>
+    api.get<AddressResponse>(`/api/v1/addresses/${addressId}`),
+  /**
+   * PUT /api/v1/addresses/{address_id} — updates an existing address
+   * (integer path param per the live schema; request body REQUIRED). Body
+   * schema is AddressUpdate — DISTINCT from AddressCreate but with the same
+   * optional-field shape (no required[]; lat/lng number|numeric-string|null;
+   * is_default boolean|null). Per PUT full-replace semantics the caller
+   * sends the COMPLETE object (every field explicit, null where unknown) —
+   * never a partial diff — so unspecified fields cannot be reset server-
+   * side. 200 returns the full AddressResponse (server truth — replaces the
+   * cached entry); 422 detail[] maps loc → field for inline form errors;
+   * 404 undocumented → web precedent. Protected endpoint, Bearer
+   * auto-attached by the shared instance (silent refresh on 401).
+   */
+  updateAddress: (addressId: number, payload: AddressUpdatePayload) =>
+    api.put<AddressResponse>(`/api/v1/addresses/${addressId}`, payload),
+  /**
+   * DELETE /api/v1/addresses/{address_id} — removes the address (integer
+   * path param per the live schema). UNUSUAL: the success response is 204
+   * NO CONTENT (live OpenAPI: no response schema at all) — typed `void` and
+   * NEVER parsed as JSON; callers branch on success/failure only. Responses:
+   * 204 + 422 only; 404 undocumented → treated as already-removed (web
+   * precedent, mirrors certifications). Deleting the user's default address
+   * returns no body, so any server-side default re-assignment is only
+   * observable via the next GET refetch — callers must not guess. Protected
+   * endpoint, Bearer auto-attached by the shared instance.
+   */
+  deleteAddress: (addressId: number) =>
+    api.delete<void>(`/api/v1/addresses/${addressId}`),
+  /**
+   * POST /api/v1/addresses — creates the authenticated user's address.
+   * JSON body per AddressCreate (live OpenAPI): every field OPTIONAL (no
+   * required[] in the schema — latitude/longitude accept number | numeric
+   * string | null; is_default defaults false). country_id/county_id/city_id
+   * are numeric ids from the PUBLIC geo endpoints (GET /api/v1/countries/,
+   * /countries/{id}/counties, /counties/{id}/cities — verified live: Estonia
+   * id=1 → Harju id=1 → Tallinn id=1) — never hardcoded. 201 returns the
+   * full AddressResponse (server truth — the caller seeds it into the
+   * addresses cache). 422 detail[] maps loc-last-element → field for inline
+   * form errors. Protected endpoint, Bearer auto-attached by the shared
+   * instance (silent refresh on 401).
+   */
+  createAddress: (payload: AddressCreatePayload) =>
+    api.post<AddressResponse>('/api/v1/addresses', payload),
+  /**
+   * GET /api/v1/countries/ — PUBLIC (no auth per live OpenAPI security:
+   * None) list of { id, name, iso2, iso3?, phone_code? }. Verified live:
+   * [{ id: 1, name: 'Estonia', iso2: 'EE', ... }]. Source for the Add
+   * Address country picker's numeric ids.
+   */
+  getCountries: () => api.get<AddressCountryResponse[]>('/api/v1/countries/'),
+  /**
+   * GET /api/v1/countries/{country_id} — fetches ONE country by id
+   * (integer path param per the live schema; responses 200 + 422 in the
+   * OpenAPI). PUBLIC — no Authorization header. VERIFIED LIVE (public, so
+   * real responses were probed): 200 returns a bare CountryResponse
+   * { id, name, iso2, iso3?, phone_code? }; a nonexistent id → 404
+   * {"detail":"Country not found."} (plain-string detail — undocumented in
+   * the schema but real); a non-integer id → 422 int_parsing with
+   * detail[].loc ["path","country_id"]. Cache-first discipline: the
+   * useCountries hook checks its cached list/single-item map BEFORE calling
+   * this, and "Get Address by ID" responses already nest the full country
+   * object — this endpoint is only for a bare country_id with no other
+   * source. Treated as graceful not-found by callers (null), web precedent.
+   */
+  getCountry: (countryId: number) =>
+    api.get<AddressCountryResponse>(`/api/v1/countries/${countryId}`),
+  /**
+   * GET /api/v1/countries/{country_id}/counties — counties for a country,
+   * [{ id, name }]. VERIFIED LIVE (public — no auth header needed despite
+   * the docs' lock icon): 200 returns [{ id: 1, name: 'Harju' }] for
+   * Estonia; a nonexistent country → 404 {"detail":"Country not found."}
+   * (plain-string detail, undocumented in the schema); a non-integer id →
+   * 422 int_parsing with detail[].loc ["path","country_id"]. CASCADE
+   * DISCIPLINE: only called once a country_id is selected (picker open or
+   * prefill); consumers reset county+city selections on country change and
+   * surface empty-array/loading/retry states.
+   */
+  getCounties: (countryId: number) =>
+    api.get<AddressRegionResponse[]>(`/api/v1/countries/${countryId}/counties`),
+  /**
+   * GET /api/v1/counties/{county_id}/cities — cities for a county,
+   * [{ id, name }]. VERIFIED LIVE (public — no auth header needed despite
+   * the docs' lock icon): 200 returns [{ id: 1, name: 'Tallinn' }] for
+   * Harju; a nonexistent county → 404 {"detail":"County not found."}
+   * (plain-string detail, undocumented in the schema); a non-integer id →
+   * 422 int_parsing with detail[].loc ["path","county_id"]. CASCADE
+   * DISCIPLINE: only called once a county_id is selected (picker open or
+   * prefill); consumers reset the city selection on county AND country
+   * change and surface empty-array/loading/retry states.
+   */
+  getCities: (countyId: number) =>
+    api.get<AddressRegionResponse[]>(`/api/v1/counties/${countyId}/cities`),
+  /**
+   * GET /api/v1/cities/{city_id} — fetches ONE city by id (integer path
+   * param per the live schema; responses 200 + 422 in the OpenAPI).
+   * VERIFIED LIVE (public — no auth header needed despite the docs' lock
+   * icon): 200 returns a bare CityResponse { id, name } (Tallinn for id 1);
+   * a nonexistent id → 404 {"detail":"City not found."} (plain-string
+   * detail, undocumented in the schema); a non-integer id → 422 int_parsing
+   * with detail[].loc ["path","city_id"]. Cache-first discipline: the
+   * useCities hook checks its caches BEFORE calling this. NOTE — the
+   * current app has NO consumer (every city_id already carries its name
+   * from List Cities rows or the nested AddressResponse.city object); this
+   * is the prepared-for-future helper for a bare-id-only scenario. Cities
+   * are the FINAL level of the location hierarchy (no area/locality
+   * sub-level exists in the live OpenAPI).
+   */
+  getCity: (cityId: number) =>
+    api.get<AddressRegionResponse>(`/api/v1/cities/${cityId}`),
+  /**
+   * GET /api/v1/counties/{county_id} — fetches ONE county by id (integer
+   * path param per the live schema; responses 200 + 422 in the OpenAPI).
+   * VERIFIED LIVE (public — no auth header needed despite the docs' lock
+   * icon): 200 returns a bare CountyResponse { id, name } (Harju for id 1);
+   * a nonexistent id → 404 {"detail":"County not found."} (plain-string
+   * detail, undocumented in the schema); a non-integer id → 422 int_parsing
+   * with detail[].loc ["path","county_id"]. Cache-first discipline: the
+   * useCounties hook checks its caches BEFORE calling this. NOTE — the
+   * current app has NO consumer (every county_id already carries its name
+   * from List Counties rows or the nested AddressResponse.county object);
+   * this is the prepared-for-future helper for a bare-id-only scenario
+   * (e.g. a deep-linked saved profile storing only county_id).
+   */
+  getCounty: (countyId: number) =>
+    api.get<AddressRegionResponse>(`/api/v1/counties/${countyId}`),
   /**
    * GET /api/v1/certifications/{certification_id} — fetches ONE certification
    * by its own id (integer path param per the live schema). 200 returns a

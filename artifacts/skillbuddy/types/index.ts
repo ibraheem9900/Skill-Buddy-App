@@ -58,6 +58,93 @@ export interface CertificationListResponse {
   total: number;
 }
 
+/** Nested country of GET /api/v1/addresses (CountryResponse per the live
+ * OpenAPI). iso3/phone_code are optional per the schema (anyOf null).
+ */
+export interface AddressCountryResponse {
+  id: number;
+  name: string;
+  iso2: string;
+  iso3?: string | null;
+  phone_code?: string | null;
+}
+
+/** Nested county/city of GET /api/v1/addresses (CountyResponse /
+ * CityResponse per the live OpenAPI — identical { id, name } shape).
+ */
+export interface AddressRegionResponse {
+  id: number;
+  name: string;
+}
+
+/** GET /api/v1/addresses response — a SINGLE AddressResponse object (live
+ * OpenAPI Schema tab: $ref AddressResponse, "type": "object" — NOT an array
+ * and no list wrapper, despite the endpoint's plural name). Text fields are
+ * nullable (required but anyOf null); latitude/longitude are numeric STRINGS
+ * — never Number() them for display. is_default is always present.
+ */
+export interface AddressResponse {
+  id: number;
+  user_id?: number | null;
+  /** Numeric STRING per the schema (e.g. "24.7453674") — never render raw. */
+  latitude?: string | null;
+  /** Numeric STRING per the schema — never render raw. */
+  longitude?: string | null;
+  house_number?: string | null;
+  street_address?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  formatted_address?: string | null;
+  is_default: boolean;
+  country?: AddressCountryResponse | null;
+  county?: AddressRegionResponse | null;
+  city?: AddressRegionResponse | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /api/v1/addresses request body (AddressCreate per the live OpenAPI).
+ * EVERY field is optional server-side (schema has NO "required" array;
+ * latitude/longitude accept number | numeric-string | null; is_default
+ * defaults to false) — client-side validation decides what to insist on.
+ * country_id/county_id/city_id are numeric ids sourced from the live
+ * GET /api/v1/countries(/counties/cities) endpoints — never hardcoded.
+ */
+export interface AddressCreatePayload {
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  country_id?: number | null;
+  county_id?: number | null;
+  city_id?: number | null;
+  house_number?: string | null;
+  street_address?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  formatted_address?: string | null;
+  is_default?: boolean | null;
+}
+
+/** PUT /api/v1/addresses/{address_id} request body (AddressUpdate per the
+ * live OpenAPI — a DISTINCT schema from AddressCreate with the same
+ * optional-field shape: no required[], latitude/longitude accept number |
+ * numeric-string | null, is_default anyOf boolean|null). The mobile client
+ * still sends the FULL body per PUT full-replace semantics (task spec):
+ * every field explicit, null where no usable value exists.
+ */
+export interface AddressUpdatePayload {
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  country_id?: number | null;
+  county_id?: number | null;
+  city_id?: number | null;
+  house_number?: string | null;
+  street_address?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  formatted_address?: string | null;
+  is_default?: boolean | null;
+}
+
 /** One item of GET /api/v1/clients/favorites — a saved-service bookmark.
  * Only stores service_id (NOT the service's title/price/image) — the screen
  * joins with the local services catalog for display.
@@ -207,6 +294,43 @@ export interface Category {
   iconLib: 'MaterialCommunityIcons' | 'Ionicons' | 'Feather';
   iconName: string;
   color: string;
+}
+
+/** One item of GET /api/v1/categories (CategoryListResponse per the live
+ * OpenAPI). id+name are REQUIRED; description/icon_url are OPTIONAL (schema
+ * required: ['id','name']) — icon rendering must tolerate a missing or
+ * broken icon_url. VERIFIED LIVE: public endpoint (no auth — the docs'
+ * lock icon does not match), 200 currently returns an EMPTY array while
+ * the backend has no seeded categories.
+ */
+export interface CategoryResponse {
+  id: number;
+  name: string;
+  description?: string | null;
+  icon_url?: string | null;
+}
+
+/** GET /api/v1/categories/{category_id} (CategoryResponse per the live
+ * OpenAPI — a RICHER schema than the list item: is_active, status and the
+ * timestamps are REQUIRED here but absent from list items, which is why a
+ * cached list entry can never satisfy a detail view). description/icon_url
+ * remain optional. VERIFIED LIVE (public): nonexistent id → 404
+ * {"detail":"Category not found."}; non-integer id → 422 int_parsing.
+ */
+export interface CategoryDetailResponse {
+  id: number;
+  name: string;
+  description?: string | null;
+  icon_url?: string | null;
+  /** Gating flag: false → the category must NOT be presented as browsable
+   * (no services list / view action). Treated as active when missing. */
+  is_active: boolean;
+  /** Semantics NOT documented (possible values unknown) — captured for the
+   * team; the UI gates on is_active only, never guesses this field. */
+  status: string;
+  /** Informational only — never displayed to end users. */
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Provider {
