@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -28,17 +28,42 @@ export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: P
   const { t } = useLanguage();
   const [remaining, setRemaining] = useState(endsAt - Date.now());
   const expiredFired = React.useRef(false);
+  const lastEndsAt = React.useRef(endsAt);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    // A NEW deadline is a NEW bidding window (e.g. the Restart Timer action
+    // moved it), so expiry must be able to fire again for it. This is keyed to
+    // an actual change of `endsAt` — resetting on every effect run would re-fire
+    // onExpire in a loop while a deadline already in the past is on screen.
+    if (lastEndsAt.current !== endsAt) {
+      lastEndsAt.current = endsAt;
+      expiredFired.current = false;
+    }
+
+    const tick = () => {
       const diff = endsAt - Date.now();
       setRemaining(diff);
       if (diff <= 0 && !expiredFired.current) {
         expiredFired.current = true;
         onExpire?.();
       }
-    }, 1000);
-    return () => clearInterval(interval);
+    };
+
+    tick(); // start from the true remaining time, not the mount-time guess
+    const interval = setInterval(tick, 1000);
+
+    // A suspended app freezes the JS timer, so on return the displayed value
+    // can be minutes behind. Native timers cannot be trusted across a suspend:
+    // recompute from `endsAt` (the absolute deadline) as soon as we are active
+    // again, and let the interval carry on from there.
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') tick();
+    });
+
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
   }, [endsAt, onExpire]);
 
   const accent = urgency === 'urgent' ? c.urgent : c.success;

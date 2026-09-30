@@ -48,3 +48,7 @@ Thumbs.db
 .cache/
 .local/
 .env
+
+# stray local logs / tool output
+ci-log.txt
+updates.json

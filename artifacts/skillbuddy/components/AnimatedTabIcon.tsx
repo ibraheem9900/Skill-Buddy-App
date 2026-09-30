@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View } from 'react-native';
+import { View, type ColorValue } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -9,9 +9,12 @@ import Animated, {
 
 interface Props {
   focused: boolean;
-  color: string;
+  /** RN 0.86 / React Navigation 7 type the tab-bar tint as `ColorValue`
+   * (string | platform colour), so the prop mirrors that — the previous
+   * `string` forced an unsafe narrowing at every call site. */
+  color: ColorValue;
   activeColor: string;
-  children: (color: string) => React.ReactNode;
+  children: (color: ColorValue) => React.ReactNode;
 }
 
 /**

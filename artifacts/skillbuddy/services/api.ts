@@ -1,6 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
+import { buildListJobsQuery } from '@/lib/jobList';
+import { isValidJobId } from '@/lib/jobPublish';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
 
 export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
 
@@ -319,6 +321,659 @@ export const authApi = {
    */
   getCategories: () => api.get<CategoryResponse[]>('/api/v1/categories'),
   /**
+   * GET /api/v1/services — the GLOBAL services catalog (the Services tab's
+   * "browse all" list). VERIFIED LIVE (public — no auth header needed
+   * despite the docs' lock icon): 200 currently returns an EMPTY array
+   * because the backend has no seeded services yet, so the Services tab
+   * falls back to the curated local catalog until it is populated.
+   *
+   * PARAMETERS: NONE. Verified against the live OpenAPI — the operation
+   * object has no `parameters` key at all (the docs UI agrees: "No
+   * parameters"), so there is no search / category_id / page / limit / sort
+   * to send. All UI filtering happens client-side (see the Services tab).
+   *
+   * RESPONSES: only 200 is documented — no 422 (impossible: no inputs) and
+   * no 404. 200 = a BARE ARRAY of ServiceListItem (same shared
+   * `ServiceListResponse` schema as the category-services endpoint);
+   * price_from/price_to are nullable numeric STRINGS — format via
+   * lib/servicePrice.ts, never render raw. thumbnail_url is nullable.
+   * Cache once per session via useServices; do not call per render.
+   */
+  getServices: () => api.get<ServiceListItem[]>('/api/v1/services'),
+  /**
+   * GET /api/v1/services/{service_id} — ONE service's FULL detail (integer
+   * path param per the live schema). VERIFIED LIVE (public — no auth header
+   * needed despite the docs' lock icon): non-integer id → 422 int_parsing
+   * with detail[].loc ["path","service_id"]; a nonexistent id → 404
+   * {"detail":"Service not found."} (plain-string detail — happens live even
+   * though the docs document only 200/422, so it is handled as its own
+   * state, not lumped into generic network errors). 200 = ServiceDetailResponse
+   * — a RICHER schema than the list item (what_to_expect, is_active,
+   * status, timestamps and the media / inclusion_options arrays, all absent
+   * from the list), so a cached list entry can never satisfy a detail view;
+   * the hook caches full detail records separately. price_from/price_to are
+   * nullable numeric STRINGS — format via lib/servicePrice.ts, never render
+   * raw. description/what_to_expect may contain rich text — render through
+   * lib/sanitizeRichText.ts. Cache per id in useServiceDetail; do not call
+   * per render.
+   */
+  getServiceById: (serviceId: number) =>
+    api.get<ServiceDetailResponse>(`/api/v1/services/${serviceId}`),
+  /**
+   * GET /api/v1/services/{service_id}/media — ONE service's media items
+   * (integer path param). VERIFIED LIVE (public — no auth header needed
+   * despite the docs' lock icon): non-integer id → 422 int_parsing with
+   * detail[].loc ["path","service_id"]; a nonexistent id → 404
+   * {"detail":"Service not found."} (plain-string detail — undocumented but
+   * real).
+   *
+   * 200 = a BARE ARRAY of ServiceMediaResponse: the SAME object shape as
+   * `ServiceResponse.media` on Get Service by ID. That duplication is real,
+   * so this endpoint is NOT called alongside the detail fetch — it exists so
+   * a gallery can re-fetch / lazy-load media WITHOUT pulling the whole
+   * service (useServiceMedia caches per id).
+   *
+   * `position` orders the gallery (ascending); `is_thumbnail` marks the
+   * cover — if several entries are flagged, the LOWEST position wins, which
+   * is an assumption (see lib/serviceMedia.ts). `media_type` is an
+   * UNCONSTRAINED string in the live schema — the spec defines no enum for
+   * it anywhere, so its exact values CANNOT be confirmed from the docs; the
+   * UI treats any value containing "video" as a video and everything else as
+   * an image, logging unrecognised values. `media_url` is NULLABLE — filter
+   * before rendering (never feed a video URL to an image component).
+   */
+  getServiceMedia: (serviceId: number) =>
+    api.get<ServiceMediaItem[]>(`/api/v1/services/${serviceId}/media`),
+  /**
+   * GET /api/v1/services/{service_id}/inclusion-options — ONE service's
+   * "what's included" list (integer path param). VERIFIED LIVE (public — no
+   * auth header needed despite the docs' lock icon): non-integer id → 422
+   * int_parsing with detail[].loc ["path","service_id"]; a nonexistent id →
+   * 404 {"detail":"Service not found."} (plain-string detail — undocumented
+   * but real).
+   *
+   * 200 = a BARE ARRAY of InclusionOptionResponse ({id, name}, both
+   * required): the SAME schema that `ServiceResponse.inclusion_options`
+   * `$ref`s on Get Service by ID. That duplication is real, so this endpoint
+   * is NOT called alongside the detail fetch — the Service Detail screen
+   * renders the detail response's array (zero extra requests) and this
+   * function backs a standalone list / lazy-load path instead.
+   * useServiceInclusionOptions caches per id.
+   */
+  getServiceInclusionOptions: (serviceId: number) =>
+    api.get<ServiceInclusionOption[]>(
+      `/api/v1/services/${serviceId}/inclusion-options`
+    ),
+  /* ── Jobs (client job creation) ─────────────────────────────────────────── */
+
+  /**
+   * POST /api/v1/jobs — creates a job for the AUTHENTICATED client.
+   *
+   * AUTH: the operation is PROTECTED (live OpenAPI security:
+   * [{OAuth2PasswordBearer: []}]). The shared axios instance attaches the
+   * stored access token as `Authorization: Bearer <token>` on every request,
+   * and its response interceptor already handles an expired token: it calls
+   * POST /api/v1/auth/refresh (rotating BOTH tokens), replays this request
+   * exactly once via the `_retry` guard, queues concurrent callers, and on a
+   * failed refresh clears the session through AuthContext's session-expired
+   * handler — so no bespoke 401/retry logic belongs here.
+   *
+   * VERIFIED LIVE: POST /api/v1/jobs with no token (and no body) returns
+   * HTTP 401 {"detail":"Not authenticated"} — auth is checked BEFORE body
+   * validation, so a 422 cannot be produced without a valid token.
+   *
+   * BODY (live OpenAPI schema JobCreate): REQUIRED service_id, title
+   * (3..150 chars), milestones (>= 1 item), address. `category_id` and
+   * `description` are nullable; `request_type` (default REGULAR),
+   * `booking_type` (default ONE_TIME) and `is_draft` (default false) are
+   * optional. `service_id`/`category_id`/`country_id`/`county_id`/`city_id`
+   * are real server ids — never invented client-side.
+   *
+   * DOC CONTRADICTION (flagged, not guessed): JobMilestoneCreate is described
+   * as "One selected day/time for a MULTI_DAY booking. Ignored for ONE_TIME
+   * bookings, which use the job's own scheduled_at / expected_hours instead."
+   * But JobCreate exposes NO top-level scheduled_at or expected_hours, so
+   * milestones[] is the ONLY channel for a ONE_TIME job's schedule and at
+   * least one entry must be sent. `expected_hours` accepts number | numeric
+   * string | null; this app always sends a number.
+   *
+   * 201 → JobResponse (callers persist id / status / bidding_ends_at).
+   * 422 → {"detail":[{"loc":["body","<field>",...],"msg":...}]}; map it with
+   * lib/jobValidation.mapValidationErrors so each message lands under its
+   * input.
+   */
+  createJob: (payload: CreateJobRequest) =>
+    api.post<JobResponse>('/api/v1/jobs', payload),
+
+  /**
+   * POST /api/v1/jobs/{job_id}/publish — publishes a DRAFT job so bidding
+   * opens.
+   *
+   * CONTRACT (verified against the live OpenAPI): ONE required integer path
+   * parameter and NO requestBody, so nothing is sent as a body — axios adds
+   * no payload to a post() with no second argument. `jobId` is re-checked at
+   * runtime because a non-integer would silently build a malformed path
+   * (/api/v1/jobs/NaN/publish); callers should never get that far.
+   *
+   * PROTECTED: same shared-client auth/refresh-once rules as createJob. A 401
+   * that survives the refresh + single replay is reported to the caller, which
+   * sends the user to login.
+   *
+   * 200 → the FULL JobResponse (same schema as createJob), so the caller reads
+   * status / is_bidding_open / bidding_ends_at / remaining_bidding_seconds
+   * from the REAL response and never assumes a published job's status.
+   * 422 → {"detail":[{"loc":[...],"msg":...}]} | {"detail":"..."}. The docs
+   * say nothing about 400/401/403/404/409 — those are handled generically by
+   * lib/jobPublish.classifyPublishFailure with no assumed meaning.
+   */
+  publishJob: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`publishJob: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/publish`);
+  },
+
+  /**
+   * GET /api/v1/jobs — lists the AUTHENTICATED user's jobs.
+   *
+   * AUTH: PROTECTED (live OpenAPI security: [{OAuth2PasswordBearer: []}]). The
+   * shared axios instance attaches the Bearer token and already refreshes an
+   * expired one once before replaying the request, so nothing extra is needed
+   * here. VERIFIED LIVE: with no token the endpoint answers
+   * HTTP 401 {"detail":"Not authenticated"}.
+   *
+   * QUERY (all optional, verified against the live OpenAPI):
+   *   status                 JobStatus enum (14 values) | null
+   *   request_type           URGENT | REGULAR | null
+   *   category_id            integer | null
+   *   service_id             integer | null
+   *   only_actively_bidding  boolean, default false
+   *   limit                  integer 1..100, default 20
+   *   offset                 integer >= 0, default 0
+   * Unset parameters are OMITTED (never null/empty) by
+   * lib/jobList.buildListJobsQuery, which also clamps limit/offset.
+   *
+   * 200 = a BARE ARRAY of JobListResponse with NO wrapper and NO total count,
+   * so "is there another page" can only be inferred from the page length
+   * (see lib/jobList.mergeJobsPage). The list item is SLIGHTER than the
+   * JobResponse returned by create/get — no description, address, attachments,
+   * status_history or can_* flags — which is why it has its own JobListItem
+   * type and why list cards must not read those fields.
+   *
+   * Documented responses: 200 and 422 (422 carries {detail:[{loc,msg,...}]};
+   * read it with lib/jobList.firstErrorMessage).
+   */
+  listJobs: (params?: ListJobsParams) =>
+    api.get<JobListItem[]>('/api/v1/jobs', {
+      params: buildListJobsQuery(params),
+    }),
+
+  /**
+   * POST /api/v1/jobs/{job_id}/address — creates the job's address.
+   *
+   * CONTRACT (verified against the live OpenAPI): one required integer path
+   * parameter and a JobAddressCreate body with NO required properties. The
+   * geo ids must be real ids from the public country → county → city cascade,
+   * and latitude/longitude are omitted by the caller because this app has no
+   * map picker (the schema allows their absence).
+   *
+   * PROTECTED: same shared-client auth/refresh-once rules as the rest of the
+   * jobs group. 201 → JobAddressResponse (the source of truth — never the
+   * locally entered values). The docs list 422 only; 400/401/403/404/409 are
+   * handled generically from the backend's own `detail`.
+   *
+   * CREATE-ONLY: the caller must be sure the job has no address yet, otherwise
+   * the backend may reject it. Changing an existing address is
+   * PATCH /jobs/{job_id}/address — a different task.
+   */
+  createJobAddress: (jobId: number, payload: JobAddressCreate) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`createJobAddress: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobAddressResponse>(`/api/v1/jobs/${jobId}/address`, payload);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/restart-timer — reopens bidding for a fresh window.
+   *
+   * CONTRACT (verified against the live OpenAPI spec, NOT just the Swagger UI): the
+   * operation has ONE required integer path parameter and **NO `requestBody` key at
+   * all** — so nothing is sent as a body. axios adds no payload to a post() with no
+   * second argument, which is exactly right; sending `{}` would be harmless but
+   * unnecessary. Its only documented responses are 200 (schema JobActionResponse =
+   * { message, job }) and 422 (HTTPValidationError).
+   *
+   * VERIFIED LIVE (no token): POST /api/v1/jobs/1/restart-timer → HTTP 401
+   * {"detail":"Not authenticated"}, while GET/PUT on the same path → 405, so POST is
+   * the registered method and auth is enforced before anything else.
+   *
+   * PROTECTED: the shared axios instance attaches the stored access token and its
+   * response interceptor refreshes it once (rotating both tokens) before replaying
+   * this request, then queues concurrent callers — so no bespoke 401/retry logic
+   * belongs here. A 401 that survives that refresh is reported to the caller.
+   *
+   * The 200 `job` is the SAME full JobResponse as GET /jobs/{job_id} and is the
+   * source of truth: it already reflects the new bidding_ends_at,
+   * remaining_bidding_seconds, timer_restart_count and updated can_restart_timer, so
+   * callers replace their held job with it rather than incrementing anything locally.
+   *
+   * The restart LIMIT is not documented anywhere in the spec (no code, no value); the
+   * backend owns it through `can_restart_timer`. See lib/jobRestartTimer for how an
+   * undocumented rejection is surfaced without inventing a status code.
+   */
+  restartJobTimer: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`restartJobTimer: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobActionResponse>(`/api/v1/jobs/${jobId}/restart-timer`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/convert-to-regular — turns an URGENT job back into
+   * a REGULAR one.
+   *
+   * CONTRACT (verified against the live OpenAPI spec, not just the Swagger UI): the
+   * operation declares `security: [{OAuth2PasswordBearer: []}]`, ONE required integer
+   * path parameter, and **NO `requestBody` key at all** — so no body is sent. Its only
+   * documented responses are 200 (schema JobActionResponse = { message, job }) and 422
+   * (HTTPValidationError).
+   *
+   * VERIFIED LIVE (no token): POST → HTTP 401 {"detail":"Not authenticated"}, while
+   * GET/PUT on the same path → 405, so POST is the registered method.
+   *
+   * PROTECTED: through the shared axios instance, so the Bearer token is attached and
+   * an expired one is refreshed once before this is replayed — no bespoke 401 logic.
+   * A 401 that survives the refresh is reported to the caller, which sends the user to
+   * login.
+   *
+   * The 200 `job` is the WHOLE job (the same JobResponse as GET /jobs/{job_id}, with
+   * its address embedded — so no extra address call is needed) and is the source of
+   * truth: callers replace their cached job with it instead of patching is_urgent or
+   * request_type locally.
+   *
+   * The reverse action is convertJobToUrgent below — a separate endpoint with its
+   * own flag; neither is used in place of the other.
+   */
+  convertJobToRegular: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`convertJobToRegular: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobActionResponse>(`/api/v1/jobs/${jobId}/convert-to-regular`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/convert-to-urgent — turns a REGULAR job into an
+   * URGENT one (the exact reverse of convertJobToRegular).
+   *
+   * CONTRACT (verified against the live OpenAPI spec): `security:
+   * [{OAuth2PasswordBearer: []}]`, ONE required integer path parameter, and **NO
+   * `requestBody` key at all** — no body is sent. Its only documented responses are
+   * 200 (schema JobActionResponse = { message, job }) and 422 (HTTPValidationError).
+   *
+   * VERIFIED LIVE (no token): POST → HTTP 401 {"detail":"Not authenticated"}, while
+   * GET/PUT on the same path → 405, so POST is the registered method.
+   *
+   * PROTECTED: through the shared axios instance, so the Bearer token is attached and
+   * an expired one is refreshed once before this is replayed — no bespoke 401 logic.
+   * A 401 that survives the refresh is reported to the caller, which sends the user to
+   * login.
+   *
+   * The 200 `job` is the WHOLE job (the same JobResponse as GET /jobs/{job_id}, with
+   * its address embedded — no extra address call) and is the source of truth: callers
+   * replace their cached job with it rather than patching is_urgent / request_type.
+   */
+  convertJobToUrgent: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`convertJobToUrgent: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobActionResponse>(`/api/v1/jobs/${jobId}/convert-to-urgent`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/assign-provider — assigns a provider to the job.
+   *
+   * CONTRACT (verified against the live OpenAPI spec): `security:
+   * [{OAuth2PasswordBearer: []}]`, ONE required integer path parameter, and a
+   * **REQUIRED `application/json` body** (schema JobAssignProviderRequest) whose
+   * single property `provider_id` (integer) is itself required — unlike the other
+   * job actions, which take no body at all.
+   *
+   * RESPONSE SHAPE DIFFERS: 200 is the **JobResponse DIRECTLY**, with no
+   * `{ message, job }` envelope, so callers adopt `data` itself as the job. The only
+   * other documented response is 422 (HTTPValidationError).
+   *
+   * VERIFIED LIVE (no token): POST → HTTP 401 {"detail":"Not authenticated"} with
+   * and without a body (FastAPI resolves auth before body validation), while
+   * GET/PUT/PATCH on the same path → 405 — so POST is the registered method.
+   *
+   * PROTECTED: through the shared axios instance, so the Bearer token is attached and
+   * an expired one is refreshed once before this is replayed — no bespoke 401 logic.
+   * A 401 that survives the refresh is reported to the caller, which sends the client
+   * to login.
+   *
+   * `provider_id` must come from a REAL source — GET /api/v1/jobs/{job_id}/bids
+   * (BidResponse.provider.id) — never invented client-side. The caller gates on the
+   * job still being open for assignment (see lib/jobAssign).
+   */
+  assignJobProvider: (jobId: number, payload: JobAssignProviderRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`assignJobProvider: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/assign-provider`, payload);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/confirm-payment — confirms the client's payment for
+   * the job.
+   *
+   * CONTRACT (verified against the live OpenAPI spec): `security:
+   * [{OAuth2PasswordBearer: []}]`, ONE required integer path parameter, and **NO
+   * `requestBody` key at all** — so nothing is sent as a body. There is no amount,
+   * no payment method and no other field to send; axios adds no payload to a post()
+   * with no second argument, which is exactly right. The docs' only responses are 200
+   * (schema **JobResponse directly** — no `{ message, job }` envelope) and 422
+   * (HTTPValidationError).
+   *
+   * VERIFIED LIVE (no token): POST → HTTP 401 {"detail":"Not authenticated"}, while
+   * GET/PUT on the same path → 405, so POST is the registered method.
+   *
+   * PROTECTED: through the shared axios instance, so the Bearer token is attached and
+   * an expired one is refreshed once before this is replayed — no bespoke 401 logic.
+   * A 401 that survives the refresh is reported to the caller, which sends the client
+   * to login.
+   *
+   * The 200 `job` IS the whole job (with its address embedded — no extra address
+   * call), and it is the source of truth for what payment confirmation changed:
+   * status, is_bidding_open, is_editable, the can_* flags and the bidding window
+   * (bidding_started_at / bidding_ends_at / remaining_bidding_seconds). Callers adopt
+   * it wholesale instead of flipping a local "paid" flag, and must not assume which
+   * status follows — the response says.
+   *
+   * The actual money movement (gateway, wallet, installment plan) is NOT part of this
+   * endpoint and is not implemented here: GET /jobs/{job_id}/payment-options,
+   * GET /jobs/{job_id}/payments, POST /jobs/{job_id}/installments/pay and
+   * GET /jobs/{job_id}/invoice are separate endpoints. The caller only fires this once
+   * the job is in a payable state and the client has confirmed (see lib/jobPayment).
+   */
+  /**
+   * POST /api/v1/jobs/{job_id}/start — the PROVIDER starts work on the job.
+   *
+   * CONTRACT (from the live OpenAPI spec, not the Swagger UI):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - **NO `requestBody` key at all** — no body is sent, and nothing (started_at,
+   *     location, …) is invented
+   *   - only 200 (**the JobResponse DIRECTLY** — no `{ message, job }` envelope) and
+   *     422 (HTTPValidationError) are documented
+   *
+   * PROTECTED + the shared 401 refresh/replay, like every other job action. On
+   * success the 200 body is the authoritative job, so the caller replaces its cached
+   * job with it (status, is_editable, the can_* flags, status_history, milestones and
+   * — when the response closes bidding — the countdown all follow the response). The
+   * caller must gate the action: it is the provider's action, and only offered on a
+   * job that is still in the startable state (see lib/jobStart).
+   */
+  startJob: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`startJob: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/start`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/complete — the PROVIDER marks the job's work done.
+   *
+   * CONTRACT (from the live OpenAPI spec, not the Swagger UI):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - **NO `requestBody` key at all** — no body is sent, and nothing (a `completed_at`,
+   *     a rating or a review, …) is invented
+   *   - only 200 (**the JobResponse DIRECTLY** — no `{ message, job }` envelope) and
+   *     422 (HTTPValidationError) are documented
+   *
+   * PROTECTED + the shared 401 refresh/replay, like every other job action. On success
+   * the 200 body is the authoritative job, so the caller replaces its cached job with
+   * it (status, completed_at, the can_* flags, status_history, milestones). The caller
+   * must gate the action: it is the provider's action, and only offered on a job that
+   * is still in progress (see lib/jobComplete). The rating/review and any payment
+   * release that follow are separate tasks and are not triggered from here.
+   */
+  completeJob: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`completeJob: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/complete`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/cancel — cancels a job, with a reason.
+   *
+   * CONTRACT (from the live OpenAPI spec, not the Swagger UI):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `application/json` request body** (schema JobCancelRequest):
+   *     `reason` required, a string of 3–255 characters (NO enum — free text), and
+   *     `notes` optional and nullable. Unlike start/complete this action is NOT
+   *     body-less, and the two field names are exactly these.
+   *   - only 200 (**the JobResponse DIRECTLY** — no `{ message, job }` envelope) and
+   *     422 (HTTPValidationError) are documented
+   *   - VERIFIED LIVE (no token): POST → 401 {"detail":"Not authenticated"}; GET/PUT
+   *     → 405, so POST is the registered method
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the backend's own
+   * `is_cancellable` flag and validates the reason against the same 3–255 rule BEFORE
+   * sending, so an empty or too-short reason can never reach the API. On success the
+   * 200 body is the authoritative job (cancellation_reason, cancellation_notes,
+   * cancellation_fee_charged, cancelled_at and every derived flag), so the caller
+   * replaces its cached job with it rather than mutating anything locally.
+   */
+  cancelJob: (jobId: number, payload: JobCancelRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`cancelJob: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/cancel`, payload);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/provider-cancel — the PROVIDER withdraws from a job
+   * they were already accepted/assigned to (Swagger: "Provider Cancel After
+   * Acceptance").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - **NO `requestBody`** — unlike the client's `/cancel`, nothing is sent (no
+   *     reason/notes), so no body is invented here
+   *   - its 200 is the WRAPPED `JobActionResponse` `{ message, job }` — the same
+   *     envelope as convert-to-regular / restart-timer, and NOT the direct job the
+   *     client's `/cancel` returns; 422 is HTTPValidationError
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the active
+   * PROVIDER role and on the job still being assigned (assigned_provider_id set) and
+   * not yet finished; the backend authorises the real party (403 gets its own copy and
+   * a re-sync). On success the caller adopts `data.job` WHOLESALE — status,
+   * assigned_provider_id, is_bidding_open, the can_* flags, cancelled_at and
+   * cancellation_fee_charged all come from it — and uses `data.message` for the toast.
+   */
+  providerCancelJob: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`providerCancelJob: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobActionResponse>(`/api/v1/jobs/${jobId}/provider-cancel`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/decline-by-provider — the PROVIDER declines a job they
+   * were assigned but had not started (Swagger: "Decline By Provider").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `application/json` request body** (schema JobDetailsRequest)
+   *     whose only property, `details` (required, `minLength: 3`, `maxLength: 1000`,
+   *     NO enum), is a free-text explanation — NOT `reason`/`notes`
+   *   - its 200 is the JobResponse DIRECTLY (no `{ message, job }` envelope here, and
+   *     no `message` field at all, so the caller writes the success toast itself);
+   *     422 is HTTPValidationError
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the active PROVIDER
+   * role and on the job sitting in PROVIDER_ASSIGNED (assigned, work not begun — the
+   * window the sibling provider-cancel endpoint does NOT own); the backend authorises
+   * the real party. On success the caller replaces its cached job with the 200 body —
+   * status, assigned_provider_id, is_bidding_open, the can_* flags and
+   * cancellation_fee_charged all come from it, never from local guesses.
+   */
+  declineJobByProvider: (jobId: number, payload: JobDetailsRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`declineJobByProvider: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/decline-by-provider`, payload);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/pause-by-client — the CLIENT temporarily halts a job
+   * that is already under way (Swagger: "Pause By Client").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `application/json` request body** (schema JobDetailsRequest)
+   *     whose only property, `details` (required, `minLength: 3`, `maxLength: 1000`,
+   *     NO enum), is a free-text explanation — NOT `reason`/`notes`
+   *   - its 200 is the JobResponse DIRECTLY (no `{ message, job }` envelope and no
+   *     `message` field, so the caller writes the success toast); 422 is
+   *     HTTPValidationError
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the CLIENT side and
+   * on the job sitting in IN_PROGRESS with a real assigned provider, not cancelled /
+   * completed / already paused; the backend authorises the real client. On success the
+   * caller replaces its cached job with the 200 body — status, is_editable,
+   * is_cancellable, the can_* flags, status_history and milestones all come from it,
+   * never from local guesses. No resume endpoint is connected, so the screen shows the
+   * paused state plainly rather than leaving a dead end.
+   */
+  pauseJobByClient: (jobId: number, payload: JobDetailsRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`pauseJobByClient: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/pause-by-client`, payload);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/pause-by-provider — the PROVIDER puts a job they are
+   * working on temporarily on hold (Swagger: "Pause By Provider").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `application/json` request body** (schema JobDetailsRequest)
+   *     whose only property, `details` (required, `minLength: 3`, `maxLength: 1000`,
+   *     NO enum), is a free-text explanation — NOT `reason`/`notes`. The operation
+   *     carries no description, so the field is honoured exactly as the shared schema
+   *     documents it.
+   *   - its 200 is the JobResponse DIRECTLY (no `{ message, job }` envelope and no
+   *     `message` field, unlike Restart Timer, so the caller writes the success toast);
+   *     422 is HTTPValidationError
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the active PROVIDER
+   * role and on the job sitting in IN_PROGRESS with a real assigned provider, not
+   * cancelled / completed / already paused; the backend authorises the real assigned
+   * provider (a wrong provider or a client is refused with its own copy and a re-sync).
+   * On success the caller replaces its cached job with the 200 body — status, the
+   * can_* flags, is_bidding_open, status_history and milestones all come from it, so a
+   * paused job shows the status the backend set and the bidding countdown disappears by
+   * itself (biddingDeadline returns null unless is_bidding_open is true).
+   */
+  pauseJobByProvider: (jobId: number, payload: JobDetailsRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`pauseJobByProvider: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/pause-by-provider`, payload);
+  },
+
+  confirmJobPayment: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`confirmJobPayment: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/confirm-payment`);
+  },
+
+  /**
+   * PATCH /api/v1/jobs/{job_id}/address — updates an EXISTING job address.
+   *
+   * CONTRACT (this task): FULL BODY only (partial bodies NOT confirmed, so the
+   * full-body rule applies). All fields are sent explicitly: latitude/longitude as
+   * NUMBERS, country_id/county_id/city_id as integers from the public geo cascade,
+   * and the text fields (nullable where empty). This is edit-only — the job must
+   * already have an address (otherwise use POST /jobs/{job_id}/address).
+   *
+   * PROTECTED: the shared axios instance attaches the Bearer token and refreshes
+   * once before replaying, the same as the rest of the jobs group. On success the
+   * 200 body is the authoritative address (source of truth — replace the cached job
+   * address with it, never merge locally-guessed values). 422 detail[] maps loc to
+   * fields for inline form errors; 404 (if returned) is treated as a graceful
+   * "address not found" so the caller can switch to add-address flow. The caller
+   * must gate on the job still being editable and still permitting edits.
+   *
+   * latitude/longitude type mismatch: sent as numbers, returned as strings — callers
+   * must parseCoordinate / parseFloat before sending, and must treat the response
+   * strings as the truth.
+   */
+  updateJobAddress: (jobId: number, payload: JobAddressUpdate) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`updateJobAddress: invalid job id ${String(jobId)}`));
+    }
+    return api.patch<JobAddressResponse>(`/api/v1/jobs/${jobId}/address`, payload);
+  },
+
+  /**
+   * PATCH /api/v1/jobs/{job_id} — updates ONLY title, description,
+   * scheduled_at and expected_hours (schema JobUpdate).
+   *
+   * CONTRACT (verified against the live OpenAPI): one required integer path
+   * parameter; the body schema has NO required fields, and it exposes exactly
+   * those four properties — so the address, status, request_type, booking_type,
+   * category_id and service_id cannot be changed here, by construction.
+   *
+   * PROTECTED: same shared-client auth/refresh-once rules as the rest of the
+   * jobs group. Documented responses are 200 (the FULL JobResponse, which is
+   * the source of truth for recalculated fields such as is_editable, status and
+   * remaining_bidding_seconds) and 422. The docs say nothing about 400/401/403/
+   * 404/409, so those are handled generically from the backend's own `detail`.
+   *
+   * The call is only ever made when the job's `is_editable` flag is true — the
+   * edit screen hides the whole form otherwise (see lib/jobUpdate).
+   */
+  updateJob: (jobId: number, payload: UpdateJobRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`updateJob: invalid job id ${String(jobId)}`));
+    }
+    return api.patch<JobResponse>(`/api/v1/jobs/${jobId}`, payload);
+  },
+
+  /**
+   * GET /api/v1/jobs/{job_id} — ONE job, in FULL.
+   *
+   * This is the source for the details screen, NOT the list response: the list
+   * item omits description, address, attachments, status_history and every
+   * is_editable / is_cancellable / can_* flag, all of which JobResponse has.
+   *
+   * AUTH: PROTECTED — the shared axios instance attaches the Bearer token and
+   * refreshes it once before replaying, same as the rest of the jobs group.
+   *
+   * Verified against the live OpenAPI: the only path parameter is the required
+   * integer `job_id`; the documented responses are 200 (JobResponse) and 422
+   * ({"detail":[{"loc":["path","job_id"],...}]}).
+   *
+   * VERIFIED LIVE (no token): HTTP 401 {"detail":"Not authenticated"} for every
+   * id, including a non-integer one — FastAPI resolves auth BEFORE it validates
+   * the path, so 422/404 cannot be observed unauthenticated. The hook therefore
+   * keys 401 off the status alone and treats 404 as its own 'notfound' state on
+   * the same plain-string-detail convention the services group uses, rather
+   * than assuming an undocumented body shape.
+   */
+  getJob: (jobId: number) => api.get<JobResponse>(`/api/v1/jobs/${jobId}`),
+  /**
    * GET /api/v1/categories/{category_id} — ONE category with detail fields
    * (integer path param per the live schema). VERIFIED LIVE (public — no
    * auth header needed despite the docs' lock icon): a nonexistent id →
@@ -333,6 +988,20 @@ export const authApi = {
    */
   getCategory: (categoryId: number) =>
     api.get<CategoryDetailResponse>(`/api/v1/categories/${categoryId}`),
+  /**
+   * GET /api/v1/categories/{category_id}/services — the services inside ONE
+   * category (integer path param per the live schema). VERIFIED LIVE
+   * (public — no auth header needed despite the docs' lock icon): a
+   * nonexistent category → 404 {"detail":"Category not found."}
+   * (plain-string detail); a non-integer id → 422 int_parsing with
+   * detail[].loc ["path","category_id"]. 200 = a BARE ARRAY of
+   * ServiceListItem (no wrapper, no pagination). price_from/price_to
+   * are nullable numeric STRINGS — format via lib/servicePrice.ts helpers,
+   * never rendered raw. thumbnail_url is nullable. Cache per category id in
+   * useCategoryServices; do not call per render.
+   */
+  getCategoryServices: (categoryId: number) =>
+    api.get<ServiceListItem[]>(`/api/v1/categories/${categoryId}/services`),
   /**
    * GET /api/v1/addresses — the signed-in user's saved address. COUNTER-
    * INTUITIVE: the live OpenAPI Schema tab shows the 200 schema is $ref

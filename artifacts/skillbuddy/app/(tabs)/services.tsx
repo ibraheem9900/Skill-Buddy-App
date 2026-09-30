@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Keyboard,
   Platform,
@@ -17,7 +18,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
@@ -25,6 +26,9 @@ import { CATEGORIES, SERVICES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 import { useLanguage } from '@/context/LanguageContext';
 import ServiceCard from '@/components/ServiceCard';
+import ServerServiceRow from '@/components/ServerServiceRow';
+import useServices from '@/hooks/useServices';
+import { parseServicePrice } from '@/lib/servicePrice';
 
 const ALL_ID = '__all__';
 
@@ -38,6 +42,30 @@ export default function ServicesScreen() {
   const [query, setQuery] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
   const { filters, activeCount } = useServiceFilters();
+
+  // ── Live catalog: GET /api/v1/services ───────────────────────────────────
+  // Fetched once per session (module cache inside useServices) and re-checked
+  // on focus. The endpoint accepts NO query parameters (verified against the
+  // live OpenAPI), so every control below filters client-side.
+  const {
+    status: svcStatus,
+    services: serverServices,
+    load: loadServices,
+    refresh: refreshServices,
+  } = useServices();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadServices();
+    }, [loadServices]),
+  );
+
+  // Same server-backed-with-local-fallback discipline as the categories
+  // screen: live services win the moment the backend seeds them; until then
+  // the curated local catalog keeps this tab working (the API currently
+  // returns [], so without the fallback the whole tab would be empty).
+  const useServer = (serverServices?.length ?? 0) > 0;
+  const firstLoad = svcStatus === 'loading' && serverServices == null;
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
 
@@ -64,6 +92,45 @@ export default function ServicesScreen() {
       return matchCat && matchQ && matchPrice && matchRating;
     });
   }, [query, selectedCatId, filters]);
+
+  /**
+   * Live-catalog filtering — CLIENT-SIDE by necessity: GET /api/v1/services
+   * declares no query parameters at all, so there is no search / category /
+   * page / limit / sort to send and no server-side filtering to delegate to.
+   *
+   *   search      → title / description / category_name
+   *   category    → the chip's curated id OR name vs the item's
+   *                 category_id / category_name (best-effort: the API has no
+   *                 taxonomy id that maps to the app's curated chips yet)
+   *   price range → price_from when the API supplied a usable one; items with
+   *                 no price ("on request") always pass
+   *   min rating  → NOT applied: the API returns no rating field at all, so
+   *                 the screen shows a note instead of silently hiding items
+   */
+  const filteredServer = useMemo(() => {
+    if (!useServer) return [];
+    const q = query.trim().toLowerCase();
+    const chip =
+      selectedCatId === ALL_ID ? null : CATEGORIES.find((cat) => cat.id === selectedCatId);
+    return (serverServices ?? []).filter((s) => {
+      const matchQ =
+        !q ||
+        (s.title ?? '').toLowerCase().includes(q) ||
+        (s.description ?? '').toLowerCase().includes(q) ||
+        (s.category_name ?? '').toLowerCase().includes(q);
+      const matchCat =
+        !chip ||
+        String(s.category_id) === chip.id ||
+        (s.category_name ?? '').trim().toLowerCase() === chip.name.trim().toLowerCase();
+      const from = parseServicePrice(s.price_from);
+      const matchPrice = from === null || (from >= filters.minPrice && from <= filters.maxPrice);
+      return matchQ && matchCat && matchPrice;
+    });
+  }, [useServer, serverServices, query, selectedCatId, filters.minPrice, filters.maxPrice]);
+
+  /** The live API exposes no rating, so a min-rating filter can't apply to it. */
+  const ratingFilterUnavailable = useServer && !!filters.minRating;
+  const resultCount = useServer ? filteredServer.length : filtered.length;
 
   const handleCategoryPress = (id: string) => {
     setSelectedCatId((prev) => (prev === id ? ALL_ID : id));
@@ -204,12 +271,38 @@ export default function ServicesScreen() {
             {activeCategoryName}
           </Text>
           <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
-            {t('services_available_count', { n: filtered.length })}
+            {t('services_available_count', { n: resultCount })}
           </Text>
         </View>
 
+        {/* ── Live-catalog states: loading / error / local fallback ─────────── */}
+        {!useServer && svcStatus === 'error' ? (
+          <View style={[styles.stateBanner, { backgroundColor: c.card, borderColor: c.destructive }]}>
+            <Feather name="wifi-off" size={16} color={c.destructive} />
+            <Text style={[styles.stateText, { color: c.destructive }]}>{t('services_load_error')}</Text>
+            <TouchableOpacity onPress={() => void refreshServices()} hitSlop={6}>
+              <Text style={[styles.stateRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : firstLoad ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={c.primary} />
+            <Text style={[styles.stateText, { color: c.mutedForeground }]}>{t('services_loading')}</Text>
+          </View>
+        ) : !useServer && svcStatus === 'ready' ? (
+          <Text style={[styles.fallbackNote, { color: c.mutedForeground }]}>
+            {t('services_local_fallback')}
+          </Text>
+        ) : null}
+
+        {ratingFilterUnavailable ? (
+          <Text style={[styles.fallbackNote, { color: c.mutedForeground }]}>
+            {t('services_rating_filter_unavailable')}
+          </Text>
+        ) : null}
+
         {/* ── Empty state ──────────────────────────────────────────────────── */}
-        {filtered.length === 0 && (
+        {resultCount === 0 && (
           <View style={styles.emptyWrap}>
             <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
               <Feather name="search" size={32} color={c.primary} />
@@ -242,18 +335,34 @@ export default function ServicesScreen() {
         )}
 
         {/* ── Services list ─────────────────────────────────────────────────── */}
-        {filtered.length > 0 && (
-          <View style={styles.servicesList}>
-            {filtered.map((item, index) => (
-              <Animated.View
-                key={item.id}
-                entering={FadeInDown.delay(index * 50).duration(300)}
-              >
-                <ServiceCard service={item} variant="list" />
-              </Animated.View>
-            ))}
-          </View>
-        )}
+        {/* Live rows while the API has data (cover-fit thumbnails, formatted
+            prices, no fabricated provider/rating); otherwise the curated
+            local cards exactly as before. */}
+        {useServer
+          ? filteredServer.length > 0 && (
+              <View style={styles.servicesList}>
+                {filteredServer.map((item, index) => (
+                  <Animated.View
+                    key={`svc_${item.id}`}
+                    entering={FadeInDown.delay(index * 50).duration(300)}
+                  >
+                    <ServerServiceRow service={item} />
+                  </Animated.View>
+                ))}
+              </View>
+            )
+          : filtered.length > 0 && (
+              <View style={styles.servicesList}>
+                {filtered.map((item, index) => (
+                  <Animated.View
+                    key={item.id}
+                    entering={FadeInDown.delay(index * 50).duration(300)}
+                  >
+                    <ServiceCard service={item} variant="list" />
+                  </Animated.View>
+                ))}
+              </View>
+            )}
       </ScrollView>
     </View>
   );
@@ -357,6 +466,35 @@ const styles = StyleSheet.create({
   seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
   resultCount: { fontFamily: 'Manrope_400Regular', fontSize: 13 },
   servicesList: { paddingHorizontal: 16 },
+
+  // ── Live-catalog state banners ──────────────────────────────────────────────
+  stateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  stateText: { fontFamily: 'Manrope_400Regular', fontSize: 12, flex: 1 },
+  stateRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  fallbackNote: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
 
   // ── Empty state ─────────────────────────────────────────────────────────────
   emptyWrap: {

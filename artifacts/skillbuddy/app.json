@@ -7,12 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "skillbuddy",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/logo-white.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#3A9E8F"
-    },
     "ios": {
       "supportsTablet": false
     },
@@ -30,7 +24,17 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/logo-white.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#3A9E8F"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

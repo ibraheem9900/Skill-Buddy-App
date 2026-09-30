@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import type { ColorValue } from 'react-native';
 import Svg, { G, Rect, Circle, Ellipse, Path } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -15,7 +16,9 @@ const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse);
 
 interface IconProps {
   focused: boolean;
-  color: string;
+  /** Matches RN's `ColorValue` and react-native-svg's `fill`/`stroke` types
+   * (both accept `ColorValue`), so the tab tint flows through un-cast. */
+  color: ColorValue;
   size?: number;
 }
 
