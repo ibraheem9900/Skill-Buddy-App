@@ -2,7 +2,7 @@
   "expo": {
     "name": "SkillBuddy",
     "slug": "skillbuddy",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "skillbuddy",
@@ -46,7 +46,7 @@
       }
     },
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/69424157-1237-431e-bedc-525512a0fbc6"
