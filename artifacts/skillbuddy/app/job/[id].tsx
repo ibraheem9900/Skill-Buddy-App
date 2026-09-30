@@ -25,6 +25,7 @@ import { useConfirmPayment } from '@/hooks/useConfirmPayment';
 import { useStartJob } from '@/hooks/useStartJob';
 import { useCompleteJob } from '@/hooks/useCompleteJob';
 import { useProviderCancelJob } from '@/hooks/useProviderCancelJob';
+import { useRemoveJobAttachment } from '@/hooks/useRemoveJobAttachment';
 import { useRole } from '@/context/RoleContext';
 import { useAuth } from '@/context/AuthContext';
 import { jobStatusLabelKey, parseExpectedHours } from '@/lib/jobList';
@@ -44,7 +45,16 @@ import { canDeclineJob } from '@/lib/providerDecline';
 import { canPauseJob } from '@/lib/jobPause';
 import { canProviderPauseJob } from '@/lib/providerPause';
 import { canReportBlocker } from '@/lib/jobBlocker';
-import { canAddJobAttachment } from '@/lib/jobAttachment';
+import {
+  attachmentRemovedAfterResync,
+  canAddJobAttachment,
+  canRemoveJobAttachment,
+  isAttachmentAlreadyGone,
+  isAttachmentUnauthorized,
+  removeAttachmentFailureMessage,
+  shouldResyncAfterAttachmentFailure,
+  withoutAttachment,
+} from '@/lib/jobAttachment';
 import { classifyMediaType, hasUsableUrl } from '@/lib/serviceMedia';
 import { canUpdateJobAddress, jobHasAddress } from '@/lib/jobAddressUpdate';
 import { isRestartNotAllowed, restartTimerFailureMessage } from '@/lib/jobRestartTimer';
@@ -891,6 +901,113 @@ export default function BiddingDashboardScreen() {
       ],
     });
   }, [providerCancelling, showAlert, t, doProviderCancel]);
+
+  // Remove Attachment — one row of the attachments list is deleted
+  // (DELETE /api/v1/jobs/{job_id}/attachments/{attachment_id}).
+  //
+  // NO BODY COMES BACK: the success response is 204 No Content, so unlike every other
+  // job action on this screen the server's answer cannot be adopted. Instead the
+  // attachment is filtered out of the job held here BY ITS OWN ID — and only AFTER the
+  // 204, never optimistically, so a failure leaves the list exactly as it was. The hook
+  // invalidates the job list + detail caches, so the next read re-confirms against the
+  // server and the local patch can never outlive a server that disagrees.
+  //
+  // The attachment id is each entry's own `id` from JobAttachmentResponse (not the job
+  // id, not the array index), and it is only ever offered for an entry that is actually
+  // present in the job we hold.
+  const { removeAttachment, removingId } = useRemoveJobAttachment();
+
+  const doRemoveAttachment = useCallback(
+    async (attachmentId: number) => {
+      if (numericId === null) return;
+      const outcome = await removeAttachment(numericId, attachmentId);
+
+      if (outcome.ok) {
+        if (serverJob) applyServerJob(withoutAttachment(serverJob, attachmentId));
+        showAlert({
+          title: t('jobd_attach_rm_success_title'),
+          message: t('jobd_attach_rm_success_msg'),
+          icon: 'check-circle',
+        });
+        return;
+      }
+
+      if (outcome.kind === 'busy') return;
+      if (isAttachmentUnauthorized(outcome.kind)) {
+        router.replace('/(auth)/login' as any);
+        return;
+      }
+
+      // 404 = the attachment is ALREADY GONE. That is not a failure, so local state is
+      // synced and the user is told the truth instead of shown an error for something
+      // that is already true.
+      if (isAttachmentAlreadyGone(outcome.kind)) {
+        if (serverJob) applyServerJob(withoutAttachment(serverJob, attachmentId));
+        showAlert({
+          title: t('jobd_attach_rm_gone_title'),
+          message: t('jobd_attach_rm_gone_msg'),
+          icon: 'info',
+        });
+        return;
+      }
+
+      // A lost response is NOT a blind retry: re-read the job and ask whether the
+      // attachment is STILL there — gone means the delete landed, so nobody is asked to
+      // remove it twice. Nothing is filtered out locally on a network failure alone.
+      if (outcome.kind === 'network') {
+        const refetched = await refetchServerJob();
+        if (attachmentRemovedAfterResync(attachmentId, refetched)) {
+          if (serverJob) applyServerJob(withoutAttachment(serverJob, attachmentId));
+          showAlert({
+            title: t('jobd_attach_rm_success_title'),
+            message: t('jobd_attach_rm_success_msg'),
+            icon: 'check-circle',
+          });
+          return;
+        }
+      }
+
+      // A refusal means the state this row gated on is stale — re-read the job.
+      if (shouldResyncAfterAttachmentFailure(outcome.kind)) {
+        void refetchServerJob();
+      }
+
+      // 422 / 403 / 5xx / network — the backend's own message wins when it sent one, and
+      // the retry re-fires the SAME removal (the row was never touched locally).
+      showAlert({
+        title: t('jobd_attach_rm_err_title'),
+        message: removeAttachmentFailureMessage(outcome, t),
+        icon: 'alert-triangle',
+        buttons: [
+          { text: t('jobs_retry'), onPress: () => void doRemoveAttachment(attachmentId) },
+          { text: t('action_cancel'), style: 'cancel' },
+        ],
+      });
+    },
+    [numericId, removeAttachment, serverJob, applyServerJob, refetchServerJob, showAlert, t, router]
+  );
+
+  // Destructive and irreversible, so it is confirmed first — naming the file makes the
+  // confirmation unambiguous — and it can never fire twice (the row is disabled while
+  // that id is in flight and the hook refuses a second concurrent call).
+  const confirmRemoveAttachment = useCallback(
+    (attachmentId: number, label: string) => {
+      if (removingId !== null) return;
+      showAlert({
+        title: t('jobd_attach_rm_confirm_title'),
+        message: t('jobd_attach_rm_confirm_msg', { name: label }),
+        icon: 'alert-triangle',
+        buttons: [
+          {
+            text: t('jobd_attach_rm_confirm_cta'),
+            onPress: () => void doRemoveAttachment(attachmentId),
+          },
+          { text: t('action_cancel'), style: 'cancel' },
+        ],
+      });
+    },
+    [removingId, showAlert, t, doRemoveAttachment]
+  );
 
   // A STABLE expiry callback: CountdownTimer re-runs its effect whenever this
   // identity changes, so an inline arrow would reset the interval on every
@@ -1822,6 +1939,24 @@ export default function BiddingDashboardScreen() {
                   <Text style={[styles.bodyLine, { color: c.text, flex: 1 }]} numberOfLines={1}>
                     {a.media_url ?? a.media_type}
                   </Text>
+                  {/* Remove one attachment (DELETE .../attachments/{attachment_id}) —
+                      confirmed first, disabled while that row is in flight, and only
+                      shown for an entry that is really present in the held job. */}
+                  {canRemoveJobAttachment(serverJob, a.id) ? (
+                    <TouchableOpacity
+                      onPress={() => confirmRemoveAttachment(a.id, a.media_url ?? a.media_type)}
+                      disabled={removingId === a.id}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ padding: 4 }}
+                      activeOpacity={0.7}
+                    >
+                      {removingId === a.id ? (
+                        <ActivityIndicator size="small" color={c.destructive} />
+                      ) : (
+                        <Feather name="trash-2" size={15} color={c.destructive} />
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               ))}
             </>

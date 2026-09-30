@@ -16,6 +16,12 @@ import {
   ATTACHMENT_UPLOAD_TIMEOUT_MS,
   attachmentAddedAfterResync,
   attachmentErrorKey,
+  attachmentRemovedAfterResync,
+  canRemoveJobAttachment,
+  isAttachmentAlreadyGone,
+  removeAttachmentErrorKey,
+  removeAttachmentFailureMessage,
+  withoutAttachment,
   attachmentExtension,
   attachmentFailureMessage,
   attachmentFileFieldError,
@@ -33,7 +39,7 @@ import {
   validateAttachmentFile,
 } from '../jobAttachment';
 import type { JobActionFailureKind } from '../jobAction';
-import type { JobApiStatus, JobAttachmentResponse } from '../../types';
+import type { JobApiStatus, JobAttachmentResponse, JobResponse } from '../../types';
 
 declare const console: { log: (msg: string) => void };
 
@@ -357,6 +363,120 @@ eq('rejects 0', isValidJobId(0), false);
 eq('rejects a float', isValidJobId(1.5), false);
 eq('rejects NaN', isValidJobId(Number.NaN), false);
 eq('rejects a string id', isValidJobId('7' as unknown as number), false);
+
+/* ======================================================================
+ * REMOVE ATTACHMENT — DELETE /api/v1/jobs/{job_id}/attachments/{attachment_id}
+ * ==================================================================== */
+
+const removable = {
+  id: 42,
+  status: 'IN_PROGRESS' as JobApiStatus,
+  cancelled_at: null as string | null,
+  completed_at: null as string | null,
+  attachments: [att(1, 0), att(2, 1)] as JobAttachmentResponse[],
+};
+type RemovableJob = Parameters<typeof canRemoveJobAttachment>[0];
+const rjob = (over: Partial<NonNullable<RemovableJob>>) =>
+  ({ ...removable, ...over }) as RemovableJob;
+
+/* -------------------------------------------------------------------- gating */
+eq('an attachment present on an in-progress job can be removed', canRemoveJobAttachment(removable, 1), true);
+eq('the second attachment is removable too', canRemoveJobAttachment(removable, 2), true);
+eq('an id that is NOT in the held job cannot be removed (stale row)', canRemoveJobAttachment(removable, 99), false);
+eq('a null attachment id cannot be removed', canRemoveJobAttachment(removable, null), false);
+eq('an undefined attachment id cannot be removed', canRemoveJobAttachment(removable, undefined), false);
+eq('attachment id 0 cannot be removed', canRemoveJobAttachment(removable, 0), false);
+eq('a non-integer attachment id cannot be removed', canRemoveJobAttachment(removable, 1.5), false);
+eq('an empty attachments array offers no removal', canRemoveJobAttachment(rjob({ attachments: [] }), 1), false);
+eq('a missing attachments array offers no removal', canRemoveJobAttachment(rjob({ attachments: undefined }), 1), false);
+eq('a null job offers no removal', canRemoveJobAttachment(null, 1), false);
+eq('an undefined job offers no removal', canRemoveJobAttachment(undefined, 1), false);
+eq('an invalid job id offers no removal', canRemoveJobAttachment(rjob({ id: 0 }), 1), false);
+eq('a completed job offers no removal', canRemoveJobAttachment(rjob({ status: 'COMPLETED', completed_at: '2026-09-30T10:00:00Z' }), 1), false);
+eq('a completion stamp alone offers no removal', canRemoveJobAttachment(rjob({ completed_at: '2026-09-30T10:00:00Z' }), 1), false);
+eq('a cancelled job offers no removal', canRemoveJobAttachment(rjob({ status: 'CANCELLED' }), 1), false);
+eq('a cancellation stamp alone offers no removal', canRemoveJobAttachment(rjob({ cancelled_at: '2026-09-30T10:00:00Z' }), 1), false);
+eq('a client-cancelled job offers no removal', canRemoveJobAttachment(rjob({ status: 'CANCELLED_BY_CLIENT' }), 1), false);
+eq('a provider-cancelled job offers no removal', canRemoveJobAttachment(rjob({ status: 'CANCELLED_BY_PROVIDER' }), 1), false);
+eq('a draft job DOES offer removal (undocumented, so not guessed)', canRemoveJobAttachment(rjob({ status: 'DRAFT' }), 1), true);
+eq('a paused job DOES offer removal', canRemoveJobAttachment(rjob({ status: 'PAUSED_BY_PROVIDER' }), 1), true);
+
+/* ------------------------------------------------------ the post-204 local patch */
+const held = removable as unknown as JobResponse;
+const patched = withoutAttachment(held, 1);
+eq('the removed attachment is gone from the patched job', (patched.attachments ?? []).map((a) => a.id).join(','), '2');
+eq(
+  'patching an absent attachment returns the SAME object (no pointless write)',
+  withoutAttachment(held, 99) === held,
+  true
+);
+eq(
+  'patching does not mutate the held job',
+  removable.attachments.map((a) => a.id).join(','),
+  '1,2'
+);
+eq(
+  'patching survives a missing attachments array',
+  (withoutAttachment(rjob({ attachments: undefined }) as unknown as JobResponse, 1).attachments ?? [])
+    .length,
+  0
+);
+
+/* -------------------------------------------------------- 404 = already removed */
+eq('a 404 is the already-gone bucket', isAttachmentAlreadyGone('notfound'), true);
+eq('a 403 is not the already-gone bucket', isAttachmentAlreadyGone('forbidden'), false);
+eq('a conflict is not the already-gone bucket', isAttachmentAlreadyGone('conflict'), false);
+eq('a network failure is not the already-gone bucket', isAttachmentAlreadyGone('network'), false);
+
+/* --------------------------------------------- lost response after a timeout */
+eq(
+  'an attachment no longer in the re-read job → the delete landed',
+  attachmentRemovedAfterResync(1, { attachments: [att(2, 1)] }),
+  true
+);
+eq(
+  'an attachment still present in the re-read job → the delete really failed',
+  attachmentRemovedAfterResync(1, { attachments: [att(1, 0), att(2, 1)] }),
+  false
+);
+eq(
+  'an empty re-read list means everything is gone',
+  attachmentRemovedAfterResync(1, { attachments: [] }),
+  true
+);
+eq('a failed re-read claims nothing', attachmentRemovedAfterResync(1, null), false);
+eq('a failed re-read claims nothing (undefined)', attachmentRemovedAfterResync(1, undefined), false);
+eq('an invalid attachment id claims nothing', attachmentRemovedAfterResync(0, { attachments: [] }), false);
+eq('a missing attachments array claims nothing', attachmentRemovedAfterResync(1, { attachments: undefined }), false);
+
+/* ------------------------------------------------------------------ remove copy */
+eq('removal 422 copy key', removeAttachmentErrorKey('invalid'), 'jobd_attach_rm_err_invalid');
+eq('removal 400 copy key', removeAttachmentErrorKey('badrequest'), 'jobd_attach_rm_err_notallowed');
+eq('removal 409 copy key', removeAttachmentErrorKey('conflict'), 'jobd_attach_rm_err_notallowed');
+eq('removal 403 copy key', removeAttachmentErrorKey('forbidden'), 'jobd_attach_rm_err_forbidden');
+eq('removal 500 copy key', removeAttachmentErrorKey('server'), 'jobd_attach_rm_err_server');
+eq('removal network copy key', removeAttachmentErrorKey('network'), 'jobd_attach_rm_err_network');
+eq('removal unknown bucket falls back to the server copy', removeAttachmentErrorKey('unknown'), 'jobd_attach_rm_err_server');
+eq(
+  'removal copy never borrows the upload wording',
+  String(removeAttachmentErrorKey('invalid')) !== String(attachmentErrorKey('invalid')),
+  true
+);
+eq(
+  "the backend's own removal message always wins",
+  removeAttachmentFailureMessage({ kind: 'forbidden', message: 'Only the uploader can remove this' }, fake as any),
+  'Only the uploader can remove this'
+);
+eq(
+  'no server message → the removal bucket copy',
+  removeAttachmentFailureMessage({ kind: 'forbidden', message: null }, fake as any),
+  '<jobd_attach_rm_err_forbidden>'
+);
+eq(
+  'a removal network failure has its own wording',
+  removeAttachmentFailureMessage({ kind: 'network', message: null }, fake as any),
+  '<jobd_attach_rm_err_network>'
+);
 
 /* -------------------------------------------------------------------- report */
 

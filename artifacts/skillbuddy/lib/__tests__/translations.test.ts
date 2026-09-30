@@ -372,6 +372,25 @@ const NEW_ATTACH_KEYS = [
   'jobd_attach_err_network',
 ];
 
+/** Keys added for the Remove Attachment action (Job Details → an attachment row). */
+const NEW_ATTACH_RM_KEYS = [
+  'jobd_attach_rm_action',
+  'jobd_attach_rm_confirm_title',
+  'jobd_attach_rm_confirm_msg',
+  'jobd_attach_rm_confirm_cta',
+  'jobd_attach_rm_busy',
+  'jobd_attach_rm_success_title',
+  'jobd_attach_rm_success_msg',
+  'jobd_attach_rm_gone_title',
+  'jobd_attach_rm_gone_msg',
+  'jobd_attach_rm_err_title',
+  'jobd_attach_rm_err_invalid',
+  'jobd_attach_rm_err_notallowed',
+  'jobd_attach_rm_err_forbidden',
+  'jobd_attach_rm_err_server',
+  'jobd_attach_rm_err_network',
+];
+
 /** Keys the update screen reuses from the create/shared dictionaries. */
 const REUSED_KEYS = [
   'addr_c_country',
@@ -452,6 +471,7 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_PPROVIDER_PAUSE_KEYS,
     ...NEW_BLOCKER_KEYS,
     ...NEW_ATTACH_KEYS,
+    ...NEW_ATTACH_RM_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -479,6 +499,7 @@ const allNewKeys = [
   ...NEW_PPROVIDER_PAUSE_KEYS,
   ...NEW_BLOCKER_KEYS,
   ...NEW_ATTACH_KEYS,
+  ...NEW_ATTACH_RM_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)
