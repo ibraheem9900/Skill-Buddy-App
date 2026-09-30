@@ -42,6 +42,7 @@ import {
 import { canDeclineJob } from '@/lib/providerDecline';
 import { canPauseJob } from '@/lib/jobPause';
 import { canProviderPauseJob } from '@/lib/providerPause';
+import { canReportBlocker } from '@/lib/jobBlocker';
 import { canUpdateJobAddress, jobHasAddress } from '@/lib/jobAddressUpdate';
 import { isRestartNotAllowed, restartTimerFailureMessage } from '@/lib/jobRestartTimer';
 import {
@@ -1445,6 +1446,31 @@ export default function BiddingDashboardScreen() {
               )}
               <Text style={[styles.restartText, { color: c.destructive }]}>
                 {providerCancelling ? t('jobd_pcancel_busy') : t('jobd_pcancel_action')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* Report Blocker — the ONE job action the API does NOT split per role:
+              either party to an active job describes what is stopping it from going
+              ahead (POST /api/v1/jobs/{job_id}/blocker, Swagger "Report Blocker", body
+              JobDetailsRequest {details}). There is deliberately NO role check here, so
+              this button is offered to the client and the provider alike — the backend
+              authorises the real party. It REQUIRES a free-text `details` body, so it
+              opens its own form screen (the blocker route). Offered only while the job is
+              in an active window (PROVIDER_ASSIGNED / IN_PROGRESS with a real assigned
+              provider) and not already blocked/cancelled/completed, so it disappears by
+              itself once the response moves the job on — nothing about that resulting
+              state is assumed, and no "view blockers" list is invented (the API has no
+              blockers collection endpoint). */}
+          {canReportBlocker(serverJob) ? (
+            <TouchableOpacity
+              style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
+              onPress={() => router.push(`/job/${serverJob.id}/blocker` as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="alert-octagon" size={15} color={c.primary} />
+              <Text style={[styles.restartText, { color: c.primary }]}>
+                {t('jobd_blocker_action')}
               </Text>
             </TouchableOpacity>
           ) : null}

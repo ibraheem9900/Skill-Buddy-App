@@ -28,6 +28,7 @@
     "./providerDecline.test.ts",
     "./jobPause.test.ts",
     "./providerPause.test.ts",
+    "./jobBlocker.test.ts",
     "./translations.test.ts"
   ]
 }

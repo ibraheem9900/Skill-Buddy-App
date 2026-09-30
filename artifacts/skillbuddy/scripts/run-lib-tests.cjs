@@ -33,6 +33,7 @@ const TEST_FILES = [
   'providerDecline.test.js',
   'jobPause.test.js',
   'providerPause.test.js',
+  'jobBlocker.test.js',
   'translations.test.js',
 ];
 

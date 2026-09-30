@@ -891,6 +891,38 @@ export const authApi = {
     return api.post<JobResponse>(`/api/v1/jobs/${jobId}/pause-by-provider`, payload);
   },
 
+  /**
+   * POST /api/v1/jobs/{job_id}/blocker — reports what is stopping a job from proceeding
+   * (Swagger: "Report Blocker"). Either party to an active job may report.
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `application/json` request body** (schema JobDetailsRequest)
+   *     whose only property, `details` (required, `minLength: 3`, `maxLength: 1000`,
+   *     NO enum), is a free-text explanation — NOT `reason`/`notes`. That schema's own
+   *     description names "reporting a blocker" among its IN_PROGRESS actions.
+   *   - its 200 is the JobResponse DIRECTLY (no `{ message, job }` envelope and no
+   *     `message` field, so the caller writes the confirmation); 422 is
+   *     HTTPValidationError
+   *   - the operation carries no description and no property is documented, so nothing
+   *     about the server-side effect is assumed — the caller adopts the returned job
+   *     wholesale and renders whatever it changed (status, status_history, flags)
+   *   - there is NO blockers collection endpoint anywhere in the API, so the app cannot
+   *     list reported blockers; the UI only confirms the report was sent
+   *
+   * PROTECTED + the shared 401 refresh/replay. The caller gates on the job sitting in an
+   * active window (PROVIDER_ASSIGNED / IN_PROGRESS) with a real assigned provider and
+   * not cancelled/completed — deliberately with NO role check, since `/blocker` is the
+   * one job action the API does not split per role.
+   */
+  reportJobBlocker: (jobId: number, payload: JobDetailsRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`reportJobBlocker: invalid job id ${String(jobId)}`));
+    }
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/blocker`, payload);
+  },
+
   confirmJobPayment: (jobId: number) => {
     if (!isValidJobId(jobId)) {
       return Promise.reject(new Error(`confirmJobPayment: invalid job id ${String(jobId)}`));
