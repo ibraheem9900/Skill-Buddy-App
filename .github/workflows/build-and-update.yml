@@ -1,18 +1,61 @@
-name: Build APK + Push OTA Update
+name: Android Release (APK + OTA)
+
+# Publishes a signed, sideloadable .apk to a NEW uniquely-tagged GitHub Release on
+# every push to main, and pushes an OTA JS update to already-installed apps.
+#
+# Why this file is shaped the way it is (see ANDROID-RELEASE-FIX.md for the full
+# post-mortem): the previous version had four independent defects that meant it never
+# once produced a release.
+#   1. `eas build:view "$BUILD_ID" --json --non-interactive` — `build:view` has no
+#      `--non-interactive` flag. It printed "Nonexistent flag: --non-interactive" onto
+#      stdout, which was piped into `JSON.parse` -> "SyntaxError: Unexpected token 'N'".
+#      The job exited 1 AFTER EAS had already finished a perfectly good build.
+#      Fixed by removing the build:list polling loop entirely and reading the build
+#      object straight out of `eas build ... --json`.
+#   2. No `permissions: contents: write`, so GITHUB_TOKEN was read-only and the
+#      `gh release upload` step could never have succeeded.
+#   3. `gh release upload v1.0.0-android ... --clobber` rewrote the same tag on every
+#      run, silently replacing a published artifact under an unchanged URL.
+#   4. No unique tag / no release notes, so testers could not tell builds apart.
+#
+# Required repo secret:
+#   EXPO_TOKEN            https://expo.dev/settings/access-tokens
+# Optional repo secrets (the notify step no-ops when unset):
+#   SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL
+#
+# The APK asset is always uploaded as `SkillBuddy.apk` because the install page
+# (install.html) and .freebuff/run.md both depend on
+#   https://github.com/ibraheem9900/Skill-Buddy-App/releases/latest/download/SkillBuddy.apk
+# Renaming it would break the permanent install link.
+#
+# The legacy tag `v1.0.0-android` is deliberately never referenced or written to.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
-  group: android-build
+  group: android-release
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10"
+  APP_DIR: artifacts/skillbuddy
+  APK_NAME: SkillBuddy.apk
+  APK_MIN_BYTES: "20000000"
+  LEGACY_TAG: v1.0.0-android
+
 jobs:
-  # Fast path: push JS changes to already-installed apps (no reinstall needed).
-  # Requires the EXPO_TOKEN repository secret (https://expo.dev/settings/access-tokens).
+  # ---------------------------------------------------------------------------
+  # Fast path: ship JS-only changes to already-installed apps, no reinstall.
+  # ---------------------------------------------------------------------------
   ota-update:
+    name: Push OTA update
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -20,16 +63,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check EXPO_TOKEN secret is set
+      - name: Fail fast if EXPO_TOKEN is missing
         if: env.EXPO_TOKEN == ''
         run: |
-          echo "::error::EXPO_TOKEN secret is missing. Add it at repo Settings → Secrets and variables → Actions, then re-run this workflow."
+          echo "::error title=EXPO_TOKEN is missing::Add EXPO_TOKEN under Settings > Secrets and variables > Actions (create one at https://expo.dev/settings/access-tokens), then re-run this workflow."
           exit 1
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Enable corepack
         run: corepack enable
@@ -37,112 +80,465 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: artifacts/skillbuddy
+        working-directory: ${{ env.APP_DIR }}
 
+      # Pinned to latest on purpose: the app is on Expo SDK 57, and eas.json only
+      # enforces a floor (`cli.version >= 21.1.0`). Pin to an exact version if you
+      # prefer reproducible CLI behaviour.
       - name: Install EAS CLI
-        run: npm install -g eas-cli@21.8.0
+        run: npm install -g eas-cli@latest
 
-      - name: Push OTA update (installed apps update automatically)
-        run: eas update --channel preview --message "OTA update from ${{ github.sha }}"
-        working-directory: artifacts/skillbuddy
+      - name: Push OTA update
+        working-directory: ${{ env.APP_DIR }}
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-  # Slow path: rebuild the APK so the GitHub Release install link always has
-  # the latest code, and refresh the release asset.
-  apk-build:
-    runs-on: ubuntu-latest
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check EXPO_TOKEN secret is set
-        if: env.EXPO_TOKEN == ''
-        run: |
-          echo "::error::EXPO_TOKEN secret is missing. Add it at repo Settings → Secrets and variables → Actions, then re-run this workflow."
-          exit 1
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: artifacts/skillbuddy
-
-      - name: Install EAS CLI
-        run: npm install -g eas-cli@21.8.0
-
-      # eas-cli picks up EXPO_TOKEN from the job-level env automatically.
-      # Do NOT run 'eas login --non-interactive' — it fails in CI.
-
-      - name: Build Android APK (preview profile)
-        run: eas build --platform android --profile preview --non-interactive
-        working-directory: artifacts/skillbuddy
-
-      - name: Wait for build to finish and download APK
+          # 8 GB-equivalent runners still OOM on hermesc without a raised heap cap.
+          NODE_OPTIONS: --max-old-space-size=4096
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
+          FIRST_LINE="$(printf '%s' "${COMMIT_MESSAGE:-Manual OTA run}" | head -n 1 | cut -c1-180)"
+          MSG="${FIRST_LINE} (${GITHUB_SHA:0:7})"
+          echo "Publishing OTA update to channel 'preview': $MSG"
+          eas update --channel preview --message "$MSG" --non-interactive
 
-          echo "Waiting for build to appear and finish..."
-          for i in $(seq 1 60); do
-            BUILD_JSON=$(eas build:list --platform android --limit 5 --json --non-interactive 2>/dev/null || echo "[]")
-            BUILD_ID=$(echo "$BUILD_JSON" | node -e "
-              let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
-                try {
-                  const a=JSON.parse(d.indexOf('[')>=0?d.slice(d.indexOf('[')):d);
-                  const sha=process.env.GITHUB_SHA;
-                  const b=(a||[]).find(x=>x.status==='FINISHED'&&x.gitCommit&&x.gitCommit.commit===sha)||(a||[]).find(x=>x.status==='FINISHED'&&x.platform==='android');
-                  if(b) console.log(b.id);
-                  else process.exit(1);
-                } catch(e) { process.exit(1); }
-              })" 2>/dev/null) && break
-            echo "  attempt $i — no finished build yet, waiting 30s..."
-            sleep 30
-          done
+  # ---------------------------------------------------------------------------
+  # Slow path: build a signed APK and publish it as a NEW GitHub Release.
+  # ---------------------------------------------------------------------------
+  apk-build:
+    name: Build signed APK and publish release
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      apk_sha256: ${{ steps.verify.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          if [ -z "${BUILD_ID:-}" ]; then
-            echo "::error::No finished Android build found after 30 minutes"
+      - name: Fail fast if EXPO_TOKEN is missing
+        if: env.EXPO_TOKEN == ''
+        run: |
+          echo "::error title=EXPO_TOKEN is missing::Add EXPO_TOKEN under Settings > Secrets and variables > Actions (create one at https://expo.dev/settings/access-tokens), then re-run this workflow."
+          exit 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: ${{ env.APP_DIR }}
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
+      # Every run gets a brand-new tag, and we refuse to continue if it already
+      # exists. There is no code path in this workflow that can overwrite a
+      # previously published release.
+      - name: Resolve unique release tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(node -e "console.log(require('./${APP_DIR}/app.json').expo.version)")"
+          TAG="android-v${APP_VERSION}-r${GITHUB_RUN_NUMBER}"
+
+          if [ "$TAG" = "$LEGACY_TAG" ]; then
+            echo "::error::refusing to publish under the legacy tag ${LEGACY_TAG}"
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::tag ${TAG} already exists — refusing to overwrite an existing release"
             exit 1
           fi
 
-          echo "Using build $BUILD_ID"
-          APK_URL=$(eas build:view "$BUILD_ID" --json | node -e "
-            let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
-              const i=d.indexOf('{');
-              const b=JSON.parse(d.slice(i));
-              const u=b.artifacts&&b.artifacts.buildUrl;
-              if(!u) throw new Error('no buildUrl');
-              console.log(u);
-            })")
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${TAG} (app version ${APP_VERSION})"
 
-          echo "Downloading APK from $APK_URL"
-          curl -fsSL "$APK_URL" -o SkillBuddy.apk
-          ls -la SkillBuddy.apk
-        working-directory: artifacts/skillbuddy
+      # Per https://docs.expo.dev/build/building-on-ci/, `--no-wait` is the flag that
+      # exits early, so `--non-interactive` WITHOUT it waits for the build to finish.
+      # `--json` then prints the finished build object on stdout, which we parse
+      # directly instead of polling `eas build:list` / `eas build:view` (the old,
+      # broken approach that never once worked).
+      - name: Build signed APK with EAS
+        id: build
+        working-directory: ${{ env.APP_DIR }}
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Upload APK to GitHub Release
+          EAS_BUILD_JSON: ${{ github.workspace }}/eas-build.json
+          EAS_BUILD_LOG: ${{ github.workspace }}/eas-build.log
         run: |
-          gh release upload v1.0.0-android SkillBuddy.apk --clobber \
-            || gh release create v1.0.0-android SkillBuddy.apk --title "SkillBuddy Android v1.0.0" \
-               --notes "Client install build. Install on Android: download the APK, open it, allow \"Install unknown apps\", then Install."
-        working-directory: artifacts/skillbuddy
+          set -euo pipefail
+          if ! eas build \
+                --platform android \
+                --profile production-apk \
+                --non-interactive \
+                --json > "$EAS_BUILD_JSON" 2> "$EAS_BUILD_LOG"; then
+            echo "::group::EAS build log (last 120 lines)"
+            tail -n 120 "$EAS_BUILD_LOG" || true
+            echo "::endgroup::"
+            echo "::error title=EAS build failed::The build did not finish successfully, so no release was published."
+            exit 1
+          fi
+          tail -n 20 "$EAS_BUILD_LOG" || true
+
+      - name: Extract artifact URL from EAS output
+        id: artifact
+        env:
+          EAS_BUILD_JSON: ${{ github.workspace }}/eas-build.json
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const raw = fs.readFileSync(process.env.EAS_BUILD_JSON, 'utf8');
+          const start = raw.search(/[[{]/);
+          if (start < 0) {
+            console.error('EAS produced no JSON output:\n' + raw.slice(0, 2000));
+            process.exit(1);
+          }
+
+          // EAS normally keeps progress on stderr, but be forgiving: strip any
+          // leading banner and any trailing chatter around the JSON payload.
+          const attempt = text => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return undefined;
+            }
+          };
+          let parsed = attempt(raw.slice(start));
+          if (parsed === undefined) {
+            const tail = Math.max(raw.lastIndexOf(']'), raw.lastIndexOf('}'));
+            if (tail > start) parsed = attempt(raw.slice(start, tail + 1));
+          }
+          if (parsed === undefined) {
+            console.error('Could not parse EAS build output as JSON. First 2000 chars:');
+            console.error(raw.slice(0, 2000));
+            process.exit(1);
+          }
+
+          const build = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
+          if (!build || typeof build !== 'object') {
+            console.error('EAS build output was empty');
+            process.exit(1);
+          }
+          if (build.status !== 'FINISHED') {
+            console.error(`EAS build status is "${build.status}", expected FINISHED`);
+            process.exit(1);
+          }
+          const url = build.artifacts && build.artifacts.buildUrl;
+          if (!url) {
+            console.error('EAS build has no artifacts.buildUrl: ' + JSON.stringify(build.artifacts));
+            process.exit(1);
+          }
+
+          const summary = {
+            id: build.id,
+            status: build.status,
+            platform: build.platform,
+            appVersion: build.appVersion,
+            runtimeVersion: build.runtimeVersion,
+            gitCommitHash: build.gitCommitHash,
+            artifactUrl: url,
+            buildPage: `https://expo.dev/accounts/${build.account?.name ?? ''}/projects/${build.project?.slug ?? ''}/builds/${build.id}`,
+          };
+          console.log(JSON.stringify(summary, null, 2));
+
+          const out = process.env.GITHUB_OUTPUT;
+          if (out) {
+            fs.appendFileSync(out, `build_id=${build.id}\n`);
+            fs.appendFileSync(out, `artifact_url=${url}\n`);
+            fs.appendFileSync(out, `version_code=${build.appVersion ?? ''}\n`);
+            fs.appendFileSync(out, `runtime_version=${build.runtimeVersion ?? ''}\n`);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(
+              process.env.GITHUB_STEP_SUMMARY,
+              `### EAS build\n\n\`\`\`json\n${JSON.stringify(summary, null, 2)}\n\`\`\`\n`
+            );
+          }
+          NODE
+
+      # EAS finishes a build slightly before the artifact is servable, and the CDN
+      # occasionally drops a connection mid-transfer. Retry with backoff instead of
+      # failing the whole release on a transient network hiccup.
+      - name: Download APK artifact (retry with backoff)
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact_url }}
+        run: |
+          set -euo pipefail
+          TARGET="$APP_DIR/$APK_NAME"
+          rm -f "$TARGET"
+
+          for attempt in 1 2 3 4 5 6; do
+            echo "Download attempt ${attempt}/6 ..."
+            if curl \
+                 --fail \
+                 --location \
+                 --silent \
+                 --show-error \
+                 --retry 5 \
+                 --retry-all-errors \
+                 --retry-delay 5 \
+                 --connect-timeout 30 \
+                 --output "$TARGET" \
+                 "$ARTIFACT_URL"; then
+              SIZE="$(wc -c < "$TARGET")"
+              echo "Downloaded ${SIZE} bytes"
+              if [ "$SIZE" -ge "$APK_MIN_BYTES" ]; then
+                exit 0
+              fi
+              echo "::warning::downloaded file is only ${SIZE} bytes, expected at least ${APK_MIN_BYTES}"
+            else
+              echo "::warning::attempt ${attempt} failed"
+            fi
+
+            if [ "$attempt" -lt 6 ]; then
+              BACKOFF=$(( attempt * 20 ))
+              echo "Waiting ${BACKOFF}s before retrying..."
+              sleep "$BACKOFF"
+            fi
+          done
+
+          echo "::error title=APK download failed::Could not download a complete artifact from ${ARTIFACT_URL} after 6 attempts."
+          exit 1
+
+      # A .aab cannot be sideloaded, and a truncated zip installs as "App not
+      # installed". Assert both before anything reaches a release.
+      - name: Verify the artifact is a complete, sideloadable APK
+        id: verify
+        run: |
+          set -euo pipefail
+          APK_PATH="$APP_DIR/$APK_NAME"
+          node - "$APK_PATH" <<'NODE'
+          const fs = require('fs');
+          const path = process.argv[2];
+          const buf = fs.readFileSync(path);
+
+          const fail = message => {
+            console.error('::error title=APK verification failed::' + message);
+            process.exit(1);
+          };
+
+          const size = buf.length;
+          console.log(`size: ${size} bytes`);
+
+          const eocd = buf.lastIndexOf(Buffer.from('PK\x05\x06', 'binary'));
+          if (eocd < 0) fail('no zip end-of-central-directory record — the file is truncated or not a zip');
+          const cdOffset = buf.readUInt32LE(eocd + 16);
+          const commentLen = buf.readUInt16LE(eocd + 20);
+          if (eocd + 22 + commentLen !== size) {
+            fail(`zip EOCD is not at the end of the file (EOCD ${eocd}, comment ${commentLen}, size ${size}) — the download was truncated`);
+          }
+          console.log(`zip EOCD ok (central directory at ${cdOffset})`);
+
+          const names = [];
+          for (let offset = cdOffset; offset < size; ) {
+            if (buf.readUInt32LE(offset) !== 0x02014b50) break;
+            const nameLen = buf.readUInt16LE(offset + 28);
+            const extraLen = buf.readUInt16LE(offset + 30);
+            const commentLength = buf.readUInt16LE(offset + 32);
+            names.push(buf.toString('utf8', offset + 46, offset + 46 + nameLen));
+            offset += 46 + nameLen + extraLen + commentLength;
+          }
+          console.log(`entries: ${names.length}`);
+          if (names.length === 0) fail('central directory is empty');
+
+          if (!names.includes('AndroidManifest.xml')) {
+            fail('no AndroidManifest.xml at the archive root — this is not an installable APK');
+          }
+          if (names.some(name => name.endsWith('BundleConfig.pb') || name.startsWith('base/manifest/'))) {
+            fail('this artifact is an Android App Bundle (.aab), which cannot be sideloaded — buildType must be "apk"');
+          }
+          if (buf.indexOf(Buffer.from('APK Sig Block 42', 'binary')) < 0) {
+            fail('no APK Signing Block found — the APK is not release-signed (Android will refuse to install it)');
+          }
+          console.log('APK Signing Block present (v2+ signature)');
+
+          const abis = [...new Set(names.filter(n => n.startsWith('lib/')).map(n => n.split('/')[1]))].sort();
+          if (abis.length === 0) fail('no lib/<abi>/ entries — the APK contains no native code');
+          console.log(`ABIs: ${abis.join(', ')}`);
+          if (!abis.includes('arm64-v8a')) {
+            fail('arm64-v8a missing — the APK will not run on modern phones');
+          }
+          if (!names.some(n => n.startsWith('assets/') && n.endsWith('app.config'))) {
+            console.log('::warning::no assets/app.config found — unexpected for an Expo build');
+          }
+          console.log('verification passed');
+          NODE
+
+          SHA256="$(sha256sum "$APK_PATH" | cut -d' ' -f1)"
+          SIZE="$(wc -c < "$APK_PATH")"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
+          echo "APK sha256: ${SHA256} (${SIZE} bytes)"
+
+      - name: Compose release notes
+        id: notes
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          BUILD_PAGE: https://expo.dev/accounts/ibraheem1122/projects/skillbuddy/builds/${{ steps.artifact.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "## SkillBuddy for Android — ${{ steps.version.outputs.tag }}"
+            echo
+            echo "Automated build of \`${GITHUB_SHA:0:7}\` on the \`${GITHUB_REF_NAME}\` branch."
+            echo
+            echo "### What changed"
+            echo
+            printf '%s\n' "${COMMIT_MESSAGE:-No commit message available.}"
+            echo
+            echo "### Build details"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| App version | \`${{ steps.version.outputs.app_version }}\` |"
+            echo "| Android versionCode | \`${{ steps.artifact.outputs.version_code }}\` |"
+            echo "| OTA runtimeVersion | \`${{ steps.artifact.outputs.runtime_version }}\` |"
+            echo "| File | \`${APK_NAME}\` (${{ steps.verify.outputs.size }} bytes) |"
+            echo "| SHA-256 | \`${{ steps.verify.outputs.sha256 }}\` |"
+            echo "| EAS build | $BUILD_PAGE |"
+            echo "| Workflow run | https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }} |"
+            echo
+            echo "### Install on Android"
+            echo
+            echo "1. Tap the **SkillBuddy.apk** asset below (or use the permanent link"
+            echo "   \`https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${APK_NAME}\`)."
+            echo "2. When prompted, allow **Install unknown apps** for your browser or file manager."
+            echo "3. Open the downloaded file and tap **Install**."
+            echo "4. If you still see **App not installed**, uninstall any earlier SkillBuddy"
+            echo "   build first — an app signed with a different key cannot be installed over."
+            echo
+            echo "> Sideloading requires Android 7.0 (API 24) or newer."
+          } > "$NOTES_FILE"
+          echo "notes_file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+          cat "$NOTES_FILE"
+
+      - name: Publish GitHub Release (new tag, never overwrites)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: SkillBuddy Android ${{ steps.version.outputs.app_version }} (build ${{ github.run_number }})
+          body_path: ${{ steps.notes.outputs.notes_file }}
+          files: ${{ env.APP_DIR }}/${{ env.APK_NAME }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Confirm the published release is downloadable
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+          STATUS="$(curl -sSL -o /dev/null -w '%{http_code} %{size_download}' "$URL")"
+          echo "GET ${URL} -> ${STATUS}"
+          case "$STATUS" in
+            "200 "*) ;;
+            *) echo "::error title=Release link check failed::${URL} did not return HTTP 200 with a body (got ${STATUS})" ; exit 1 ;;
+          esac
+          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Permanent link: https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${APK_NAME}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- sha256: \`${{ steps.verify.outputs.sha256 }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Both jobs report here. Notifications are optional: with no webhook secret
+  # configured this just writes a summary and relies on GitHub's own
+  # failed-run email, so a red X is never silent.
+  # ---------------------------------------------------------------------------
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [ota-update, apk-build]
+    if: always()
+    steps:
+      - name: Report result
+        env:
+          APK_RESULT: ${{ needs.apk-build.result }}
+          OTA_RESULT: ${{ needs.ota-update.result }}
+          REPO: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ "$APK_RESULT" = "success" ] && [ "$OTA_RESULT" = "success" ]; then
+            EMOJI=":white_check_mark:"
+            TITLE="New Android build published"
+          else
+            EMOJI=":rotating_light:"
+            TITLE="Android release pipeline FAILED"
+          fi
+
+          SUMMARY="${EMOJI} ${TITLE}
+          repo: ${REPO}
+          commit: ${SHA:0:7} by ${ACTOR}
+          apk-build: ${APK_RESULT}
+          ota-update: ${OTA_RESULT}
+          ${MESSAGE}"
+
+          echo "$SUMMARY"
+          {
+            echo "### ${TITLE}"
+            echo
+            echo "| job | result |"
+            echo "| --- | --- |"
+            echo "| apk-build | ${APK_RESULT} |"
+            echo "| ota-update | ${OTA_RESULT} |"
+            echo
+            echo "Run: ${RUN_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+            PAYLOAD="$(printf '%s' "$SUMMARY" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.stringify({text:d})))")"
+            curl -sS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" \
+              && echo "Sent Slack notification" \
+              || echo "::warning::Slack notification failed"
+          fi
+
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            PAYLOAD="$(printf '%s' "$SUMMARY" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.stringify({content:d})))")"
+            curl -sS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$DISCORD_WEBHOOK_URL" \
+              && echo "Sent Discord notification" \
+              || echo "::warning::Discord notification failed"
+          fi
+
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ] && [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "No Slack/Discord webhook configured — relying on GitHub's built-in run notifications."
+          fi
+
+      # Surface a real pipeline failure as a red X. (This step is what keeps a
+      # failed build from ever looking like a successful, silent run.)
+      - name: Fail if a build job failed
+        if: needs.apk-build.result != 'success' || needs.ota-update.result != 'success'
+        run: |
+          echo "::error title=Android release pipeline failed::apk-build=${{ needs.apk-build.result }} ota-update=${{ needs.ota-update.result }} — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          exit 1
