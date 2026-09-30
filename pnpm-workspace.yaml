@@ -68,6 +68,27 @@ catalog:
 
 autoInstallPeers: false
 
+# pnpm 11 replaced `onlyBuiltDependencies` with this `allowBuilds` map, and made
+# strictDepBuilds default to true. An unapproved build script is now a hard ERROR
+# (ERR_PNPM_IGNORED_BUILDS) instead of a warning. EAS Build's SDK 57 image ships
+# pnpm 11, which made the Android build fail at the install step even though the
+# install itself succeeded on pnpm 10.
+#
+# Both spellings are kept deliberately: pnpm 11 reads `allowBuilds`, pnpm 10 (used
+# by local dev and the GitHub Actions workflow) reads `onlyBuiltDependencies`.
+# The four packages listed are exactly the ones the project already approved.
+allowBuilds:
+  '@swc/core': true
+  esbuild: true
+  msw: true
+  unrs-resolver: true
+
+# Safety net. pnpm 10 only warned about an unapproved build script; pnpm 11 fails
+# the whole install. Restoring the warning-only behaviour means a future dependency
+# with a lifecycle script can never block a client release again.
+strictDepBuilds: false
+
+# Legacy pnpm 10 spelling. Ignored by pnpm 11; still read by pnpm 10.
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
