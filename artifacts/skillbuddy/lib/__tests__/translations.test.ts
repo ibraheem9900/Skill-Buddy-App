@@ -307,6 +307,36 @@ const NEW_PPROVIDER_PAUSE_KEYS = [
   'jobd_ppause_err_network',
 ];
 
+/** Keys added for the Report Blocker action (Job Details → Report an Issue). */
+const NEW_BLOCKER_KEYS = [
+  'jobd_blocker_action',
+  'jobd_blocker_screen_title',
+  'jobd_blocker_warning',
+  'jobd_blocker_details_label',
+  'jobd_blocker_details_ph',
+  'jobd_blocker_details_hint',
+  'jobd_blocker_submit',
+  'jobd_blocker_busy',
+  'jobd_blocker_confirm_title',
+  'jobd_blocker_confirm_msg',
+  'jobd_blocker_confirm_cta',
+  'jobd_blocker_success_title',
+  'jobd_blocker_success_msg',
+  'jobd_blocker_moved_title',
+  'jobd_blocker_moved_msg',
+  'jobd_blocker_blocked_title',
+  'jobd_blocker_blocked_msg',
+  'jobd_blocker_err_details_required',
+  'jobd_blocker_err_details_short',
+  'jobd_blocker_err_details_long',
+  'jobd_blocker_err_invalid',
+  'jobd_blocker_err_notallowed',
+  'jobd_blocker_err_forbidden',
+  'jobd_blocker_err_notfound',
+  'jobd_blocker_err_server',
+  'jobd_blocker_err_network',
+];
+
 /** Keys the update screen reuses from the create/shared dictionaries. */
 const REUSED_KEYS = [
   'addr_c_country',
@@ -385,6 +415,7 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_DECLINE_KEYS,
     ...NEW_PAUSE_KEYS,
     ...NEW_PPROVIDER_PAUSE_KEYS,
+    ...NEW_BLOCKER_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -410,6 +441,7 @@ const allNewKeys = [
   ...NEW_DECLINE_KEYS,
   ...NEW_PAUSE_KEYS,
   ...NEW_PPROVIDER_PAUSE_KEYS,
+  ...NEW_BLOCKER_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)
