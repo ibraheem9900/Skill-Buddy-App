@@ -230,6 +230,146 @@ export function isAttachmentNotAllowed(kind: JobActionFailureKind): boolean {
   return kind === 'badrequest' || kind === 'conflict';
 }
 
+/* ==========================================================================
+ * REMOVE ATTACHMENT — DELETE /api/v1/jobs/{job_id}/attachments/{attachment_id}
+ *
+ * WHAT THE LIVE OPENAPI ACTUALLY SAYS:
+ *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+ *   - TWO required integer path parameters: `job_id` AND `attachment_id`
+ *   - NO request body
+ *   - its 204 is **NO CONTENT** — the success response has no body at all, so
+ *     nothing may be parsed from it and no job object comes back (unlike Add
+ *     Attachment, whose 201 is the whole job). 422 is the only other documented
+ *     response; 403/404 are NOT documented (SMALL NOTE: VERIFIED LIVE, the path
+ *     exists and is protected — DELETE → 401 {"detail":"Not authenticated"})
+ *
+ * IDENTITY OF THE ID: `attachment_id` is each entry's OWN `id` from the
+ * `JobAttachmentResponse` items inside `job.attachments` — the shape that module
+ * documents above and that `types/index.ts` already declares. It is NOT the job
+ * id, and NOT the array index.
+ *
+ * NO JOB OBJECT COMES BACK, SO THE CALLER PATCHES THE CACHED JOB ITSELF: after a
+ * 204 the attachment is filtered out of the held job's `attachments` array BY ID,
+ * and the job caches are invalidated so the next read re-confirms against the
+ * server. That is the chosen approach and it is deliberately conservative on both
+ * sides: the local filter only ever runs AFTER a 2xx (never optimistically), and
+ * the invalidation means the patch can never outlive a server that disagrees.
+ *
+ * STATUS / PERMISSION RULES ARE UNDOCUMENTED, so — exactly like Add Attachment —
+ * only the TERMINAL statuses are ruled out client-side, nobody is role-gated (the
+ * server authorises the real party), and every refusal the contract does not
+ * describe is surfaced as its own message with a job re-read.
+ * ========================================================================== */
+
+/** Copy keys for a rejected removal — deliberately separate from the add copy. */
+export type RemoveAttachmentErrorKey =
+  | 'jobd_attach_rm_err_invalid'
+  | 'jobd_attach_rm_err_notallowed'
+  | 'jobd_attach_rm_err_forbidden'
+  | 'jobd_attach_rm_err_server'
+  | 'jobd_attach_rm_err_network';
+
+/**
+ * Copy per bucket for a failed REMOVAL.
+ *
+ * `notfound` is absent on purpose: a 404 means the attachment is already gone, which
+ * the screen reports as a soft "already removed" state (and syncs local state) rather
+ * than as a failure — the same treatment the brief asks for.
+ */
+export function removeAttachmentErrorKey(kind: JobActionFailureKind): RemoveAttachmentErrorKey {
+  switch (kind) {
+    case 'invalid':
+      return 'jobd_attach_rm_err_invalid';
+    case 'badrequest':
+    case 'conflict':
+      return 'jobd_attach_rm_err_notallowed';
+    case 'forbidden':
+      return 'jobd_attach_rm_err_forbidden';
+    case 'network':
+      return 'jobd_attach_rm_err_network';
+    default:
+      return 'jobd_attach_rm_err_server';
+  }
+}
+
+/** Body copy for a failed removal: the backend's own words win when it sent any. */
+export function removeAttachmentFailureMessage(
+  failure: { kind: JobActionFailureKind; message: string | null },
+  translate: (key: RemoveAttachmentErrorKey) => string
+): string {
+  return failure.message ?? translate(removeAttachmentErrorKey(failure.kind));
+}
+
+/** A 404 means "already removed" — a soft state, not an error. */
+export function isAttachmentAlreadyGone(kind: JobActionFailureKind): boolean {
+  return kind === 'notfound';
+}
+
+/**
+ * Whether the "Remove" action may be OFFERED for one attachment: the job must still be
+ * non-terminal, both ids must be real positive integers, and the attachment must
+ * actually be present in the job we hold (so a stale row can never offer a delete for
+ * something the server no longer has).
+ *
+ * Takes NO role: the contract does not say whether only the original uploader or any
+ * participant may remove an attachment, so the backend authorises and a 403 gets its own
+ * copy plus a re-sync.
+ */
+export function canRemoveJobAttachment(
+  job:
+    | Pick<JobResponse, 'id' | 'status' | 'cancelled_at' | 'completed_at' | 'attachments'>
+    | null
+    | undefined,
+  attachmentId: number | null | undefined
+): boolean {
+  if (!job) return false;
+  if (!isValidJobId(job.id)) return false;
+  if (!isValidJobId(attachmentId)) return false;
+  if (isJobCancelledStatus(job)) return false;
+  if (isJobCompleted(job)) return false;
+  if (ATTACHMENT_BLOCKED_STATUSES.includes(job.status)) return false;
+  if (!Array.isArray(job.attachments)) return false;
+  return job.attachments.some((entry) => entry && entry.id === attachmentId);
+}
+
+/**
+ * The job with one attachment filtered out — the local patch applied AFTER a 204.
+ *
+ * Returns the SAME object (unchanged) when the attachment is not there, so a caller can
+ * detect "nothing to do" by identity and skip a pointless state write. Never applied
+ * before the server confirms: a failed removal leaves the list exactly as it was.
+ */
+export function withoutAttachment(
+  job: JobResponse,
+  attachmentId: number
+): JobResponse {
+  const current = Array.isArray(job.attachments) ? job.attachments : [];
+  const next = current.filter((entry) => !entry || entry.id !== attachmentId);
+  if (next.length === current.length) return job;
+  return { ...job, attachments: next };
+}
+
+/**
+ * Whether a network failure was in fact already carried out by the server.
+ *
+ * A DELETE whose response was lost may still have been processed. The caller re-reads the
+ * job and asks whether the attachment is STILL there: gone means it was removed and
+ * nobody should be asked to try again. `refetched` is null when the re-read itself
+ * failed, in which case nothing is claimed and the normal network error + retry path
+ * applies (nothing is ever filtered out locally on a network failure alone).
+ */
+export function attachmentRemovedAfterResync(
+  attachmentId: number | null | undefined,
+  refetched: Pick<JobResponse, 'attachments'> | null | undefined
+): boolean {
+  if (!isValidJobId(attachmentId)) return false;
+  if (!refetched) return false;
+  // An ABSENT `attachments` field is an unusable answer, not evidence of absence: nothing
+  // is claimed and the ordinary network error + retry path applies. Only a real array
+  // (even an empty one) is trusted to answer the question.
+  if (!Array.isArray(refetched.attachments)) return false;
+  return !refetched.attachments.some((entry) => entry && entry.id === attachmentId);
+}
 
 /**
  * Whether the screen should re-read the job after a failure.

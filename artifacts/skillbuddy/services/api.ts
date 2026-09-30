@@ -985,6 +985,40 @@ export const authApi = {
     });
   },
 
+  /**
+   * DELETE /api/v1/jobs/{job_id}/attachments/{attachment_id} — removes ONE attachment
+   * from a job (Swagger: "Remove Attachment").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory and IS
+   *     auto-attached by the shared interceptor
+   *   - TWO required integer path parameters: `job_id` and `attachment_id` — the latter is
+   *     each entry's own `id` from `JobAttachmentResponse` (NOT the job id, NOT an array
+   *     index); both are guarded here so a nonsense id never reaches the wire
+   *   - NO request body at all
+   *   - its **204 is NO CONTENT**: there is no body to read, so this resolves with
+   *     `void` and the caller must NOT treat any response data as a job. Because nothing
+   *     comes back, the caller patches its own cached job by filtering the attachment out
+   *     BY ID after the 2xx, and invalidates the job caches
+   *   - 422 is the only other documented response; 403/404 are undocumented (a 404 is
+   *     treated by the caller as "already removed")
+   *
+   * VERIFIED LIVE (no token): DELETE → 401 {"detail":"Not authenticated"}, so the path
+   * is registered and protected. The sibling POST on the parent path is "Add Attachment"
+   * — a different action, deliberately not reachable from here.
+   */
+  removeJobAttachment: (jobId: number, attachmentId: number) => {
+    if (!isValidJobId(jobId) || !isValidJobId(attachmentId)) {
+      return Promise.reject(
+        new Error(
+          `removeJobAttachment: invalid job id ${String(jobId)} / attachment id ${String(attachmentId)}`
+        )
+      );
+    }
+    // 204 No Content — resolves with an empty body; nothing is parsed from it.
+    return api.delete<void>(`/api/v1/jobs/${jobId}/attachments/${attachmentId}`);
+  },
+
   confirmJobPayment: (jobId: number) => {
     if (!isValidJobId(jobId)) {
       return Promise.reject(new Error(`confirmJobPayment: invalid job id ${String(jobId)}`));
