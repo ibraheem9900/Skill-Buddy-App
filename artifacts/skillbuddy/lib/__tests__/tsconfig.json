@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0",
+    "outDir": "./.out",
+    "rootDir": "../..",
+    "baseUrl": "../..",
+    "paths": { "@/*": ["./*"] },
+    "types": [],
+    "lib": ["es2020"]
+  },
+  "files": [
+    "./jobAddressUpdate.test.ts",
+    "./jobRestartTimer.test.ts",
+    "./jobConvert.test.ts",
+    "./jobAssign.test.ts",
+    "./jobPayment.test.ts",
+    "./jobStart.test.ts",
+    "./jobComplete.test.ts",
+    "./jobCancel.test.ts",
+    "./providerCancel.test.ts",
+    "./providerDecline.test.ts",
+    "./jobPause.test.ts",
+    "./providerPause.test.ts",
+    "./translations.test.ts"
+  ]
+}

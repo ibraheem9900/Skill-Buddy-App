@@ -41,7 +41,7 @@ function VideoBackground() {
 
   return (
     <VideoView
-      style={StyleSheet.absoluteFillObject}
+      style={StyleSheet.absoluteFill}
       player={player}
       contentFit="cover"
       nativeControls={false}
@@ -55,7 +55,7 @@ function StaticBackground() {
   return (
     <Animated.View
       entering={FadeIn.duration(600)}
-      style={[StyleSheet.absoluteFillObject, styles.fallbackBg]}
+      style={[StyleSheet.absoluteFill, styles.fallbackBg]}
     >
       <View style={styles.fallbackLogo}>
         <LogoImage variant="white" height={64} animateOnMount={false} />

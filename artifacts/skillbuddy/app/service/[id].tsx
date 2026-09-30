@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import Animated, {
   FadeIn,
@@ -24,6 +24,11 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
 import { getServiceById } from '@/lib/serviceLookup';
+import { formatServicePrice } from '@/lib/servicePrice';
+import { sanitizeRichText } from '@/lib/sanitizeRichText';
+import { prepareMedia, pickThumbnail, type PreparedMedia } from '@/lib/serviceMedia';
+import useServiceDetail from '@/hooks/useServiceDetail';
+import MediaVideo from '@/components/MediaVideo';
 import RatingStars from '@/components/RatingStars';
 import BrandedLoader from '@/components/BrandedLoader';
 import { useBookmarks } from '@/context/BookmarkContext';
@@ -41,11 +46,33 @@ export default function ServiceDetailScreen() {
   const { colors: c } = useTheme();
   const { t, tCat } = useLanguage();
 
-  const service = (id ? getServiceById(id) : undefined) ?? SERVICES[0];
+  // SERVER vs LOCAL routing: the detail endpoint takes an INTEGER path param,
+  // so a purely numeric id is a real server service id (pushed from the
+  // server-backed lists) → fetch GET /api/v1/services/{service_id}. Anything
+  // else is a local catalog/synthetic id (svc_…, synth_…) → the original mock
+  // path, byte-for-byte unchanged.
+  const numericId = id && /^\d+$/.test(id) ? Number(id) : null;
+  const isServer = numericId !== null;
+  const {
+    status: svcdStatus,
+    service: serverService,
+    load: loadServer,
+    refresh: refreshServer,
+  } = useServiceDetail(numericId);
+
+  // Re-check on every focus (mirrors the lists' useFocusEffect discipline):
+  // cached ids hydrate instantly, unknown ids fetch once per session.
+  useFocusEffect(
+    useCallback(() => {
+      if (isServer) loadServer();
+    }, [isServer, loadServer])
+  );
+
+  const localService = (id ? getServiceById(id) : undefined) ?? SERVICES[0];
   const reviews = MOCK_REVIEWS.slice(0, 4);
 
   const [activeTab, setActiveTab] = useState<Tab>('service_tab_about');
-  const [selectedImage, setSelectedImage] = useState(0);
+  const [selectedImage, setSelectedImage] = useState<number | null>(null);
   const [screenLoading, setScreenLoading] = useState(true);
 
   useEffect(() => {
@@ -53,9 +80,49 @@ export default function ServiceDetailScreen() {
     return () => clearTimeout(t);
   }, []);
 
-  const images = [service.image, ...(service.images ?? [])].filter(Boolean).slice(0, 5);
+  // Gallery sources: server media (sorted by `position`, URL-less entries
+  // dropped, media_type resolved to image/video) or the local images. Video
+  // entries must never reach an <Image>, so every entry carries its kind.
+  const localImages = [localService.image, ...(localService.images ?? [])].filter(Boolean).slice(0, 5);
+  const galleryItems: PreparedMedia[] = isServer
+    ? prepareMedia(serverService?.media)
+    : localImages.map((url, i) => ({
+        id: i,
+        kind: 'image' as const,
+        url,
+        position: i,
+        isThumbnail: i === 0,
+      }));
+  // Cover = the entry flagged is_thumbnail (lowest position wins — assumption
+  // flagged in lib/serviceMedia); tapping a thumbnail overrides it.
+  const coverItem = pickThumbnail(galleryItems);
+  const heroItem =
+    (selectedImage !== null ? galleryItems[selectedImage] : coverItem) ??
+    galleryItems[0] ??
+    null;
+  const isSelectedThumb = (index: number) =>
+    selectedImage !== null ? index === selectedImage : galleryItems[index] === coverItem;
 
-  const bookmarked = isBookmarked(service.id);
+  // ── Server-derived display fields (never fabricate provider/rating/unit) ──
+  const displayTitle = isServer && serverService ? serverService.title : localService.title;
+  const displayCategory =
+    isServer && serverService ? serverService.category_name ?? '' : tCat(localService.categoryId);
+  const serverPrice = isServer && serverService ? formatServicePrice(serverService) : null;
+  const isActive = isServer && serverService ? serverService.is_active : true;
+
+  // Rich text: server fields may carry HTML — sanitized to clean text (RN has
+  // no DOM; raw tags would render literally). Local mock descriptions are
+  // plain strings and go through the original path unchanged.
+  const serverDesc =
+    isServer && serverService ? sanitizeRichText(serverService.description) : null;
+  const serverWhatToExpect =
+    isServer && serverService ? sanitizeRichText(serverService.what_to_expect) : null;
+  const serverInclusions =
+    isServer && serverService
+      ? (serverService.inclusion_options ?? []).map((o) => o.name)
+      : null;
+
+  const bookmarked = !isServer && isBookmarked(localService.id);
   const scrollY = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -83,13 +150,78 @@ export default function ServiceDetailScreen() {
     opacity: interpolate(scrollY.value, [200, 260], [0, 1], Extrapolation.CLAMP),
   }));
 
-  if (screenLoading) {
+  // ── Server state gates (placed after every hook, like the original loader) ──
+  const serverPending = isServer && (svcdStatus === 'idle' || svcdStatus === 'loading');
+  if (screenLoading || serverPending) {
     return (
       <View style={[styles.root, { backgroundColor: c.surface }]}>
         <BrandedLoader size={44} />
       </View>
     );
   }
+
+  // 404 "Service not found." (live-verified; undocumented but real) — a dead
+  // link must not look like a network failure, so it gets its own screen and
+  // no retry (same id can never succeed).
+  if (isServer && svcdStatus === 'notfound') {
+    return (
+      <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity style={[styles.iconBtn, styles.stateBack]} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={20} color="#1A1A1A" />
+        </TouchableOpacity>
+        <View style={styles.stateWrap}>
+          <View style={[styles.stateCard, { backgroundColor: c.card, borderColor: c.border }]}>
+            <Feather name="search" size={28} color={c.mutedForeground} />
+            <Text style={[styles.stateText, { color: c.text }]}>{t('svcd_not_found')}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // 422 int_parsing — the server's `detail` array is logged by the hook; the
+  // user sees a friendly, retryable card (never a crash).
+  if (isServer && svcdStatus === 'invalid') {
+    return (
+      <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity style={[styles.iconBtn, styles.stateBack]} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={20} color="#1A1A1A" />
+        </TouchableOpacity>
+        <View style={styles.stateWrap}>
+          <View style={[styles.stateCard, { backgroundColor: c.card, borderColor: c.destructive }]}>
+            <Feather name="alert-circle" size={28} color={c.destructive} />
+            <Text style={[styles.stateText, { color: c.destructive }]}>{t('svcd_invalid')}</Text>
+            <TouchableOpacity onPress={() => refreshServer()} hitSlop={6}>
+              <Text style={[styles.stateRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Network/timeout/5xx — retryable.
+  if (isServer && svcdStatus === 'error') {
+    return (
+      <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity style={[styles.iconBtn, styles.stateBack]} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={20} color="#1A1A1A" />
+        </TouchableOpacity>
+        <View style={styles.stateWrap}>
+          <View style={[styles.stateCard, { backgroundColor: c.card, borderColor: c.destructive }]}>
+            <Feather name="wifi-off" size={28} color={c.destructive} />
+            <Text style={[styles.stateText, { color: c.destructive }]}>{t('svcd_load_error')}</Text>
+            <TouchableOpacity onPress={() => refreshServer()} hitSlop={6}>
+              <Text style={[styles.stateRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // By here the server path is either local, or ready with a non-null detail.
+  const svc = isServer ? serverService! : localService;
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface }]}>
@@ -102,15 +234,22 @@ export default function ServiceDetailScreen() {
           <Feather name="arrow-left" size={20} color="#1A1A1A" />
         </TouchableOpacity>
         <Animated.Text style={[styles.floatingTitle, { color: c.text }, floatingTitleStyle]} numberOfLines={1}>
-          {service.title}
+          {displayTitle}
         </Animated.Text>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(service)}>
-          <MaterialIcons
-            name={bookmarked ? 'bookmark' : 'bookmark-border'}
-            size={22}
-            color={bookmarked ? c.primary : '#1A1A1A'}
-          />
-        </TouchableOpacity>
+        {/* Bookmarks are a local-catalog concept (the favorites API stores the
+            local Service shape) — hidden for server services rather than
+            storing a fabricated entry. */}
+        {!isServer ? (
+          <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(localService)}>
+            <MaterialIcons
+              name={bookmarked ? 'bookmark' : 'bookmark-border'}
+              size={22}
+              color={bookmarked ? c.primary : '#1A1A1A'}
+            />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.iconBtn} />
+        )}
       </View>
 
       <Animated.ScrollView
@@ -124,76 +263,131 @@ export default function ServiceDetailScreen() {
             a subtle parallax/zoom effect instead of staying stuck in place. */}
         <View style={{ height: 300, overflow: 'hidden' }}>
           <Animated.View style={heroStyle}>
-            <Image source={{ uri: images[selectedImage] }} style={styles.heroImage} contentFit="cover" />
+            {heroItem ? (
+              heroItem.kind === 'video' ? (
+                <MediaVideo
+                  url={heroItem.url}
+                  style={styles.heroImage}
+                  cover
+                  autoplay
+                  muted
+                  loop
+                  controls={false}
+                />
+              ) : (
+                <Image source={{ uri: heroItem.url }} style={styles.heroImage} contentFit="cover" />
+              )
+            ) : (
+              <View style={[styles.heroImage, styles.heroFallback, { backgroundColor: c.muted }]}>
+                <Feather name="image" size={44} color={c.mutedForeground} />
+              </View>
+            )}
           </Animated.View>
-          {/* Thumbnail strip */}
-          {images.length > 1 && (
+          {/* Thumbnail strip — gallery order (position ascending) */}
+          {galleryItems.length > 1 && (
             <FlatList
-              data={images}
-              keyExtractor={(_, i) => String(i)}
+              data={galleryItems}
+              keyExtractor={(item, i) => `${item.id}-${i}`}
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.thumbStrip}
               contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
               renderItem={({ item, index }) => (
                 <TouchableOpacity onPress={() => setSelectedImage(index)} activeOpacity={0.8}>
-                  <Image
-                    source={{ uri: item }}
-                    style={[
-                      styles.thumb,
-                      index === selectedImage && { borderWidth: 2, borderColor: c.primary },
-                    ]}
-                    contentFit="cover"
-                  />
+                  {item.kind === 'video' ? (
+                    <MediaVideo
+                      url={item.url}
+                      style={[
+                        styles.thumb,
+                        isSelectedThumb(index) && { borderWidth: 2, borderColor: c.primary },
+                      ]}
+                      cover
+                      controls={false}
+                    />
+                  ) : (
+                    <Image
+                      source={{ uri: item.url }}
+                      style={[
+                        styles.thumb,
+                        isSelectedThumb(index) && { borderWidth: 2, borderColor: c.primary },
+                      ]}
+                      contentFit="cover"
+                    />
+                  )}
                 </TouchableOpacity>
               )}
             />
           )}
         </View>
+        {/* Inactive banner — the service exists but is not currently offered
+            (is_active=false). Browsing stays possible; booking is disabled. */}
+        {isServer && !isActive && (
+          <View style={[styles.unavailableCard, { backgroundColor: c.muted }]}>
+            <Feather name="slash" size={16} color={c.mutedForeground} />
+            <Text style={[styles.unavailableText, { color: c.mutedForeground }]}>
+              {t('svcd_unavailable')}
+            </Text>
+          </View>
+        )}
         {/* Title row */}
         <View style={styles.titleRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: c.text }]}>{service.title}</Text>
-            <Text style={[styles.categoryLabel, { color: c.mutedForeground }]}>{tCat(service.categoryId)}</Text>
+            <Text style={[styles.title, { color: c.text }]}>{displayTitle}</Text>
+            {displayCategory ? (
+              <Text style={[styles.categoryLabel, { color: c.mutedForeground }]}>{displayCategory}</Text>
+            ) : null}
           </View>
-          <View style={styles.priceBox}>
-            <Text style={[styles.price, { color: c.primary }]}>${service.price}</Text>
-            <Text style={[styles.priceUnit, { color: c.mutedForeground }]}>{t('service_per_hour')}</Text>
-          </View>
-        </View>
-
-        {/* Provider row */}
-        <View style={styles.providerRow}>
-          <View style={[styles.providerInitials, { backgroundColor: c.primaryLight }]}>
-            <Text style={[styles.providerInitialsText, { color: c.primary }]}>
-              {service.provider.name.charAt(0)}
-            </Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.providerName, { color: c.text }]}>{service.provider.name}</Text>
-            <Text style={[styles.providerSub, { color: c.mutedForeground }]}>
-              {service.provider.specialty}
-            </Text>
-          </View>
-          <RatingStars rating={service.rating} size={14} />
-          <Text style={[styles.ratingCount, { color: c.mutedForeground }]}>
-            ({service.reviewCount})
-          </Text>
-        </View>
-
-        {/* Stats row */}
-        <View style={[styles.statsRow, { backgroundColor: c.muted }]}>
-          {[
-            { label: t('service_stat_jobs_done'), value: `${service.provider.jobsDone}+` },
-            { label: t('service_stat_satisfaction'), value: `${service.provider.credibility}%` },
-            { label: t('service_stat_rating'), value: `${service.rating}★` },
-          ].map((stat) => (
-            <View key={stat.label} style={styles.statItem}>
-              <Text style={[styles.statValue, { color: c.text }]}>{stat.value}</Text>
-              <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{stat.label}</Text>
+          {isServer ? (
+            serverPrice ? (
+              <View style={styles.priceBox}>
+                <Text style={[styles.price, { color: c.primary }]}>{serverPrice}</Text>
+              </View>
+            ) : null
+          ) : (
+            <View style={styles.priceBox}>
+              <Text style={[styles.price, { color: c.primary }]}>${localService.price}</Text>
+              <Text style={[styles.priceUnit, { color: c.mutedForeground }]}>{t('service_per_hour')}</Text>
             </View>
-          ))}
+          )}
         </View>
+
+        {/* Provider row — the detail API provides no provider/rating data;
+            fabricated values are shown ONLY for local catalog entries. */}
+        {!isServer && (
+          <>
+            <View style={styles.providerRow}>
+              <View style={[styles.providerInitials, { backgroundColor: c.primaryLight }]}>
+                <Text style={[styles.providerInitialsText, { color: c.primary }]}>
+                  {localService.provider.name.charAt(0)}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.providerName, { color: c.text }]}>{localService.provider.name}</Text>
+                <Text style={[styles.providerSub, { color: c.mutedForeground }]}>
+                  {localService.provider.specialty}
+                </Text>
+              </View>
+              <RatingStars rating={localService.rating} size={14} />
+              <Text style={[styles.ratingCount, { color: c.mutedForeground }]}>
+                ({localService.reviewCount})
+              </Text>
+            </View>
+
+            {/* Stats row */}
+            <View style={[styles.statsRow, { backgroundColor: c.muted }]}>
+              {[
+                { label: t('service_stat_jobs_done'), value: `${localService.provider.jobsDone}+` },
+                { label: t('service_stat_satisfaction'), value: `${localService.provider.credibility}%` },
+                { label: t('service_stat_rating'), value: `${localService.rating}★` },
+              ].map((stat) => (
+                <View key={stat.label} style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: c.text }]}>{stat.value}</Text>
+                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* Tabs */}
         <View style={[styles.tabRow, { borderBottomColor: c.border }]}>
@@ -216,29 +410,63 @@ export default function ServiceDetailScreen() {
         {/* About tab */}
         {activeTab === 'service_tab_about' && (
           <Animated.View entering={FadeIn} style={{ paddingHorizontal: 20, paddingTop: 16 }}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('service_description')}</Text>
-            <Text style={[styles.body2, { color: c.mutedForeground }]}>
-              {service.description ??
-                t('service_default_desc', {
-                  provider: service.provider.name,
-                  category: tCat(service.categoryId),
-                  service: service.title.toLowerCase(),
-                })}
-            </Text>
-            <Text style={[styles.sectionTitle, { color: c.text, marginTop: 20 }]}>
-              {t('service_whats_included')}
-            </Text>
-            {[
-              t('service_include_1'),
-              t('service_include_2'),
-              t('service_include_3'),
-              t('service_include_4'),
-            ].map((item) => (
-                <View key={item} style={styles.includeRow}>
-                  <Feather name="check-circle" size={16} color={c.primary} />
-                  <Text style={[styles.includeText, { color: c.text }]}>{item}</Text>
-                </View>
-              )
+            {isServer ? (
+              <>
+                {serverDesc ? (
+                  <>
+                    <Text style={[styles.sectionTitle, { color: c.text }]}>{t('service_description')}</Text>
+                    <Text style={[styles.body2, { color: c.mutedForeground }]}>{serverDesc}</Text>
+                  </>
+                ) : null}
+                {serverWhatToExpect ? (
+                  <>
+                    <Text style={[styles.sectionTitle, { color: c.text, marginTop: serverDesc ? 20 : 0 }]}>
+                      {t('svcd_what_to_expect')}
+                    </Text>
+                    <Text style={[styles.body2, { color: c.mutedForeground }]}>{serverWhatToExpect}</Text>
+                  </>
+                ) : null}
+                {serverInclusions && serverInclusions.length > 0 ? (
+                  <>
+                    <Text style={[styles.sectionTitle, { color: c.text, marginTop: 20 }]}>
+                      {t('service_whats_included')}
+                    </Text>
+                    {serverInclusions.map((item) => (
+                      <View key={item} style={styles.includeRow}>
+                        <Feather name="check-circle" size={16} color={c.primary} />
+                        <Text style={[styles.includeText, { color: c.text }]}>{item}</Text>
+                      </View>
+                    ))}
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={[styles.sectionTitle, { color: c.text }]}>{t('service_description')}</Text>
+                <Text style={[styles.body2, { color: c.mutedForeground }]}>
+                  {localService.description ??
+                    t('service_default_desc', {
+                      provider: localService.provider.name,
+                      category: tCat(localService.categoryId),
+                      service: localService.title.toLowerCase(),
+                    })}
+                </Text>
+                <Text style={[styles.sectionTitle, { color: c.text, marginTop: 20 }]}>
+                  {t('service_whats_included')}
+                </Text>
+                {[
+                  t('service_include_1'),
+                  t('service_include_2'),
+                  t('service_include_3'),
+                  t('service_include_4'),
+                ].map((item) => (
+                    <View key={item} style={styles.includeRow}>
+                      <Feather name="check-circle" size={16} color={c.primary} />
+                      <Text style={[styles.includeText, { color: c.text }]}>{item}</Text>
+                    </View>
+                  )
+                )}
+              </>
             )}
           </Animated.View>
         )}
@@ -246,36 +474,64 @@ export default function ServiceDetailScreen() {
         {/* Gallery tab */}
         {activeTab === 'service_tab_gallery' && (
           <Animated.View entering={FadeIn} style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-            <View style={styles.galleryGrid}>
-              {images.map((img, i) => (
-                <TouchableOpacity key={i} onPress={() => setSelectedImage(i)} activeOpacity={0.85}>
-                  <Image source={{ uri: img }} style={styles.galleryItem} contentFit="cover" />
-                </TouchableOpacity>
-              ))}
-            </View>
+            {galleryItems.length > 0 ? (
+              <View style={styles.galleryGrid}>
+                {galleryItems.map((item, i) => (
+                  <TouchableOpacity
+                    key={`${item.id}-${i}`}
+                    onPress={() => setSelectedImage(i)}
+                    activeOpacity={0.85}
+                  >
+                    {item.kind === 'video' ? (
+                      <MediaVideo url={item.url} style={styles.galleryItem} cover controls />
+                    ) : (
+                      <Image source={{ uri: item.url }} style={styles.galleryItem} contentFit="cover" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyGallery}>
+                <Feather name="image" size={36} color={c.border} />
+                <Text style={[styles.emptyGalleryText, { color: c.mutedForeground }]}>
+                  {t('svcd_no_media')}
+                </Text>
+              </View>
+            )}
           </Animated.View>
         )}
 
         {/* Reviews tab */}
         {activeTab === 'service_tab_reviews' && (
           <Animated.View entering={FadeIn} style={{ paddingTop: 16 }}>
-            {reviews.map((review) => (
-              <View key={review.id} style={[styles.reviewCard, { backgroundColor: c.muted }]}>
-                <View style={styles.reviewHeader}>
-                  <View style={[styles.reviewerInitials, { backgroundColor: c.primaryLight }]}>
-                    <Text style={[styles.reviewerInitialsText, { color: c.primary }]}>
-                      {review.reviewer.name.charAt(0)}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.reviewerName, { color: c.text }]}>{review.reviewer.name}</Text>
-                    <Text style={[styles.reviewDate, { color: c.mutedForeground }]}>{review.date}</Text>
-                  </View>
-                  <RatingStars rating={review.rating} size={13} />
-                </View>
-                <Text style={[styles.reviewText, { color: c.mutedForeground }]}>{review.comment}</Text>
+            {isServer ? (
+              // The service endpoints carry no reviews — never show mock
+              // reviews for a real service.
+              <View style={styles.emptyGallery}>
+                <Feather name="message-square" size={36} color={c.border} />
+                <Text style={[styles.emptyGalleryText, { color: c.mutedForeground }]}>
+                  {t('svcd_no_reviews')}
+                </Text>
               </View>
-            ))}
+            ) : (
+              reviews.map((review) => (
+                <View key={review.id} style={[styles.reviewCard, { backgroundColor: c.muted }]}>
+                  <View style={styles.reviewHeader}>
+                    <View style={[styles.reviewerInitials, { backgroundColor: c.primaryLight }]}>
+                      <Text style={[styles.reviewerInitialsText, { color: c.primary }]}>
+                        {review.reviewer.name.charAt(0)}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.reviewerName, { color: c.text }]}>{review.reviewer.name}</Text>
+                      <Text style={[styles.reviewDate, { color: c.mutedForeground }]}>{review.date}</Text>
+                    </View>
+                    <RatingStars rating={review.rating} size={13} />
+                  </View>
+                  <Text style={[styles.reviewText, { color: c.mutedForeground }]}>{review.comment}</Text>
+                </View>
+              ))
+            )}
           </Animated.View>
         )}
       </Animated.ScrollView>
@@ -286,8 +542,9 @@ export default function ServiceDetailScreen() {
           <Feather name="message-circle" size={20} color={c.primary} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.bookBtn, { backgroundColor: c.primary }]}
-          onPress={() => router.push(`/booking/${service.id}` as any)}
+          style={[styles.bookBtn, { backgroundColor: c.primary }, isServer && !isActive && { opacity: 0.4 }]}
+          disabled={isServer && !isActive}
+          onPress={() => router.push(`/booking/${svc.id}` as any)}
         >
           <Text style={styles.bookBtnText}>{t('book_now')}</Text>
         </TouchableOpacity>
@@ -299,6 +556,7 @@ export default function ServiceDetailScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   heroImage: { width: '100%', height: 300 },
+  heroFallback: { alignItems: 'center', justifyContent: 'center' },
   floatingHeader: {
     position: 'absolute',
     left: 0,
@@ -390,6 +648,8 @@ const styles = StyleSheet.create({
   includeText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   galleryItem: { width: (W - 40) / 2, height: (W - 40) / 2, borderRadius: 12 },
+  emptyGallery: { alignItems: 'center', gap: 10, paddingVertical: 48 },
+  emptyGalleryText: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center' },
   reviewCard: { marginHorizontal: 20, marginBottom: 16, padding: 16, borderRadius: 16 },
   reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   reviewerInitials: {
@@ -403,6 +663,31 @@ const styles = StyleSheet.create({
   reviewerName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
   reviewDate: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
   reviewText: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20 },
+  // Full-screen server state (404 / 422 / network) — centered card + back.
+  stateBack: { alignSelf: 'flex-start', marginLeft: 16, marginTop: 8 },
+  stateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  stateCard: {
+    alignItems: 'center',
+    gap: 12,
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    width: '100%',
+  },
+  stateText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, textAlign: 'center' },
+  stateRetry: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
+  // is_active=false banner under the title row.
+  unavailableCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  unavailableText: { fontFamily: 'Manrope_500Medium', fontSize: 13, flex: 1 },
   bottomBar: {
     flexDirection: 'row',
     paddingHorizontal: 20,

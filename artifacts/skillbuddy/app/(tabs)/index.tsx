@@ -633,7 +633,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   headerGlow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   headerGlowOrb: {
     position: 'absolute',

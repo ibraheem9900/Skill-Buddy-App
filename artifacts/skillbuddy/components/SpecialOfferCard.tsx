@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 16,
   },
   content: {

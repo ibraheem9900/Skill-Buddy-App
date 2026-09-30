@@ -333,6 +333,97 @@ export interface CategoryDetailResponse {
   updated_at: string;
 }
 
+/** One service as the server lists it — the shared `ServiceListResponse`
+ * schema behind BOTH list endpoints:
+ *   - GET /api/v1/services                        (global catalog)
+ *   - GET /api/v1/categories/{category_id}/services
+ * Both return a bare ARRAY of this shape (no wrapper, no pagination).
+ * id/category_id/title are REQUIRED; category_name, description, price_from,
+ * price_to, price_range and thumbnail_url are all NULLABLE.
+ * IMPORTANT: price_from/price_to are numeric STRINGS on the wire (declared
+ * pattern `^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$`) — never numbers and often null.
+ * The docs' Example Value shows astronomically long values; that is the
+ * unconstrained example generator, not real data (see lib/servicePrice.ts
+ * for the defensive parse/format used by every consumer).
+ * VERIFIED LIVE: GET /api/v1/services → 200 [] (backend unseeded);
+ * GET /api/v1/categories/1/services → 404 {"detail":"Category not found."};
+ * GET /api/v1/categories/abc/services → 422 int_parsing with detail[].loc
+ * ["path","category_id"].
+ */
+export interface ServiceListItem {
+  id: number;
+  category_id: number;
+  title: string;
+  /** Server's own category label — informational; the screen already has
+   * the category name from GET /categories/{id}. */
+  category_name?: string | null;
+  description?: string | null;
+  /** Nullable numeric STRING (not a number) — parse before display. */
+  price_from?: string | null;
+  /** Nullable numeric STRING (not a number) — parse before display. */
+  price_to?: string | null;
+  /** Server-rendered range label (nullable) — display fallback ONLY when
+   * the numeric from/to pair is absent. */
+  price_range?: string | null;
+  /** Cover-fit thumbnail URL (nullable) — must tolerate missing/broken. */
+  thumbnail_url?: string | null;
+}
+
+/** One entry of `ServiceResponse.media` (live OpenAPI schema
+ * ServiceMediaResponse): id/media_type/position/is_thumbnail REQUIRED,
+ * media_url nullable. Rendered in the detail screen's gallery. */
+export interface ServiceMediaItem {
+  id: number;
+  /** Server string, e.g. "image"/"video" — semantics undocumented; the UI
+   * only uses entries that carry a usable media_url. */
+  media_type: string;
+  media_url?: string | null;
+  position: number;
+  is_thumbnail: boolean;
+}
+
+/** One entry of `ServiceResponse.inclusion_options` (live OpenAPI schema
+ * InclusionOptionResponse): just { id, name }, both required. */
+export interface ServiceInclusionOption {
+  id: number;
+  name: string;
+}
+
+/** GET /api/v1/services/{service_id} — the FULL service detail schema
+ * (`ServiceResponse`), richer than ServiceListItem: adds what_to_expect,
+ * is_active, status, created_at/updated_at (all four REQUIRED) and the
+ * media / inclusion_options arrays (default []). price_from/price_to are
+ * nullable numeric STRINGS exactly as in the list schema — parse via
+ * lib/servicePrice.ts, never render raw. description/what_to_expect may
+ * contain rich text/HTML — render through lib/sanitizeRichText.ts.
+ * VERIFIED LIVE (public — no auth header needed): non-integer id → 422
+ * int_parsing with detail[].loc ["path","service_id"]; a nonexistent id →
+ * 404 {"detail":"Service not found."} (plain-string detail — happens even
+ * though the docs document only 200/422). */
+export interface ServiceDetailResponse {
+  id: number;
+  category_id: number;
+  title: string;
+  category_name?: string | null;
+  description?: string | null;
+  /** Nullable numeric STRING (not a number) — parse before display. */
+  price_from?: string | null;
+  /** Nullable numeric STRING (not a number) — parse before display. */
+  price_to?: string | null;
+  /** Server-rendered range label — fallback ONLY when from/to are absent. */
+  price_range?: string | null;
+  what_to_expect?: string | null;
+  is_active: boolean;
+  /** Server workflow state (semantics undocumented) — displayed only via
+   * is_active; the raw value is never guessed into UI labels. */
+  status: string;
+  /** Informational only — never displayed to end users. */
+  created_at: string;
+  updated_at: string;
+  media?: ServiceMediaItem[];
+  inclusion_options?: ServiceInclusionOption[];
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -579,4 +670,391 @@ export interface Bid {
   eta: string;
   createdAt: number;
   score: number;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * JOBS API — server contract (POST /api/v1/jobs + /jobs/{id}/publish).
+ *
+ * These mirror the LIVE OpenAPI schemas exactly: JobCreate,
+ * JobMilestoneCreate, JobAddressCreate, JobResponse, JobAddressResponse,
+ * JobMilestoneResponse, JobAttachmentResponse, JobStatusHistoryResponse.
+ *
+ * They are deliberately NOT the local mock `Job` interface above: that one
+ * models the app's demo jobs (string ids, hourlyRate, photos, urgency) which
+ * the server contract does not have. Naming the 201 body `JobResponse` keeps
+ * every existing mock-driven job screen compiling untouched.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** JobRequestType enum — exactly ["URGENT","REGULAR"]. */
+export type JobRequestType = 'URGENT' | 'REGULAR';
+
+/** BookingType enum — exactly ["ONE_TIME","MULTI_DAY"]. */
+export type JobBookingType = 'ONE_TIME' | 'MULTI_DAY';
+
+/** Server JobStatus enum — DISTINCT from the local mock `JobStatus` above. */
+export type JobApiStatus =
+  | 'DRAFT'
+  | 'OPEN'
+  | 'PAYMENT_PENDING'
+  | 'PROVIDER_ASSIGNED'
+  | 'IN_PROGRESS'
+  | 'DECLINED_BY_PROVIDER'
+  | 'DECLINED_BY_CLIENT'
+  | 'PAUSED_BY_CLIENT'
+  | 'PAUSED_BY_PROVIDER'
+  | 'BLOCKED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CANCELLED_BY_CLIENT'
+  | 'CANCELLED_BY_PROVIDER';
+
+/**
+ * One milestone row of the create payload (schema JobMilestoneCreate).
+ * Only `scheduled_at` is required. The schema notes milestones are intended
+ * for MULTI_DAY bookings, but JobCreate exposes NO top-level scheduled_at /
+ * expected_hours, so this array is the only channel for a ONE_TIME job's
+ * schedule either — see the doc comment on createJob.
+ */
+export interface JobMilestoneCreate {
+  /** ISO 8601 UTC, e.g. "2026-09-28T10:35:52.816Z". */
+  scheduled_at: string;
+  /** number | numeric string | null on the wire; this app always sends a number. */
+  expected_hours?: number | string | null;
+}
+
+/**
+ * Address block of the create payload (schema JobAddressCreate). Every field
+ * is optional/nullable on the server. `country_id`/`county_id`/`city_id` are
+ * numeric ids from the PUBLIC geo endpoints — never invented client-side.
+ * `latitude`/`longitude` are accepted but the app has no map picker, so they
+ * are OMITTED rather than zero-filled (same rule the address screens use).
+ */
+export interface JobAddressCreate {
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  country_id?: number | null;
+  county_id?: number | null;
+  city_id?: number | null;
+  house_number?: string | null;
+  street_address?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  formatted_address?: string | null;
+}
+
+/**
+ * POST /api/v1/jobs request body (schema JobCreate).
+ * Server-REQUIRED: service_id, title (3..150 chars), milestones (>= 1 item),
+ * address. category_id/description are nullable; request_type/booking_type/
+ * is_draft carry server defaults.
+ */
+export interface CreateJobRequest {
+  service_id: number;
+  category_id?: number | null;
+  title: string;
+  description?: string | null;
+  request_type?: JobRequestType;
+  booking_type?: JobBookingType;
+  milestones: JobMilestoneCreate[];
+  address: JobAddressCreate;
+  is_draft?: boolean;
+}
+
+/** Nested geo objects returned inside JobAddressResponse. */
+export interface JobAddressGeo {
+  id: number;
+  name: string;
+}
+
+/** JobAddressResponse — the job's own address (NOT AddressResponse). */
+export interface JobAddressResponse {
+  id: number;
+  job_id: number;
+  /**
+   * Decimal STRING|null per the live schema (same convention as
+   * AddressResponse.latitude). Parse with parseCoordinate before any math.
+   */
+  latitude: string | number | null;
+  longitude: string | number | null;
+  house_number: string | null;
+  street_address: string | null;
+  postal_code: string | null;
+  landmark: string | null;
+  formatted_address: string | null;
+  country?: (JobAddressGeo & { iso2?: string; iso3?: string | null; phone_code?: string | null }) | null;
+  county?: JobAddressGeo | null;
+  city?: JobAddressGeo | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Server MilestoneStatus enum — schema MilestoneStatus (12 values, spec order).
+ * DISTINCT from JobApiStatus; a milestone has its own lifecycle.
+ */
+export type MilestoneStatus =
+  | 'PENDING'
+  | 'IN_PROGRESS'
+  | 'ON_HOLD'
+  | 'BLOCKED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CANCELLED_BY_CLIENT'
+  | 'CANCELLED_BY_PROVIDER'
+  | 'DISPUTED_BY_CLIENT'
+  | 'DISPUTED_BY_PROVIDER'
+  | 'PROVIDER_NO_SHOW'
+  | 'CLIENT_NO_SHOW';
+
+/** JobMilestoneResponse — a persisted milestone. */
+export interface JobMilestoneResponse {
+  id: number;
+  sequence: number;
+  /** REQUIRED (non-null) per the live schema, unlike the job's own schedule. */
+  scheduled_at: string;
+  /** Numeric STRING on the wire (same convention as service prices). */
+  expected_hours?: string | null;
+  status: MilestoneStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** JobAttachmentResponse — note media_type is an unconstrained string. */
+export interface JobAttachmentResponse {
+  id: number;
+  media_type: string;
+  media_url?: string | null;
+  position: number;
+  created_at: string;
+}
+
+/** JobStatusHistoryResponse — one workflow transition. */
+export interface JobStatusHistoryResponse {
+  id: number;
+  status: JobApiStatus;
+  note?: string | null;
+  changed_by?: number | null;
+  created_at: string;
+}
+
+/**
+ * PATCH /api/v1/jobs/{job_id} body (schema JobUpdate).
+ *
+ * Verified against the live OpenAPI: the schema has NO required fields, so a
+ * PATCH may carry any subset. It exposes EXACTLY these four properties and
+ * nothing else — address changes belong to the Job Address endpoints, and
+ * status / request_type / booking_type / category_id / service_id are not
+ * editable here at all.
+ *
+ * `title` is bounded 3..150 by the server. `expected_hours` is sent as a
+ * NUMBER (the same field comes back as a numeric STRING on JobResponse).
+ */
+export interface UpdateJobRequest {
+  title?: string | null;
+  description?: string | null;
+  /** ISO 8601 UTC string. */
+  scheduled_at?: string | null;
+  expected_hours?: number | null;
+}
+
+/**
+ * PATCH /api/v1/jobs/{job_id}/address request body (schema JobAddressUpdate).
+ *
+ * Contract for this task: FULL BODY only (partial bodies NOT confirmed, so
+ * follow the full-body rule). All fields below are sent explicitly; the geo ids
+ * are integers from the public country → county → city cascade; latitude and
+ * longitude are sent as NUMBERS (the API returns them as numeric strings on the
+ * 200 response). The caller must be sure the job already has an address — this is
+ * edit-only, never the first address (that is POST /api/v1/jobs/{job_id}/address).
+ */
+export interface JobAddressUpdate {
+  latitude: number;
+  longitude: number;
+  country_id: number;
+  county_id: number;
+  city_id: number;
+  house_number?: string | null;
+  street_address?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  formatted_address?: string | null;
+}
+
+/**
+ * POST /api/v1/jobs 201 body (schema JobResponse).
+ * The app stores `id`, `status` and `bidding_ends_at` after creation.
+ */
+export interface JobResponse {
+  id: number;
+  client_id: number;
+  category_id: number;
+  service_id: number;
+  title: string;
+  description?: string | null;
+  request_type: JobRequestType;
+  booking_type: JobBookingType;
+  status: JobApiStatus;
+  scheduled_at?: string | null;
+  /** Numeric STRING on the wire. */
+  expected_hours?: string | null;
+  bidding_started_at?: string | null;
+  bidding_ends_at?: string | null;
+  timer_restart_count: number;
+  is_urgent: boolean;
+  is_bidding_open: boolean;
+  is_editable: boolean;
+  is_cancellable: boolean;
+  can_restart_timer: boolean;
+  can_convert_to_regular: boolean;
+  can_convert_to_urgent: boolean;
+  remaining_bidding_seconds?: number | null;
+  assigned_provider_id?: number | null;
+  assigned_at?: string | null;
+  completed_at?: string | null;
+  cancellation_reason?: string | null;
+  cancellation_notes?: string | null;
+  cancellation_fee_charged: boolean;
+  cancelled_at?: string | null;
+  address?: JobAddressResponse | null;
+  attachments?: JobAttachmentResponse[];
+  status_history?: JobStatusHistoryResponse[];
+  milestones?: JobMilestoneResponse[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** One entry of a FastAPI 422 body. `loc` is ["body", ...path]. */
+/**
+ * 200 body of the job ACTION endpoints (schema JobActionResponse).
+ *
+ * "Generic envelope for job actions (restart timer, convert to regular, cancel, ...)
+ * that returns a short message alongside the updated job." — the schema's own words.
+ * Both members are REQUIRED, and `job` is the SAME full JobResponse that GET
+ * /api/v1/jobs/{job_id} returns, so callers must adopt it wholesale: it already
+ * carries the recalculated bidding window, permission flags and counters.
+ *
+ * Verified against the live OpenAPI spec: the restart-timer operation declares only
+ * its 200 (this schema) and 422 (HTTPValidationError) responses, and declares NO
+ * requestBody at all.
+ */
+export interface JobActionResponse {
+  message: string;
+  job: JobResponse;
+}
+
+/**
+ * POST /api/v1/jobs/{job_id}/assign-provider request body
+ * (schema JobAssignProviderRequest).
+ *
+ * The body is REQUIRED and its single property is REQUIRED — `provider_id` is an
+ * integer, and it must be a real provider id: the ones the client can choose from
+ * come from GET /api/v1/jobs/{job_id}/bids (each BidResponse carries
+ * `provider.id`, schema BidProviderSummary) — the "Recommended SkillBuddies" /
+ * "View All Offers" list. It must never be invented client-side.
+ *
+ * NOTE the response shape differs from the other job actions: this endpoint returns
+ * the JobResponse DIRECTLY (no `{ message, job }` envelope).
+ */
+export interface JobAssignProviderRequest {
+  provider_id: number;
+}
+
+/**
+ * POST /api/v1/jobs/{job_id}/cancel request body (schema JobCancelRequest).
+ *
+ * The body is REQUIRED and `reason` is REQUIRED — a plain string with
+ * `minLength: 3, maxLength: 255` and **no enum**, i.e. the contract itself confirms
+ * FREE TEXT rather than a fixed list, so no reason value is ever invented client-side.
+ * `notes` is OPTIONAL and nullable.
+ *
+ * NOTE the response shape differs from the other job actions: this endpoint returns
+ * the JobResponse DIRECTLY (no `{ message, job }` envelope).
+ */
+export interface JobCancelRequest {
+  reason: string;
+  notes?: string | null;
+}
+
+/**
+ * Body of the job "explanation" actions (schema JobDetailsRequest) — used by
+ * POST /jobs/{job_id}/decline-by-provider AND its siblings decline-by-client,
+ * pause-by-client, pause-by-provider and blocker. The schema's own description:
+ * "Body for IN_PROGRESS actions that require an explanation: decline, pause, or
+ * reporting a blocker."
+ *
+ * The single field is `details` (singular, PLURAL-looking but one string) — NOT
+ * `reason`/`notes`. It is REQUIRED, `minLength: 3`, `maxLength: 1000`, and has **no
+ * enum**, so the contract itself confirms FREE TEXT rather than a fixed list of
+ * reasons; no reason value is ever invented client-side.
+ *
+ * NOTE the response shape of these endpoints differs from the other job actions: they
+ * return the JobResponse DIRECTLY (no `{ message, job }` envelope).
+ */
+export interface JobDetailsRequest {
+  details: string;
+}
+
+export interface ValidationErrorDetail {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
+}
+
+/** FastAPI 422 response body shared by the jobs endpoints. */
+export interface ApiValidationError {
+  detail: ValidationErrorDetail[];
+}
+
+/**
+ * One entry of GET /api/v1/jobs (schema JobListResponse).
+ *
+ * DELIBERATELY LIGHTER than JobResponse: the list carries NO description, NO
+ * address, NO attachments, NO status_history, NO is_editable / is_cancellable
+ * / can_* flags and NO assigned_provider fields. Those exist only on
+ * GET /api/v1/jobs/{job_id}, so list cards must not reference them.
+ *
+ * `expected_hours` is a numeric STRING on the wire (same convention as service
+ * prices). Status reuses the 14-value JobApiStatus union; request/booking
+ * types reuse the enums added for Create Job — no duplicate types.
+ */
+export interface JobListItem {
+  id: number;
+  client_id: number;
+  category_id: number;
+  service_id: number;
+  title: string;
+  request_type: JobRequestType;
+  booking_type: JobBookingType;
+  status: JobApiStatus;
+  scheduled_at?: string | null;
+  /** Numeric STRING on the wire — parse before display. */
+  expected_hours?: string | null;
+  is_urgent: boolean;
+  is_bidding_open: boolean;
+  bidding_ends_at?: string | null;
+  remaining_bidding_seconds?: number | null;
+  created_at: string;
+  updated_at: string;
+  milestones?: JobMilestoneResponse[];
+}
+
+/**
+ * Query parameters for GET /api/v1/jobs — every one is optional and nullable
+ * EXCEPT the paging pair, which the server defaults to limit 20 / offset 0
+ * (limit 1..100, offset >= 0). Unset params must be OMITTED from the query
+ * string, never sent as null/undefined/empty.
+ */
+export interface ListJobsParams {
+  status?: JobApiStatus | null;
+  request_type?: JobRequestType | null;
+  category_id?: number | null;
+  service_id?: number | null;
+  only_actively_bidding?: boolean;
+  limit?: number;
+  offset?: number;
 }

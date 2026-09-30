@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Compiled pure-helper tests
+lib/__tests__/.out/
+
 # Native
 ios/
 android/
@@ -39,3 +42,9 @@ yarn-error.*
 .vercel
 
 .env
+
+# local run artifacts (logs, pid files, generated QR pages)
+expo-err.log
+expo-out.log
+expo.pid
+qr-code.html
