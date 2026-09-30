@@ -337,6 +337,41 @@ const NEW_BLOCKER_KEYS = [
   'jobd_blocker_err_network',
 ];
 
+/** Keys added for the Add Attachment action (Job Details → Add Attachment). */
+const NEW_ATTACH_KEYS = [
+  'jobd_attach_action',
+  'jobd_attach_screen_title',
+  'jobd_attach_warning',
+  'jobd_attach_existing',
+  'jobd_attach_none_yet',
+  'jobd_attach_pick',
+  'jobd_attach_repick',
+  'jobd_attach_hint',
+  'jobd_attach_submit',
+  'jobd_attach_busy',
+  'jobd_attach_progress',
+  'jobd_attach_confirm_title',
+  'jobd_attach_confirm_msg',
+  'jobd_attach_confirm_cta',
+  'jobd_attach_success_title',
+  'jobd_attach_success_msg',
+  'jobd_attach_moved_title',
+  'jobd_attach_moved_msg',
+  'jobd_attach_blocked_title',
+  'jobd_attach_blocked_msg',
+  'jobd_attach_err_nofile',
+  'jobd_attach_err_type',
+  'jobd_attach_err_size',
+  'jobd_attach_err_permission',
+  'jobd_attach_err_pick',
+  'jobd_attach_err_invalid',
+  'jobd_attach_err_notallowed',
+  'jobd_attach_err_forbidden',
+  'jobd_attach_err_notfound',
+  'jobd_attach_err_server',
+  'jobd_attach_err_network',
+];
+
 /** Keys the update screen reuses from the create/shared dictionaries. */
 const REUSED_KEYS = [
   'addr_c_country',
@@ -416,6 +451,7 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_PAUSE_KEYS,
     ...NEW_PPROVIDER_PAUSE_KEYS,
     ...NEW_BLOCKER_KEYS,
+    ...NEW_ATTACH_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -442,6 +478,7 @@ const allNewKeys = [
   ...NEW_PAUSE_KEYS,
   ...NEW_PPROVIDER_PAUSE_KEYS,
   ...NEW_BLOCKER_KEYS,
+  ...NEW_ATTACH_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

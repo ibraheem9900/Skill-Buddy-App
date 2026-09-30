@@ -29,6 +29,7 @@
     "./jobPause.test.ts",
     "./providerPause.test.ts",
     "./jobBlocker.test.ts",
+    "./jobAttachment.test.ts",
     "./translations.test.ts"
   ]
 }

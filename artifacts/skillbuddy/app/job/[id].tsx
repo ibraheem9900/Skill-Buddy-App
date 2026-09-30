@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, T
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -43,6 +44,8 @@ import { canDeclineJob } from '@/lib/providerDecline';
 import { canPauseJob } from '@/lib/jobPause';
 import { canProviderPauseJob } from '@/lib/providerPause';
 import { canReportBlocker } from '@/lib/jobBlocker';
+import { canAddJobAttachment } from '@/lib/jobAttachment';
+import { classifyMediaType, hasUsableUrl } from '@/lib/serviceMedia';
 import { canUpdateJobAddress, jobHasAddress } from '@/lib/jobAddressUpdate';
 import { isRestartNotAllowed, restartTimerFailureMessage } from '@/lib/jobRestartTimer';
 import {
@@ -1475,6 +1478,30 @@ export default function BiddingDashboardScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* Add Attachment — attaches ONE file to this job
+              (POST /api/v1/jobs/{job_id}/attachments, Swagger "Add Attachment").
+              MULTIPART, not JSON, so it opens its own upload screen which owns the
+              picker, the local type/size guard, the in-flight state and the retry. No
+              role check: the contract never says whether the client or the provider may
+              attach, and the uploader's identity is derived server-side from the Bearer
+              token. Offered on any non-terminal job (cancelled/completed are ruled out
+              client-side; every other status is left to the backend to accept or
+              refuse). Like every other job action the response is the FULL job, so the
+              attachments list below re-renders from the server's own copy — nothing is
+              ever appended locally. */}
+          {canAddJobAttachment(serverJob) ? (
+            <TouchableOpacity
+              style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
+              onPress={() => router.push(`/job/${serverJob.id}/attachment` as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="paperclip" size={15} color={c.primary} />
+              <Text style={[styles.restartText, { color: c.primary }]}>
+                {t('jobd_attach_action')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Which actions exist is decided by is_editable / is_cancellable /
               can_restart_timer / can_convert_to_regular / can_convert_to_urgent
               exactly as returned — never re-derived from status or dates. */}
@@ -1766,8 +1793,12 @@ export default function BiddingDashboardScreen() {
             </>
           ) : null}
 
-          {/* JobAttachmentResponse shape confirmed: id, media_type (required),
-              media_url (nullable), position, created_at. */}
+          {/* JobAttachmentResponse shape confirmed from the spec's own schema (NOT from
+              the placeholder [] in the 201 example): id, media_type (an UNCONSTRAINED
+              string — the document defines no enum), media_url (nullable), position,
+              created_at. Entries are shown in position order, and an image-like entry
+              with a usable URL renders a real thumbnail — the same media_type rule the
+              service galleries use, so nothing about the shape is guessed. */}
           {attachments.length > 0 ? (
             <>
               <View style={styles.sectionHeaderRow}>
@@ -1778,7 +1809,16 @@ export default function BiddingDashboardScreen() {
                   key={a.id}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}
                 >
-                  <Feather name="paperclip" size={13} color={c.mutedForeground} />
+                  {hasUsableUrl(a.media_url) && classifyMediaType(a.media_type) === 'image' ? (
+                    <Image
+                      source={{ uri: a.media_url as string }}
+                      style={{ width: 36, height: 36, borderRadius: 8 }}
+                      contentFit="cover"
+                      transition={150}
+                    />
+                  ) : (
+                    <Feather name="paperclip" size={13} color={c.mutedForeground} />
+                  )}
                   <Text style={[styles.bodyLine, { color: c.text, flex: 1 }]} numberOfLines={1}>
                     {a.media_url ?? a.media_type}
                   </Text>

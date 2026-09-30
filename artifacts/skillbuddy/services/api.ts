@@ -923,6 +923,68 @@ export const authApi = {
     return api.post<JobResponse>(`/api/v1/jobs/${jobId}/blocker`, payload);
   },
 
+  /**
+   * POST /api/v1/jobs/{job_id}/attachments — adds ONE file to a job (Swagger:
+   * "Add Attachment").
+   *
+   * CONTRACT (from the live OpenAPI spec):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory and IS
+   *     auto-attached by the shared interceptor; the uploader's identity
+   *     (`uploaded_by`-style ownership) is derived server-side from that token, so it is
+   *     never sent in the body
+   *   - exactly ONE parameter: the required integer path `job_id`
+   *   - a **REQUIRED `multipart/form-data` body** (schema
+   *     Body_add_attachment_api_v1_jobs__job_id__attachments_post) with exactly ONE
+   *     property, `file` (required, `contentMediaType: application/octet-stream`) — this
+   *     is NOT a JSON endpoint and the body must never be JSON.stringify'd
+   *   - its **201** is the JobResponse DIRECTLY (no `{ message, job }` envelope and no
+   *     `message` field), so the caller replaces its whole cached job with it; 422 is
+   *     HTTPValidationError
+   *   - the 201 example shows `attachments: []`, which is FastAPI's generic array
+   *     placeholder, NOT evidence that the upload was ignored: the real entry shape is
+   *     the spec's own `JobAttachmentResponse` (id, media_type, media_url|null,
+   *     position, created_at) — the shape `JobResponse.attachments` already declares
+   *   - the sibling DELETE on this path is "Remove Attachment" — a DIFFERENT action and
+   *     deliberately not reachable from here
+   *
+   * MULTIPART handling follows this project's four existing uploads exactly
+   * (profile-picture, residence-permits, face-video, certifications): the instance's
+   * application/json default is overridden per-request and React Native's networking
+   * layer builds the multipart header INCLUDING the boundary. Timeout raised to 120s — a
+   * photo on a poor connection takes far longer than the 15s JSON default.
+   *
+   * `onProgress` receives the 0..1 upload fraction when the platform reports a total size
+   * and `null` when it cannot, so the screen can show a real bar with an honest
+   * indeterminate fallback.
+   */
+  addJobAttachment: (
+    jobId: number,
+    file: { uri: string; name: string; mimeType: string },
+    onProgress?: (fraction: number | null) => void
+  ) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`addJobAttachment: invalid job id ${String(jobId)}`));
+    }
+    const formData = new FormData();
+    // React Native file part: { uri, name, type } (uri points at the local file).
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob);
+    return api.post<JobResponse>(`/api/v1/jobs/${jobId}/attachments`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+      onUploadProgress: (event: { loaded?: number; total?: number }) => {
+        if (!onProgress) return;
+        const total = typeof event?.total === 'number' ? event.total : 0;
+        const loaded = typeof event?.loaded === 'number' ? event.loaded : 0;
+        // No usable total (chunked/unknown length) → an indeterminate progress signal.
+        onProgress(total > 0 ? Math.min(1, Math.max(0, loaded / total)) : null);
+      },
+    });
+  },
+
   confirmJobPayment: (jobId: number) => {
     if (!isValidJobId(jobId)) {
       return Promise.reject(new Error(`confirmJobPayment: invalid job id ${String(jobId)}`));
