@@ -34,6 +34,7 @@ const TEST_FILES = [
   'jobPause.test.js',
   'providerPause.test.js',
   'jobBlocker.test.js',
+  'jobAttachment.test.js',
   'translations.test.js',
 ];
 
