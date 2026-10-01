@@ -248,15 +248,28 @@ jobs:
             process.exit(1);
           }
 
+          // NOTE: the payload printed by `eas build --json` is SLIMMER than
+          // `eas build:view --json`. Confirmed against run #22 (build
+          // a5e92400): it has `appVersion` but NO `versionCode`, NO
+          // `runtimeVersion`, and NO `account`. The Android versionCode lives
+          // in `appBuildVersion`, the OTA runtimeVersion and the owner account
+          // are simply absent — fall back to the profile's known values.
+          const versionCode = build.appBuildVersion ?? build.versionCode ?? '';
+          const runtimeVersion = build.runtimeVersion ?? '';
+          const owner =
+            build.project?.ownerAccount?.name ?? build.account?.name ?? 'ibraheem1122';
+          const slug = build.project?.slug ?? 'skillbuddy';
+
           const summary = {
             id: build.id,
             status: build.status,
             platform: build.platform,
             appVersion: build.appVersion,
-            runtimeVersion: build.runtimeVersion,
+            versionCode,
+            runtimeVersion,
             gitCommitHash: build.gitCommitHash,
             artifactUrl: url,
-            buildPage: `https://expo.dev/accounts/${build.account?.name ?? ''}/projects/${build.project?.slug ?? ''}/builds/${build.id}`,
+            buildPage: `https://expo.dev/accounts/${owner}/projects/${slug}/builds/${build.id}`,
           };
           console.log(JSON.stringify(summary, null, 2));
 
@@ -264,8 +277,9 @@ jobs:
           if (out) {
             fs.appendFileSync(out, `build_id=${build.id}\n`);
             fs.appendFileSync(out, `artifact_url=${url}\n`);
-            fs.appendFileSync(out, `version_code=${build.appVersion ?? ''}\n`);
-            fs.appendFileSync(out, `runtime_version=${build.runtimeVersion ?? ''}\n`);
+            fs.appendFileSync(out, `version_code=${versionCode}\n`);
+            fs.appendFileSync(out, `runtime_version=${runtimeVersion}\n`);
+            fs.appendFileSync(out, `build_page=${summary.buildPage}\n`);
           }
           if (process.env.GITHUB_STEP_SUMMARY) {
             fs.appendFileSync(
@@ -393,7 +407,7 @@ jobs:
         id: notes
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          BUILD_PAGE: https://expo.dev/accounts/ibraheem1122/projects/skillbuddy/builds/${{ steps.artifact.outputs.build_id }}
+          BUILD_PAGE: ${{ steps.artifact.outputs.build_page }}
         run: |
           set -euo pipefail
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
