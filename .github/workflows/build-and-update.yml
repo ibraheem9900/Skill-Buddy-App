@@ -291,7 +291,9 @@ jobs:
 
       # The payload printed by `eas build --json` omits `runtimeVersion` (the
       # Android versionCode already comes through as `appBuildVersion`). Pull the
-      # missing field from `eas build:view` so the release notes always state it.
+      # missing field from `eas build:view` (it lives at runtime.version, which
+      # under the fingerprint policy equals the fingerprint hash) so the release
+      # notes always state it.
       # Best-effort: if the extra lookup ever fails, the notes simply omit it.
       - name: Enrich build metadata (runtimeVersion via build:view)
         if: steps.artifact.outputs.build_id != ''
@@ -303,7 +305,7 @@ jobs:
           RTV="$(eas build:view "$EAS_BUILD_ID" --json 2>/dev/null | node -e "
             let d='';
             process.stdin.on('data', c => d += c).on('end', () => {
-              try { process.stdout.write(JSON.parse(d).runtimeVersion || ''); }
+              try { const b = JSON.parse(d); process.stdout.write((b.runtime && b.runtime.version) || b.runtimeVersion || ''); }
               catch { process.stdout.write(''); }
             });
           ")" || RTV=''
