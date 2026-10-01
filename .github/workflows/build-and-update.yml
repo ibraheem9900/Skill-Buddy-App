@@ -289,6 +289,32 @@ jobs:
           }
           NODE
 
+      # The payload printed by `eas build --json` omits `runtimeVersion` (the
+      # Android versionCode already comes through as `appBuildVersion`). Pull the
+      # missing field from `eas build:view` so the release notes always state it.
+      # Best-effort: if the extra lookup ever fails, the notes simply omit it.
+      - name: Enrich build metadata (runtimeVersion via build:view)
+        if: steps.artifact.outputs.build_id != ''
+        env:
+          EAS_BUILD_ID: ${{ steps.artifact.outputs.build_id }}
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          RTV="$(eas build:view "$EAS_BUILD_ID" --json 2>/dev/null | node -e "
+            let d='';
+            process.stdin.on('data', c => d += c).on('end', () => {
+              try { process.stdout.write(JSON.parse(d).runtimeVersion || ''); }
+              catch { process.stdout.write(''); }
+            });
+          ")" || RTV=''
+          if [ -n "$RTV" ]; then
+            echo "runtime_version=${RTV}" >> "$GITHUB_OUTPUT"
+            echo "runtimeVersion: ${RTV}"
+          else
+            echo "runtimeVersion not available from build:view — notes will omit it"
+          fi
+        id: enrich
+
       # EAS finishes a build slightly before the artifact is servable, and the CDN
       # occasionally drops a connection mid-transfer. Retry with backoff instead of
       # failing the whole release on a transient network hiccup.
@@ -426,7 +452,7 @@ jobs:
             echo "| --- | --- |"
             echo "| App version | \`${{ steps.version.outputs.app_version }}\` |"
             echo "| Android versionCode | \`${{ steps.artifact.outputs.version_code }}\` |"
-            echo "| OTA runtimeVersion | \`${{ steps.artifact.outputs.runtime_version }}\` |"
+            echo "| OTA runtimeVersion | \`${{ steps.enrich.outputs.runtime_version || steps.artifact.outputs.runtime_version }}\` |"
             echo "| File | \`${APK_NAME}\` (${{ steps.verify.outputs.size }} bytes) |"
             echo "| SHA-256 | \`${{ steps.verify.outputs.sha256 }}\` |"
             echo "| EAS build | $BUILD_PAGE |"
