@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   StyleSheet,
   Text,
@@ -12,53 +13,193 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import useCountries from '@/hooks/useCountries';
+import { setSelectedLocation } from '@/hooks/useSelectedLocation';
+import { authApi } from '@/services/api';
+import type { AddressRegionResponse } from '@/types';
 
-const SUGGESTIONS = [
-  { id: '1', name: 'Tallinn City Center', sub: 'Tallinn, Estonia' },
-  { id: '2', name: 'Riga Old Town',        sub: 'Riga, Latvia' },
-  { id: '3', name: 'Vilnius Old Town',     sub: 'Vilnius, Lithuania' },
-  { id: '4', name: 'Tartu',               sub: 'Tartu, Estonia' },
-  { id: '5', name: 'Pärnu',              sub: 'Pärnu, Estonia' },
-  { id: '6', name: 'Kaunas',              sub: 'Kaunas, Lithuania' },
-  { id: '7', name: 'Jūrmala',            sub: 'Jūrmala, Latvia' },
-];
+type Level = 'country' | 'county' | 'city';
 
+/**
+ * Location picker.
+ *
+ * There is no location endpoint that returns a flat list of cities, so this
+ * screen walks the REAL public geo cascade the address screens already use —
+ * GET /countries (shared session cache) → GET /countries/{id}/counties →
+ * GET /counties/{id}/cities. The previous hardcoded SUGGESTIONS fixture
+ * (seven invented cities) is gone; every row here comes from the server.
+ * Picking a city records it in the session location store so the home header
+ * reflects the choice.
+ */
 export default function LocationScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+
+  const { status: countriesStatus, countries, load: loadCountries, refresh: refreshCountries } = useCountries();
+
+  const [level, setLevel] = useState<Level>('country');
   const [query, setQuery] = useState('');
 
-  const filtered = query.trim()
-    ? SUGGESTIONS.filter(
-        (s) =>
-          s.name.toLowerCase().includes(query.toLowerCase()) ||
-          s.sub.toLowerCase().includes(query.toLowerCase()),
-      )
-    : SUGGESTIONS;
+  const [countryId, setCountryId] = useState<number | null>(null);
+  const [countryName, setCountryName] = useState<string | null>(null);
+
+  const [counties, setCounties] = useState<AddressRegionResponse[] | null>(null);
+  const [countiesLoading, setCountiesLoading] = useState(false);
+  const [countiesError, setCountiesError] = useState(false);
+
+  const [countyId, setCountyId] = useState<number | null>(null);
+  const [countyName, setCountyName] = useState<string | null>(null);
+
+  const [cities, setCities] = useState<AddressRegionResponse[] | null>(null);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [citiesError, setCitiesError] = useState(false);
+
+  useEffect(() => {
+    void loadCountries();
+  }, [loadCountries]);
+
+  const loadCounties = (id: number) => {
+    setCountiesLoading(true);
+    setCountiesError(false);
+    authApi
+      .getCounties(id)
+      .then(({ data }) => setCounties(Array.isArray(data) ? data : []))
+      .catch(() => setCountiesError(true))
+      .finally(() => setCountiesLoading(false));
+  };
+
+  const loadCities = (id: number) => {
+    setCitiesLoading(true);
+    setCitiesError(false);
+    authApi
+      .getCities(id)
+      .then(({ data }) => setCities(Array.isArray(data) ? data : []))
+      .catch(() => setCitiesError(true))
+      .finally(() => setCitiesLoading(false));
+  };
+
+  const pickCountry = (id: number, name: string) => {
+    setCountryId(id);
+    setCountryName(name);
+    setCountyId(null);
+    setCountyName(null);
+    setCounties(null);
+    setCities(null);
+    setQuery('');
+    setLevel('county');
+    loadCounties(id);
+  };
+
+  const pickCounty = (id: number, name: string) => {
+    setCountyId(id);
+    setCountyName(name);
+    setCities(null);
+    setQuery('');
+    setLevel('city');
+    loadCities(id);
+  };
+
+  const pickCity = (id: number, name: string) => {
+    if (countryId == null || !countryName) return; // cannot happen — guarded by level
+    setSelectedLocation({
+      countryId,
+      countryName,
+      countyId,
+      countyName,
+      cityId: id,
+      cityName: name,
+    });
+    router.back();
+  };
+
+  /** Header back: step up the cascade before leaving the screen. */
+  const goUp = () => {
+    if (level === 'city') {
+      setLevel('county');
+      setCities(null);
+      setQuery('');
+    } else if (level === 'county') {
+      setLevel('country');
+      setCounties(null);
+      setQuery('');
+    } else {
+      router.back();
+    }
+  };
+
+  const source: AddressRegionResponse[] | null =
+    level === 'country' ? countries : level === 'county' ? counties : cities;
+  const loadingNow =
+    level === 'country' ? countriesStatus === 'loading' : level === 'county' ? countiesLoading : citiesLoading;
+  const errorNow =
+    level === 'country' ? countriesStatus === 'error' : level === 'county' ? countiesError : citiesError;
+  const titleKey = level === 'country' ? 'addr_c_country' : level === 'county' ? 'addr_c_county' : 'addr_c_city';
+
+  const retry = () => {
+    if (level === 'country') void refreshCountries();
+    else if (level === 'county') countryId != null && loadCounties(countryId);
+    else countyId != null && loadCities(countyId);
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (source ?? []).filter((item) => !q || item.name.toLowerCase().includes(q));
+  }, [source, query]);
+
+  const onPick = (item: AddressRegionResponse) => {
+    if (level === 'country') pickCountry(item.id, item.name);
+    else if (level === 'county') pickCounty(item.id, item.name);
+    else pickCity(item.id, item.name);
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      {/*
-        ── Safe-area spacer ────────────────────────────────────────────────────
-        Explicit View with height = insets.top ensures the header content sits
-        safely below the notch/status bar on every device — no padding conflicts.
-      */}
       <View style={{ height: insets.top, backgroundColor: c.background }} />
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: c.border }]}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[styles.backBtn, { backgroundColor: c.muted }]}
-        >
+        <TouchableOpacity onPress={goUp} style={[styles.backBtn, { backgroundColor: c.muted }]}>
           <Feather name="arrow-left" size={20} color={c.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
-          {t('location_title')}
+          {t(titleKey)}
         </Text>
       </View>
+
+      {/* ── Breadcrumb ─────────────────────────────────────────────────────── */}
+      {(countryName || countyName) && (
+        <View style={styles.crumbs}>
+          <TouchableOpacity
+            onPress={() => {
+              setLevel('country');
+              setCounties(null);
+              setQuery('');
+            }}
+          >
+            <Text style={[styles.crumb, { color: c.primary }]} numberOfLines={1}>
+              {countryName}
+            </Text>
+          </TouchableOpacity>
+          {countyName && level === 'city' && (
+            <>
+              <Feather name="chevron-right" size={14} color={c.mutedForeground} />
+              <TouchableOpacity
+                onPress={() => {
+                  setLevel('county');
+                  setCities(null);
+                  setQuery('');
+                }}
+              >
+                <Text style={[styles.crumb, { color: c.primary }]} numberOfLines={1}>
+                  {countyName}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
 
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <View style={[styles.searchRow, { backgroundColor: c.muted }]}>
@@ -69,7 +210,7 @@ export default function LocationScreen() {
           placeholderTextColor={c.mutedForeground}
           value={query}
           onChangeText={setQuery}
-          autoFocus
+          autoCorrect={false}
           returnKeyType="search"
           underlineColorAndroid="transparent"
         />
@@ -80,7 +221,7 @@ export default function LocationScreen() {
         )}
       </View>
 
-      {/* ── Use current location ────────────────────────────────────────────── */}
+      {/* ── Use current location ───────────────────────────────────────────── */}
       <TouchableOpacity style={styles.currentRow} onPress={() => router.back()} activeOpacity={0.7}>
         <View style={[styles.currentIcon, { backgroundColor: c.primaryLight }]}>
           <MaterialIcons name="my-location" size={18} color={c.primary} />
@@ -94,36 +235,48 @@ export default function LocationScreen() {
 
       <View style={[styles.divider, { backgroundColor: c.border }]} />
 
-      {/* ── Results ─────────────────────────────────────────────────────────── */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Feather name="map-pin" size={32} color={c.border} />
-            <Text style={[styles.emptyText, { color: c.mutedForeground }]}>
-              {t('location_no_results', { query })}
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.resultRow} onPress={() => router.back()} activeOpacity={0.7}>
-            <View style={[styles.resultIcon, { backgroundColor: c.muted }]}>
-              <MaterialIcons name="place" size={18} color={c.mutedForeground} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.resultName, { color: c.text }]}>{item.name}</Text>
-              <Text style={[styles.resultSub, { color: c.mutedForeground }]}>{item.sub}</Text>
-            </View>
-            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+      {/* ── Results ────────────────────────────────────────────────────────── */}
+      {loadingNow ? (
+        <View style={styles.state}>
+          <ActivityIndicator size="large" color={c.primary} />
+        </View>
+      ) : errorNow ? (
+        <View style={styles.state}>
+          <Feather name="wifi-off" size={28} color={c.destructive} />
+          <Text style={[styles.stateText, { color: c.mutedForeground }]}>{t('addr_c_err_geo')}</Text>
+          <TouchableOpacity onPress={retry}>
+            <Text style={[styles.retry, { color: c.primary }]}>{t('addr_retry')}</Text>
           </TouchableOpacity>
-        )}
-        ItemSeparatorComponent={() => (
-          <View style={[styles.sep, { backgroundColor: c.border }]} />
-        )}
-      />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => String(item.id)}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          ListEmptyComponent={
+            <View style={styles.state}>
+              <Feather name="map-pin" size={32} color={c.border} />
+              <Text style={[styles.stateText, { color: c.mutedForeground }]}>
+                {source && source.length === 0 ? t('addr_c_geo_empty') : t('geo_no_match')}
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.resultRow} onPress={() => onPick(item)} activeOpacity={0.7}>
+              <View style={[styles.resultIcon, { backgroundColor: c.muted }]}>
+                <MaterialIcons name={level === 'city' ? 'place' : 'public'} size={18} color={c.mutedForeground} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.resultName, { color: c.text }]}>{item.name}</Text>
+              </View>
+              <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+            </TouchableOpacity>
+          )}
+          ItemSeparatorComponent={() => <View style={[styles.sep, { backgroundColor: c.border }]} />}
+        />
+      )}
     </View>
   );
 }
@@ -131,7 +284,6 @@ export default function LocationScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
 
-  // Single horizontal row: back btn + title, NO paddingVertical shorthand
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -154,6 +306,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     flex: 1,
   },
+
+  crumbs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  crumb: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
 
   searchRow: {
     flexDirection: 'row',
@@ -210,9 +371,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   resultName: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
-  resultSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
 
   sep: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
-  empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyText: { fontFamily: 'Manrope_400Regular', fontSize: 14 },
+
+  state: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  stateText: { fontFamily: 'Manrope_400Regular', fontSize: 14, textAlign: 'center' },
+  retry: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
 });

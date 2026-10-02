@@ -18,17 +18,18 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CHAT_THREADS } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
-import type { ChatMessage } from '@/types';
+import EmptyState from '@/components/EmptyState';
+import type { ChatMessage, ChatThread } from '@/types';
+
+// No chat backend exists yet (the live API exposes no chat/threads/messages
+// endpoints), so there are no real threads or messages to render. The local
+// fixtures (3 fake threads + lorem-ipsum messages) were removed — the screen
+// now shows an honest empty state instead of simulating a conversation.
+const CHAT_THREADS: ChatThread[] = [];
 
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  { id: 'm1', text: 'Lorem Ipsum is simply dummy text of the printing and typesetting industry.', sender: 'other', timestamp: '08:04 pm', senderName: 'Jenny Wilson' },
-  { id: 'm2', text: 'Lorem Ipsum is simply dummy text of the printing and typesetting industry.', sender: 'me', timestamp: '08:04 pm', senderName: 'Esther Howard' },
-  { id: 'm3', image: 'https://images.unsplash.com/photo-1527515673510-8aa78ce21f9b?w=300&q=80', sender: 'other', timestamp: '08:04 pm', senderName: 'Jenny Wilson' },
-  { id: 'm4', voice: 'audio', voiceDuration: 13, sender: 'me', timestamp: '08:04 pm', senderName: 'Esther Howard' },
-];
+const INITIAL_MESSAGES: ChatMessage[] = [];
 
 export default function ChatThreadScreen() {
   const { colors: c } = useTheme();
@@ -36,10 +37,24 @@ export default function ChatThreadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const thread = CHAT_THREADS.find((t) => t.id === id) ?? CHAT_THREADS[0];
+  const thread: ChatThread | undefined = CHAT_THREADS.find((th) => th.id === id);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState('');
   const flatRef = useRef<FlatList>(null);
+
+  // No thread can exist without a chat backend — honest empty state.
+  if (!thread) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.background }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: c.headerBg }]}>
+          <View style={styles.headerLeft}>
+            <BackButton color="#FFF" style={{ backgroundColor: 'rgba(255,255,255,0.25)', shadowOpacity: 0 }} />
+          </View>
+        </View>
+        <EmptyState icon="message-circle" title={t('empty_chat_title')} subtitle={t('empty_chat_sub')} />
+      </View>
+    );
+  }
 
   const sendMessage = () => {
     if (!input.trim()) return;

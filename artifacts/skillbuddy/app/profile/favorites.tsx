@@ -20,6 +20,8 @@ import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { useBookmarks } from '@/context/BookmarkContext';
 import useClientFavorites, { joinFavoriteWithService } from '@/hooks/useClientFavorites';
+import useServices from '@/hooks/useServices';
+import { formatServicePrice } from '@/lib/servicePrice';
 
 /**
  * My Favorites (GET /api/v1/clients/favorites) — the client's saved services.
@@ -36,8 +38,14 @@ export default function FavoritesScreen() {
   const { activeRole } = useRole();
   const { status, favorites, total, errorMessage, load, refresh, removeFavorite } = useClientFavorites();
   const { removeBookmark } = useBookmarks();
+  // Live catalog for the client-side join (no per-favorite detail calls).
+  const { services: catalog, load: loadCatalog } = useServices();
   const [removingId, setRemovingId] = useState<number | null>(null);
   const canLoad = !!user && activeRole === 'CLIENT';
+
+  React.useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
 
   /** Destructive removal — explicit confirm first (no undo), DELETE fires
    * only on confirm; the row drops only after the confirmed 204. */
@@ -140,7 +148,7 @@ export default function FavoritesScreen() {
               {t('cf_count', { n: total })}
             </Text>
             {favorites.map((favorite, i) => {
-              const { service } = joinFavoriteWithService(favorite);
+              const { service } = joinFavoriteWithService(favorite, catalog ?? []);
               return (
                 <TouchableOpacity
                   key={favorite.id ?? `fav-${i}`}
@@ -153,7 +161,7 @@ export default function FavoritesScreen() {
                   activeOpacity={0.75}
                 >
                   {service ? (
-                    <Image source={{ uri: service.image }} style={styles.thumb} />
+                    <Image source={{ uri: service.thumbnail_url ?? undefined }} style={styles.thumb} />
                   ) : (
                     <View style={[styles.thumb, styles.thumbFallback]}>
                       <MaterialCommunityIcons name="tag-outline" size={18} color={c.mutedForeground} />
@@ -163,11 +171,11 @@ export default function FavoritesScreen() {
                     <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
                       {service ? service.title : t('cf_unknown_service', { id: favorite.service_id })}
                     </Text>
-                    {service && (
+                    {service && formatServicePrice(service) ? (
                       <Text style={[styles.sub, { color: c.mutedForeground }]} numberOfLines={1}>
-                        €{service.price} · {service.provider.name}
+                        {formatServicePrice(service)}
                       </Text>
-                    )}
+                    ) : null}
                     {favorite.notes ? (
                       <Text style={[styles.notes, { color: c.mutedForeground }]} numberOfLines={2}>
                         “{favorite.notes}”

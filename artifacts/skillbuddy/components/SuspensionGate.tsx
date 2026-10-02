@@ -2,7 +2,6 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { CURRENT_USER } from '@/data/mockData';
 import { useRole } from '@/context/RoleContext';
 import { useLanguage } from '@/context/LanguageContext';
 import colors from '@/constants/colors';
@@ -23,7 +22,13 @@ export default function SuspensionGate({ children }: { children: React.ReactNode
   const { activeRole, toggleRole } = useRole();
   const { t } = useLanguage();
 
-  const suspendedUntil = CURRENT_USER.providerSuspendedUntil;
+  // NO BACKEND SOURCE YET: neither GET /providers/profile nor
+  // /providers/dashboard exposes a suspension date, so the previous source —
+  // a hardcoded mock user field — was removed rather than kept as fake
+  // state. The gate therefore passes through; when the API ships a
+  // suspension field, read it here and the existing UI (i18n keys included)
+  // activates again.
+  const suspendedUntil: number | null = null;
   const isSuspended = !!suspendedUntil && suspendedUntil > Date.now() && activeRole === 'PROVIDER';
 
   if (!isSuspended) return <>{children}</>;

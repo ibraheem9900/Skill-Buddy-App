@@ -7,8 +7,6 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CATEGORIES, SUBSERVICES } from '@/data/mockData';
-import { getServiceForSubservice } from '@/lib/serviceLookup';
 import BackButton from '@/components/BackButton';
 import useCategories from '@/hooks/useCategories';
 import useCategoryServices from '@/hooks/useCategoryServices';
@@ -48,15 +46,15 @@ export default function CategoryDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t, tCat } = useLanguage();
+  const { t } = useLanguage();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  // DUAL MODE: the route id is a LOCAL slug when tapped from the curated
-  // fallback tiles ('plumbing'…) or a NUMERIC server id from API-backed
-  // tiles. Only numeric ids hit the server (public): GET
-  // /api/v1/categories/{id} for the header + GET
-  // /api/v1/categories/{id}/services for the list. The category detail cache
-  // is separate from the list cache by design: detail adds REQUIRED
+  // SERVER-ONLY: route ids are NUMERIC server ids from API-backed tiles
+  // (the local curated mode was removed with the mock data). A non-numeric
+  // id — e.g. an old deep link into the removed local grid — renders the
+  // honest not-found card. GET /api/v1/categories/{id} for the header +
+  // GET /api/v1/categories/{id}/services for the list. The category detail
+  // cache is separate from the list cache by design: detail adds REQUIRED
   // is_active/status the list items never carry.
   const numericId = id && /^\d+$/.test(String(id)) ? Number(id) : null;
   const isServer = numericId != null;
@@ -90,9 +88,6 @@ export default function CategoryDetailScreen() {
     };
   }, [isServer, numericId, getById, reloadKey]);
 
-  const category = CATEGORIES.find((cat) => cat.id === id) ?? CATEGORIES[0];
-  const subservices = SUBSERVICES.filter((ss) => ss.categoryId === id);
-
   /** GATING: an inactive category is never presented as browsable — the
    * services list/action is replaced by an availability notice. status
    * semantics are undocumented (team question) so only is_active gates. */
@@ -105,24 +100,10 @@ export default function CategoryDetailScreen() {
     isServer && serverState === 'ready' && isActive
   );
 
-  const handleSubservicePress = (subserviceId: string) => {
-    const service = getServiceForSubservice(subserviceId);
-    router.push(`/service/${service.id}` as any);
-  };
-
-  /** Unified row — server services (numeric ids) and the curated local
-   * subservices (string ids) have different shapes; the discriminator keeps
-   * the FlatList fully typed. */
-  type Row =
-    | { kind: 'server'; service: ServiceListItem }
-    | { kind: 'local'; local: (typeof SUBSERVICES)[number] };
-
-  const rows: Row[] =
-    isServer
-      ? isActive && svcStatus === 'ready'
-        ? (services ?? []).map((service) => ({ kind: 'server' as const, service }))
-        : []
-      : subservices.map((local) => ({ kind: 'local' as const, local }));
+  // Server services only — the curated local subservice rows (and their
+  // string ids) were removed with the mock data.
+  const rows: ServiceListItem[] =
+    isServer && isActive && svcStatus === 'ready' ? (services ?? []) : [];
 
   /** Server-mode header card: name + description + icon (glyph fallback
    * for missing/broken icon_url). created_at/updated_at are informational
@@ -199,13 +180,13 @@ export default function CategoryDetailScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: c.headerBg }]}>
         <BackButton />
-        <Text style={styles.headerTitle}>{isServer && serverCat ? serverCat.name : tCat(category.id)}</Text>
+        <Text style={styles.headerTitle}>{serverCat?.name ?? t('services_title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <FlatList
         data={rows}
-        keyExtractor={(row) => (row.kind === 'server' ? `s${row.service.id}` : `l${row.local.id}`)}
+        keyExtractor={(row) => `s${row.id}`}
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
@@ -225,7 +206,7 @@ export default function CategoryDetailScreen() {
                 {isActive && svcStatus === 'notfound' ? notFoundCard : null}
               </>
             )
-          ) : null
+          ) : notFoundCard
         }
         ListEmptyComponent={
           isServer ? (
@@ -240,58 +221,28 @@ export default function CategoryDetailScreen() {
                 <Text style={[styles.emptyText, { color: c.mutedForeground }]}>{t('catd_services_empty')}</Text>
               </View>
             ) : null /* loading / 404 / 422 / network handled by the header card */
-          ) : (
-            <View style={styles.emptyWrap}>
-              <Feather name="inbox" size={40} color={c.border} />
-              <Text style={[styles.emptyText, { color: c.mutedForeground }]}>{t('category_no_subservices')}</Text>
-            </View>
-          )
+          ) : null /* non-numeric id — the not-found card shows in the header */
         }
         renderItem={({ item, index }) => {
-          const anim = FadeInDown.delay(index * 60).duration(350);
-
-          if (item.kind === 'server') {
-            const price = formatServicePrice(item.service);
-            return (
-              <Animated.View entering={anim}>
-                <TouchableOpacity
-                  style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
-                  onPress={() => router.push(`/service/${item.service.id}`)}
-                  activeOpacity={0.82}
-                >
-                  <ServiceThumb uri={item.service.thumbnail_url} />
-                  <View style={styles.cardBody}>
-                    <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={2}>
-                      {item.service.title}
-                    </Text>
-                    {item.service.description ? (
-                      <Text style={[styles.cardDesc, { color: c.mutedForeground }]} numberOfLines={2}>
-                        {item.service.description}
-                      </Text>
-                    ) : null}
-                    {price ? <Text style={[styles.servicePrice, { color: c.primary }]}>{price}</Text> : null}
-                  </View>
-                  <Feather name="chevron-right" size={20} color={c.mutedForeground} />
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          }
-
+          const price = formatServicePrice(item);
           return (
-            <Animated.View entering={anim}>
+            <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
               <TouchableOpacity
                 style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
-                onPress={() => handleSubservicePress(item.local.id)}
+                onPress={() => router.push(`/service/${item.id}`)}
                 activeOpacity={0.82}
               >
-                <View style={[styles.iconCircle, { backgroundColor: c.primaryLight }]}>
-                  <Feather name="tool" size={20} color={c.primary} />
-                </View>
+                <ServiceThumb uri={item.thumbnail_url} />
                 <View style={styles.cardBody}>
-                  <Text style={[styles.cardTitle, { color: c.text }]}>{item.local.name}</Text>
-                  <Text style={[styles.cardDesc, { color: c.mutedForeground }]} numberOfLines={2}>
-                    {item.local.description}
+                  <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={2}>
+                    {item.title}
                   </Text>
+                  {item.description ? (
+                    <Text style={[styles.cardDesc, { color: c.mutedForeground }]} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+                  {price ? <Text style={[styles.servicePrice, { color: c.primary }]}>{price}</Text> : null}
                 </View>
                 <Feather name="chevron-right" size={20} color={c.mutedForeground} />
               </TouchableOpacity>

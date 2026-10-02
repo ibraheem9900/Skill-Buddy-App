@@ -14,7 +14,7 @@ interface LogoMarkProps {
  *
  * Usage:
  *   <LogoMark color="#FFFFFF" size={34} />   ← header
- *   <LogoMark color="#20735A" size={34} />   ← light bg
+ *   <LogoMark color="#076246" size={34} />   ← light bg
  */
 export default function LogoMark({ color = colors.light.primaryDark, size = 34 }: LogoMarkProps) {
   // Aspect ratio ≈ 2.4 : 1  (matches the real brand mark width:height)

@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { MOCK_TICKETS } from '@/data/ticketStore';
+import { TICKETS } from '@/data/ticketStore';
 import BackButton from '@/components/BackButton';
 
 const STATUS_KEYS = ['ticket_status_open', 'ticket_status_review', 'ticket_status_waiting', 'ticket_status_resolved', 'ticket_status_closed'] as const;
@@ -18,7 +18,7 @@ export default function TicketDetailScreen() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
 
-  const ticket = MOCK_TICKETS.find((t) => t.id === id);
+  const ticket = TICKETS.find((t) => t.id === id);
 
   if (!ticket) {
     return (

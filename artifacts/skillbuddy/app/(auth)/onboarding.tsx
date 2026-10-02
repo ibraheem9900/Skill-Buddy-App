@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: 'rgba(46, 158, 122, 0.08)',
+    backgroundColor: 'rgba(43, 121, 92, 0.08)',
   },
   btnWrap: {
     position: 'absolute',
@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnTouch: {
-    backgroundColor: '#2E9E7A',
+    backgroundColor: '#2b795c',
     paddingHorizontal: 48,
     paddingVertical: 16,
     borderRadius: 30,

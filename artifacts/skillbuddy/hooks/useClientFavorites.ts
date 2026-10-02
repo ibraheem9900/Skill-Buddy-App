@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
-import { SERVICES } from '@/data/mockData';
-import type { FavoriteItemResponse, Service } from '@/types';
+import type { FavoriteItemResponse, ServiceListItem } from '@/types';
 
 /**
  * Client favorites state (GET /api/v1/clients/favorites):
@@ -14,30 +13,34 @@ import type { FavoriteItemResponse, Service } from '@/types';
  *
  * READ-ONLY list, kept separate from every other cache. Each item carries
  * ONLY { id, service_id, notes?, created_at } per the OpenAPI schema — the
- * service's title/price/image are joined CLIENT-SIDE against the local
- * services catalog (SERVICES). No per-favorite "Get Service by ID" calls are
+ * service's title/price/thumbnail are joined CLIENT-SIDE against the LIVE
+ * services catalog (GET /api/v1/services, fetched once per session and
+ * passed in by the caller). No per-favorite "Get Service by ID" calls are
  * made (spec: avoid N individual calls when the list is available); a
- * favorite whose service_id has no catalog match renders a neutral fallback
- * row instead of being dropped.
+ * favorite whose service_id has no match in the current catalog renders a
+ * neutral fallback row instead of being dropped (the catalog may be
+ * unseeded, or the service delisted).
  *
  * Cache discipline: module-level cache + fetch on screen entry (caller gates
  * on role/auth) + pull-to-refresh via refresh().
  */
 export type ClientFavoritesStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** Local-catalog id convention ('s12') → numeric backend service_id. */
-export function catalogIdToServiceId(id: string): number | null {
-  const n = Number(String(id).replace(/\D/g, ''));
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-/** Join one favorite with its local-catalog service (may be null → fallback UI). */
-export function joinFavoriteWithService(favorite: FavoriteItemResponse): {
+/**
+ * Join one favorite with its service from the LIVE catalog (may be null →
+ * fallback UI). The catalog is passed in (from useServices at the caller) so
+ * this stays a pure helper — the old local-catalog id convention ('s12') was
+ * removed with the mock data; favorites now match on the real numeric
+ * service_id.
+ */
+export function joinFavoriteWithService(
+  favorite: FavoriteItemResponse,
+  services: ServiceListItem[],
+): {
   favorite: FavoriteItemResponse;
-  service: Service | null;
+  service: ServiceListItem | null;
 } {
-  const service =
-    SERVICES.find((s) => catalogIdToServiceId(s.id) === favorite.service_id) ?? null;
+  const service = services.find((s) => s.id === favorite.service_id) ?? null;
   return { favorite, service };
 }
 

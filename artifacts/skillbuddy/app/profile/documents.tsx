@@ -4,14 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
-import { CURRENT_USER } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
 import useResidencePermitUpload from '@/hooks/useResidencePermitUpload';
 import useFaceVideoUpload from '@/hooks/useFaceVideoUpload';
 
-type DocStatus = 'verified' | 'pending' | 'rejected';
+type DocStatus = 'not_submitted' | 'verified' | 'pending' | 'rejected';
 
 const STATUS_META: Record<DocStatus, { labelKey: TranslationKey; icon: keyof typeof Feather.glyphMap }> = {
+  not_submitted: { labelKey: 'documents_not_submitted', icon: 'upload-cloud' },
   verified: { labelKey: 'documents_verified', icon: 'check-circle' },
   pending: { labelKey: 'documents_pending', icon: 'clock' },
   rejected: { labelKey: 'documents_rejected', icon: 'alert-circle' },
@@ -26,7 +26,11 @@ const STATUS_META: Record<DocStatus, { labelKey: TranslationKey; icon: keyof typ
 function ResidencePermitRow() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const [status, setStatus] = useState<DocStatus>(CURRENT_USER.residencePermit);
+  // No verification-status endpoint exists yet (GET /users/me carries no KYC
+  // fields), so the honest starting state is NOT SUBMITTED — the previous
+  // mock seed (residencePermit: 'pending') claimed a status the backend
+  // never reported. An upload switches this to "Pending Review".
+  const [status, setStatus] = useState<DocStatus>('not_submitted');
   const [previews, setPreviews] = useState<{ front: string | null; back: string | null }>({ front: null, back: null });
   const { pickAndUpload, uploading } = useResidencePermitUpload((frontUrl, backUrl) => {
     setPreviews({ front: frontUrl, back: backUrl });
@@ -34,8 +38,22 @@ function ResidencePermitRow() {
   });
 
   const meta = STATUS_META[status];
-  const accent = status === 'verified' ? c.success : status === 'pending' ? c.warning : c.destructive;
-  const accentLight = status === 'verified' ? c.successLight : status === 'pending' ? '#FFF6E8' : c.urgentLight;
+  const accent =
+    status === 'verified'
+      ? c.success
+      : status === 'pending'
+        ? c.warning
+        : status === 'not_submitted'
+          ? c.mutedForeground
+          : c.destructive;
+  const accentLight =
+    status === 'verified'
+      ? c.successLight
+      : status === 'pending'
+        ? '#FFF6E8'
+        : status === 'not_submitted'
+          ? c.muted
+          : c.urgentLight;
 
   return (
     <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -104,15 +122,31 @@ export default function DocumentsScreen() {
 function FaceVerificationRow() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const [status, setStatus] = useState<DocStatus>(CURRENT_USER.faceVerification);
+  // Same as the residence-permit row: no API status field exists, so start
+  // honestly at NOT SUBMITTED (the mock seed said 'verified').
+  const [status, setStatus] = useState<DocStatus>('not_submitted');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const { recordAndUpload, uploading } = useFaceVideoUpload((url) => {
     setVideoUrl(url);
     setStatus('pending');
   });
   const meta = STATUS_META[status];
-  const accent = status === 'verified' ? c.success : status === 'pending' ? c.warning : c.destructive;
-  const accentLight = status === 'verified' ? c.successLight : status === 'pending' ? '#FFF6E8' : c.urgentLight;
+  const accent =
+    status === 'verified'
+      ? c.success
+      : status === 'pending'
+        ? c.warning
+        : status === 'not_submitted'
+          ? c.mutedForeground
+          : c.destructive;
+  const accentLight =
+    status === 'verified'
+      ? c.successLight
+      : status === 'pending'
+        ? '#FFF6E8'
+        : status === 'not_submitted'
+          ? c.muted
+          : c.urgentLight;
 
   return (
     <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>

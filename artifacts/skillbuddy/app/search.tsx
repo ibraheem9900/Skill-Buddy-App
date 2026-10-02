@@ -16,12 +16,13 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import BackButton from '@/components/BackButton';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { SERVICES, CATEGORIES, SUBSERVICES } from '@/data/mockData';
-import { getServiceForSubservice } from '@/lib/serviceLookup';
-import ServiceCard from '@/components/ServiceCard';
+import ServerServiceRow from '@/components/ServerServiceRow';
+import useServices from '@/hooks/useServices';
+import useCategories from '@/hooks/useCategories';
+import type { CategoryResponse, ServiceListItem } from '@/types';
 
 // ─── Suggestion types ────────────────────────────────────────────────────────
-type SuggestionKind = 'service' | 'category' | 'subservice';
+type SuggestionKind = 'service' | 'category';
 interface Suggestion {
   id: string;
   label: string;
@@ -29,30 +30,39 @@ interface Suggestion {
   kind: SuggestionKind;
 }
 
-function buildSuggestions(q: string): Suggestion[] {
+/**
+ * Suggestions are built from the LIVE API catalogs (GET /api/v1/categories +
+ * GET /api/v1/services) — the local fixture categories/subservices/services
+ * were removed with the mock data. The old 'subservice' kind is gone: the
+ * API has no subservice concept (those rows were local fixtures only).
+ */
+function buildSuggestions(
+  q: string,
+  categories: CategoryResponse[],
+  services: ServiceListItem[],
+): Suggestion[] {
   if (!q.trim()) return [];
   const lq = q.toLowerCase();
   const results: Suggestion[] = [];
 
-  CATEGORIES.forEach((c) => {
+  categories.forEach((c) => {
     if (c.name.toLowerCase().includes(lq)) {
       results.push({ id: `cat_${c.id}`, label: c.name, sublabel: 'Category', kind: 'category' });
     }
   });
 
-  SUBSERVICES.forEach((ss) => {
-    if (ss.name.toLowerCase().includes(lq) || ss.description.toLowerCase().includes(lq)) {
-      results.push({ id: `ss_${ss.id}`, label: ss.name, sublabel: ss.description, kind: 'subservice' });
-    }
-  });
-
-  SERVICES.forEach((s) => {
+  services.forEach((s) => {
     if (
-      s.title.toLowerCase().includes(lq) ||
-      s.category.toLowerCase().includes(lq) ||
-      s.provider.name.toLowerCase().includes(lq)
+      (s.title ?? '').toLowerCase().includes(lq) ||
+      (s.category_name ?? '').toLowerCase().includes(lq) ||
+      (s.description ?? '').toLowerCase().includes(lq)
     ) {
-      results.push({ id: `svc_${s.id}`, label: s.title, sublabel: s.category, kind: 'service' });
+      results.push({
+        id: `svc_${s.id}`,
+        label: s.title ?? '',
+        sublabel: s.category_name ?? undefined,
+        kind: 'service',
+      });
     }
   });
 
@@ -62,14 +72,13 @@ function buildSuggestions(q: string): Suggestion[] {
 const kindIcon: Record<SuggestionKind, string> = {
   service: 'briefcase',
   category: 'grid',
-  subservice: 'list',
 };
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t, tCat } = useLanguage();
+  const { t } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -77,23 +86,34 @@ export default function SearchScreen() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
-  // Live filtering results
-  const filtered = SERVICES.filter(
+  // Search over the LIVE API catalogs (fetched once per session).
+  const { status: svcStatus, services: serverServices, load: loadServices, refresh: refreshServices } = useServices();
+  const { categories: serverCategories, load: loadCategories } = useCategories();
+
+  useEffect(() => {
+    void loadServices();
+    void loadCategories();
+  }, [loadServices, loadCategories]);
+
+  // Live filtering results — client-side over the server list (the endpoint
+  // declares no query parameters to send).
+  const lq = query.trim().toLowerCase();
+  const filtered = (serverServices ?? []).filter(
     (s) =>
-      !query ||
-      s.title.toLowerCase().includes(query.toLowerCase()) ||
-      s.category.toLowerCase().includes(query.toLowerCase()) ||
-      s.provider.name.toLowerCase().includes(query.toLowerCase())
+      !lq ||
+      (s.title ?? '').toLowerCase().includes(lq) ||
+      (s.category_name ?? '').toLowerCase().includes(lq) ||
+      (s.description ?? '').toLowerCase().includes(lq)
   );
 
   // Update suggestions on every keystroke
   useEffect(() => {
     if (!submitted && query.length > 0) {
-      setSuggestions(buildSuggestions(query));
+      setSuggestions(buildSuggestions(query, serverCategories ?? [], serverServices ?? []));
     } else {
       setSuggestions([]);
     }
-  }, [query, submitted]);
+  }, [query, submitted, serverCategories, serverServices]);
 
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 300);
@@ -117,10 +137,6 @@ export default function SearchScreen() {
     if (s.kind === 'category') {
       const catId = s.id.replace('cat_', '');
       router.push(`/category/${catId}` as any);
-    } else if (s.kind === 'subservice') {
-      const ssId = s.id.replace('ss_', '');
-      const svc = getServiceForSubservice(ssId);
-      router.push(`/service/${svc.id}` as any);
     } else {
       const svcId = s.id.replace('svc_', '');
       router.push(`/service/${svcId}` as any);
@@ -176,7 +192,7 @@ export default function SearchScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.suggestLabel, { color: c.text }]} numberOfLines={1}>
-                  {s.kind === 'category' ? tCat(s.id.replace('cat_', '')) : s.label}
+                  {s.label}
                 </Text>
                 {s.sublabel && (
                   <Text style={[styles.suggestSub, { color: c.mutedForeground }]} numberOfLines={1}>
@@ -202,8 +218,25 @@ export default function SearchScreen() {
         </View>
       )}
 
+      {/* Catalog load error — strict API, so a failed fetch must never look
+          like an honest "no results" answer */}
+      {showResults && svcStatus === 'error' && serverServices == null && (
+        <View style={styles.emptyWrap}>
+          <View style={[styles.emptyIconWrap, { backgroundColor: c.destructive + '18' }]}>
+            <Feather name="wifi-off" size={36} color={c.destructive} />
+          </View>
+          <Text style={[styles.emptyTitle, { color: c.text }]}>{t('services_load_error')}</Text>
+          <TouchableOpacity
+            style={[styles.emptyBtn, { backgroundColor: c.primary }]}
+            onPress={() => void refreshServices()}
+          >
+            <Text style={styles.emptyBtnText}>{t('cats_retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* No results empty state */}
-      {showResults && filtered.length === 0 && (
+      {showResults && filtered.length === 0 && !(svcStatus === 'error' && serverServices == null) && (
         <View style={styles.emptyWrap}>
           <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
             <Feather name="search" size={36} color={c.primary} />
@@ -232,13 +265,13 @@ export default function SearchScreen() {
       {showResults && filtered.length > 0 && (
         <FlatList
           data={filtered}
-          keyExtractor={(s) => s.id}
+          keyExtractor={(s) => String(s.id)}
           contentContainerStyle={{ padding: 16, paddingBottom: TAB_HEIGHT + insets.bottom + 16 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item, index }) => (
             <Animated.View entering={FadeInDown.delay(index * 50).duration(300)}>
-              <ServiceCard service={item} variant="list" />
+              <ServerServiceRow service={item} />
             </Animated.View>
           )}
         />

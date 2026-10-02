@@ -8,7 +8,6 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
-import { BID_PROVIDERS, MOCK_BIDS, MOCK_JOBS } from '@/data/mockData';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
 import BidCard from '@/components/BidCard';
@@ -118,18 +117,6 @@ import type { Bid, BidProvider } from '@/types';
 
 type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
 
-function makeMockBid(jobId: string, provider: BidProvider): Bid {
-  const basePrice = 40 + Math.round(Math.random() * 40);
-  return {
-    id: `bid_${jobId}_${provider.id}_${Date.now()}`,
-    jobId,
-    provider,
-    price: basePrice,
-    eta: `${15 + Math.round(Math.random() * 45)} min`,
-    createdAt: Date.now(),
-    score: calculateProviderScore(provider).total,
-  };
-}
 
 export default function BiddingDashboardScreen() {
   // `providerId` is optional and only ever comes from the offers/bids list the
@@ -1015,43 +1002,6 @@ export default function BiddingDashboardScreen() {
   const handleBiddingExpired = useCallback(() => {
     void refetchServerJob();
   }, [refetchServerJob]);
-
-  const job = useMemo(() => MOCK_JOBS.find((j) => j.id === id), [id]);
-  const [bids, setBids] = useState<Bid[]>(() => MOCK_BIDS.filter((b) => b.jobId === id));
-  const [expired, setExpired] = useState(job ? job.biddingEndsAt <= Date.now() : false);
-  const [showAll, setShowAll] = useState(false);
-  const [sortMode, setSortMode] = useState<SortMode>('recommended');
-  const spawnedProviderIds = useRef(new Set(bids.map((b) => b.provider.id)));
-  const [screenLoading, setScreenLoading] = useState(true);
-
-  const sortedForAll = useMemo(() => {
-    const arr = [...bids];
-    switch (sortMode) {
-      case 'lowPrice': return arr.sort((a, b) => a.price - b.price);
-      case 'highRating': return arr.sort((a, b) => (b.provider.rating ?? 0) - (a.provider.rating ?? 0));
-      case 'distance': return arr.sort((a, b) => a.provider.distanceKm - b.provider.distanceKm);
-      case 'badge': return arr.sort((a, b) => (b.provider.badge ?? 0) - (a.provider.badge ?? 0));
-      default: return arr.sort((a, b) => b.score - a.score);
-    }
-  }, [bids, sortMode]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setScreenLoading(false), 400);
-    return () => clearTimeout(t);
-  }, []);
-
-  // Simulate live bids trickling in while the dashboard is open.
-  useEffect(() => {
-    if (!job || expired || job.status !== 'bidding') return;
-    const interval = setInterval(() => {
-      const remainingProviders = BID_PROVIDERS.filter((p) => !spawnedProviderIds.current.has(p.id));
-      if (remainingProviders.length === 0) return;
-      const next = remainingProviders[Math.floor(Math.random() * remainingProviders.length)];
-      spawnedProviderIds.current.add(next.id);
-      setBids((prev) => [...prev, makeMockBid(job.id, next)]);
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [job, expired]);
 
   if (isServer) {
     const serverHeader = (title: string) => (
@@ -2020,198 +1970,14 @@ export default function BiddingDashboardScreen() {
   }
 
 
-  if (screenLoading) {
-    return (
-      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <BrandedLoader size={44} />
-      </View>
-    );
-  }
-
-  if (!job) {
-    return (
-      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <EmptyState icon="alert-circle" title={t('job_not_found')} />
-      </View>
-    );
-  }
-
-  const sortedByScore = [...bids].sort((a, b) => b.score - a.score);
-  const top3 = sortedByScore.slice(0, 3);
-
-  const restartTimer = () => {
-    job.biddingEndsAt = Date.now() + job.biddingDurationMs;
-    setExpired(false);
-  };
-
-  const convertToRegular = () => {
-    job.urgency = 'regular';
-    job.biddingDurationMs = 3 * 60 * 60 * 1000;
-    job.biddingEndsAt = Date.now() + job.biddingDurationMs;
-    setExpired(false);
-  };
-
-  const cancelJob = () => {
-    showAlert({
-      title: t('job_cancel_title'),
-      message: t('job_cancel_msg'),
-      icon: 'alert-triangle',
-      buttons: [
-        { text: t('job_keep'), style: 'cancel' },
-        {
-          text: t('job_cancel_title'),
-          style: 'destructive',
-          onPress: () => {
-            job.status = 'cancelled';
-            router.back();
-          },
-        },
-      ],
-    });
-  };
-
-  const acceptBid = (bid: Bid) => {
-    showAlert({
-      title: t('job_accept_title'),
-      message: `${bid.provider.name} — €${bid.price}, ${t('bidcard_eta', { eta: bid.eta })}\n${job.date}, ${job.time}\n${job.title}`,
-      icon: 'check-circle',
-      buttons: [
-        { text: t('action_cancel'), style: 'cancel' },
-        {
-          text: t('job_accept_btn'),
-          onPress: () => {
-            job.status = 'pending_payment';
-            job.assignedProviderId = bid.provider.id;
-            job.assignedPrice = bid.price;
-            job.paymentDeadline = Date.now() + 10 * 60 * 1000;
-            router.push(`/job/${job.id}/payment` as any);
-          },
-        },
-      ],
-    });
-  };
-
-  const openChat = (provider: BidProvider) => {
-    router.push(`/chat/${provider.id}` as any);
-  };
-
+  // Non-numeric id — a legacy 'j1'/'j2' deep link into the mock catalogue
+  // that was removed with the mock data. Honest not-found state.
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{job.title}</Text>
-        <TouchableOpacity onPress={cancelJob} style={styles.backBtn}>
-          <Feather name="x-circle" size={20} color={c.destructive} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
-        {job.status === 'bidding' && (
-          <>
-            <CountdownTimer endsAt={job.biddingEndsAt} urgency={job.urgency} onExpire={() => setExpired(true)} />
-
-            {!expired && (
-              <TouchableOpacity style={[styles.restartBtn, { borderColor: c.border }]} onPress={restartTimer}>
-                <Feather name="refresh-cw" size={14} color={c.text} />
-                <Text style={[styles.restartText, { color: c.text }]}>{t('job_restart_timer')}</Text>
-              </TouchableOpacity>
-            )}
-
-            {expired && bids.length === 0 ? (
-              <View style={[styles.noBidsCard, { backgroundColor: c.card, borderColor: c.border }]}>
-                <Feather name="inbox" size={32} color={c.mutedForeground} />
-                <Text style={[styles.noBidsTitle, { color: c.text }]}>{t('job_no_bids_title')}</Text>
-                <Text style={[styles.noBidsSub, { color: c.mutedForeground }]}>
-                  {t('job_no_bids_sub')}{job.urgency === 'urgent' ? t('job_no_bids_sub_urgent') : t('job_no_bids_sub_period')}
-                </Text>
-                <View style={styles.noBidsActions}>
-                  <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.primary }]} onPress={restartTimer}>
-                    <Text style={styles.restartFullText}>{t('job_restart_timer')}</Text>
-                  </TouchableOpacity>
-                  {job.urgency === 'urgent' && (
-                    <TouchableOpacity style={[styles.restartBtnFull, { backgroundColor: c.muted }]} onPress={convertToRegular}>
-                      <Text style={[styles.restartFullText, { color: c.text }]}>{t('job_convert_regular')}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            ) : (
-              <>
-                {top3.length > 0 && (
-                  <>
-                    <View style={styles.sectionHeaderRow}>
-                      <Text style={[styles.sectionTitle, { color: c.text }]}>{t('job_recommended')}</Text>
-                      <TouchableOpacity onPress={() => setShowAll(true)}>
-                        <Text style={[styles.viewAll, { color: c.primary }]}>{t('job_view_all_offers', { n: bids.length })}</Text>
-                      </TouchableOpacity>
-                    </View>
-                    {top3.map((bid, i) => (
-                      <Animated.View key={bid.id} entering={FadeInDown.delay(i * 80).duration(350)}>
-                        <BidCard
-                          bid={bid}
-                          rank={i + 1}
-                          onViewProfile={() => {}}
-                          onChat={() => openChat(bid.provider)}
-                          onAccept={() => acceptBid(bid)}
-                        />
-                      </Animated.View>
-                    ))}
-                  </>
-                )}
-
-                {showAll && (
-                  <View style={{ marginTop: 8 }}>
-                    <View style={styles.sectionHeaderRow}>
-                      <Text style={[styles.sectionTitle, { color: c.text }]}>{t('job_all_offers')}</Text>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                      {([
-                        ['recommended', 'job_sort_best'],
-                        ['lowPrice', 'job_sort_lowest'],
-                        ['highRating', 'job_sort_highest'],
-                        ['distance', 'job_sort_nearest'],
-                        ['badge', 'job_sort_badge'],
-                      ] as [SortMode, string][]).map(([mode, labelKey]) => (
-                        <TouchableOpacity
-                          key={mode}
-                          style={[styles.sortChip, { backgroundColor: sortMode === mode ? c.primary : c.muted, marginRight: 8 }]}
-                          onPress={() => setSortMode(mode)}
-                        >
-                          <Text style={[styles.sortChipText, { color: sortMode === mode ? '#FFF' : c.text }]}>{t(labelKey as any)}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                    {sortedForAll.map((bid) => (
-                      <BidCard
-                        key={bid.id}
-                        bid={bid}
-                        onViewProfile={() => {}}
-                        onChat={() => openChat(bid.provider)}
-                        onAccept={() => acceptBid(bid)}
-                      />
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
-          </>
-        )}
-
-        {job.status !== 'bidding' && (
-          <View style={[styles.statusCard, { backgroundColor: c.primaryLight }]}>
-            <Feather name="check-circle" size={28} color={c.primary} />
-            <Text style={[styles.statusText, { color: c.primary }]}>
-              {job.status === 'task_assigned' ? t('job_status_assigned') : job.status === 'cancelled' ? t('job_status_cancelled') : t('job_status_progress')}
-            </Text>
-          </View>
-        )}
-
-        <TouchableOpacity style={[styles.cancelBtn, { borderColor: c.border }]} onPress={cancelJob}>
-          <Text style={[styles.cancelText, { color: c.destructive }]}>{t('job_cancel')}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+      <EmptyState icon="alert-circle" title={t('job_not_found')} />
     </View>
   );
+
 }
 
 const styles = StyleSheet.create({

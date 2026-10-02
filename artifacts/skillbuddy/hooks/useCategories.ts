@@ -15,10 +15,9 @@ import type { CategoryDetailResponse, CategoryResponse } from '@/types';
  * module-level cache and shared across every consumer — no re-fetching
  * across screens; refresh() exists for pull-to-refresh / retry.
  *
- * EMPTY-LIST FALLBACK: while the API returns [], the categories screen
- * renders the curated local grid (mockData CATEGORIES) so the product
- * keeps working; server data replaces it the moment the backend seeds
- * categories. The screen decides the fallback — the hook reports states.
+ * EMPTY-LIST POLICY: STRICT API. An empty array is a real server state (the
+ * backend currently has no seeded categories) and screens render an honest
+ * empty state for it — the curated local grid was removed with the mock data.
  */
 export type CategoriesStatus = 'idle' | 'loading' | 'ready' | 'error';
 

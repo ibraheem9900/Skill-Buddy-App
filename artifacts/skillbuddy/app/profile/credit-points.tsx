@@ -1,16 +1,35 @@
 import React from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
-import { useLanguage } from '@/context/LanguageContext';
-import { CURRENT_USER, CREDIT_HISTORY } from '@/data/mockData';
+import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
+import { useCreditWallet } from '@/hooks/useWallet';
 import BackButton from '@/components/BackButton';
+import EmptyState from '@/components/EmptyState';
+import type { CreditTransactionType } from '@/types';
+
+/** Human label per credit transaction type (server enum → i18n key). */
+const TX_LABEL_KEY: Record<CreditTransactionType, TranslationKey> = {
+  EARNED: 'credit_tx_earned',
+  REDEEMED: 'credit_tx_redeemed',
+  REFUND: 'credit_tx_refund',
+  ADJUSTMENT: 'credit_tx_adjustment',
+};
 
 export default function CreditPointsScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  const { user } = useAuth();
+
+  // Real wallet: GET /api/v1/wallet/credits (balance is an integer count).
+  const { status, balance, transactions, load, refresh } = useCreditWallet();
+
+  React.useEffect(() => {
+    if (user) void load();
+  }, [user, load]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -22,34 +41,62 @@ export default function CreditPointsScreen() {
 
       <View style={[styles.balanceCard, { backgroundColor: c.heroCard }]}>
         <Feather name="star" size={28} color="#FFF" />
-        <Text style={styles.balanceValue}>{CURRENT_USER.creditPoints}</Text>
+        <Text style={styles.balanceValue}>{balance}</Text>
         <Text style={styles.balanceLabel}>{t('credit_balance')}</Text>
         <Text style={styles.balanceSub}>{t('credit_earn_note')}</Text>
       </View>
 
       <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('credit_history')}</Text>
 
+      {status === 'error' ? (
+        <View style={{ paddingHorizontal: 20, marginBottom: 8 }}>
+          <Text style={[styles.txDate, { color: c.destructive }]}>{t('services_load_error')}</Text>
+          <TouchableOpacity onPress={() => void refresh()} hitSlop={6}>
+            <Text style={[styles.txDesc, { color: c.primary }]}>{t('cats_retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <FlatList
-        data={CREDIT_HISTORY}
-        keyExtractor={(t) => t.id}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
-        renderItem={({ item }) => (
-          <View style={[styles.txRow, { borderBottomColor: c.border }]}>
-            <View style={[styles.txIcon, { backgroundColor: item.change > 0 ? c.successLight : c.urgentLight }]}>
-              <Feather name={item.change > 0 ? 'plus' : 'minus'} size={14} color={item.change > 0 ? c.success : c.urgent} />
+        data={transactions}
+        keyExtractor={(row) => String(row.id)}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
+        ListEmptyComponent={
+          status === 'loading' ? null : (
+            <EmptyState
+              icon="star"
+              title={t('empty_credit_history_title')}
+              subtitle={t('empty_credit_history_sub')}
+            />
+          )
+        }
+        renderItem={({ item }) => {
+          const points = item.points ?? 0;
+          const positive = points >= 0;
+          return (
+            <View style={[styles.txRow, { borderBottomColor: c.border }]}>
+              <View style={[styles.txIcon, { backgroundColor: positive ? c.successLight : c.urgentLight }]}>
+                <Feather name={positive ? 'plus' : 'minus'} size={14} color={positive ? c.success : c.urgent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.txDesc, { color: c.text }]}>
+                  {item.description || t(TX_LABEL_KEY[item.transaction_type])}
+                </Text>
+                <Text style={[styles.txDate, { color: c.mutedForeground }]}>
+                  {new Date(item.created_at).toLocaleDateString()}
+                </Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[styles.txChange, { color: positive ? c.success : c.urgent }]}>
+                  {positive ? '+' : ''}{points}
+                </Text>
+                <Text style={[styles.txBalance, { color: c.mutedForeground }]}>
+                  {t('credit_bal', { n: item.balance_after })}
+                </Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.txDesc, { color: c.text }]}>{item.description}</Text>
-              <Text style={[styles.txDate, { color: c.mutedForeground }]}>{item.date}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[styles.txChange, { color: item.change > 0 ? c.success : c.urgent }]}>
-                {item.change > 0 ? '+' : ''}{item.change}
-              </Text>
-              <Text style={[styles.txBalance, { color: c.mutedForeground }]}>{t('credit_bal', { n: item.balanceAfter })}</Text>
-            </View>
-          </View>
-        )}
+          );
+        }}
       />
     </View>
   );

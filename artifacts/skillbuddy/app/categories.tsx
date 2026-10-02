@@ -16,72 +16,21 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CATEGORIES } from '@/data/mockData';
-import CategoryItem from '@/components/CategoryItem';
 import useCategories from '@/hooks/useCategories';
+import EmptyState from '@/components/EmptyState';
+import ServerCategoryTile from '@/components/ServerCategoryTile';
 import type { CategoryResponse } from '@/types';
-
-/**
- * Server category tile — same visual language as CategoryItem (muted
- * circle + icon + label, /category/{id} navigation). ICON FALLBACK: the
- * schema's icon_url is OPTIONAL (required: ['id','name']) and may 404 —
- * a failed/missing image falls back to a glyph so the grid never shows a
- * broken image. DESCRIPTION is consumed via the accessibility label (no
- * category detail screen exists yet — Get Category by ID is a separate
- * task); the name is the server's own string (local cat_* translation
- * keys cover only the curated fallback ids).
- */
-function ServerCategoryTile({ category }: { category: CategoryResponse }) {
-  const router = useRouter();
-  const { colors: c } = useTheme();
-  const [iconFailed, setIconFailed] = useState(false);
-  const showImage = !!category.icon_url && !iconFailed;
-
-  return (
-    <TouchableOpacity
-      style={styles.tile}
-      activeOpacity={0.85}
-      onPress={() => router.push(`/category/${category.id}` as any)}
-      accessibilityLabel={category.description ? `${category.name}. ${category.description}` : category.name}
-    >
-      <View style={[styles.tileCircle, { backgroundColor: c.muted }]}>
-        {showImage ? (
-          <Image
-            source={{ uri: category.icon_url as string }}
-            style={styles.tileImage}
-            resizeMode="contain"
-            onError={() => setIconFailed(true)}
-          />
-        ) : (
-          <MaterialCommunityIcons name="shape-plus" size={28} color={c.primary} />
-        )}
-      </View>
-      <Text style={[styles.tileLabel, { color: c.text }]} numberOfLines={1}>
-        {category.name}
-      </Text>
-    </TouchableOpacity>
-  );
-}
 
 /**
  * Categories (GET /api/v1/categories — PUBLIC per live verification).
  *
- * SERVER-BACKED WITH LOCAL FALLBACK: the live API currently returns an
- * EMPTY array (backend has no seeded categories), while the app ships a
- * curated local grid (mockData CATEGORIES + icon fonts + cat_* copy) that
- * 11 screens already rely on. So: server categories render the moment the
- * backend has them (verbatim names, icon_url with glyph fallback,
- * description in the accessibility label); until then the local grid keeps
- * the product working, with a small note explaining it. Loading shows a
- * spinner banner over the grid; network failure shows a retry banner;
- * pull-to-refresh force-refetches (session cache otherwise).
+ * STRICT SERVER-BACKED: the live API currently returns an EMPTY array
+ * (backend has no seeded categories) and that is a real server state — the
+ * screen shows an honest empty state instead of the old curated local grid,
+ * which was removed along with the mock data. Loading shows a spinner
+ * banner; network failure shows a retry banner; pull-to-refresh
+ * force-refetches (session cache otherwise).
  */
-/** Unified grid row — the server list and the curated local fallback
- * have different item types (numeric vs string ids, icon_url vs icon
- * fonts); the discriminator keeps the FlatList fully typed. */
-type CategoryRow =
-  | { kind: 'server'; server: CategoryResponse }
-  | { kind: 'local'; local: (typeof CATEGORIES)[number] };
 
 export default function CategoriesScreen() {
   const insets = useSafeAreaInsets();
@@ -96,14 +45,10 @@ export default function CategoriesScreen() {
     }, [load]),
   );
 
-  const useServer = (serverCategories?.length ?? 0) > 0;
   const firstLoad = status === 'loading' && serverCategories == null;
 
   const footer = (
     <>
-      {!useServer && status === 'ready' ? (
-        <Text style={[styles.fallbackNote, { color: c.mutedForeground }]}>{t('cats_empty')}</Text>
-      ) : null}
       <Animated.View entering={FadeInDown.delay(600).duration(400)} style={[styles.quoteBanner, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
         <View style={styles.quoteInner}>
           <View style={[styles.quoteIconWrap, { backgroundColor: c.primary }]}>
@@ -127,13 +72,9 @@ export default function CategoriesScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: 8 }]}>
-      <FlatList<CategoryRow>
-        data={
-          useServer
-            ? (serverCategories as CategoryResponse[]).map((server) => ({ kind: 'server' as const, server }))
-            : CATEGORIES.map((local) => ({ kind: 'local' as const, local }))
-        }
-        keyExtractor={(item) => String(item.kind === 'server' ? item.server.id : item.local.id)}
+      <FlatList<CategoryResponse>
+        data={serverCategories ?? []}
+        keyExtractor={(item) => String(item.id)}
         numColumns={4}
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 20 }}
@@ -163,13 +104,18 @@ export default function CategoriesScreen() {
             colors={[c.primary]}
           />
         }
+        ListEmptyComponent={
+          firstLoad || status === 'error' ? null : (
+            <EmptyState
+              icon="grid"
+              title={t('empty_categories_title')}
+              subtitle={t('empty_categories_sub')}
+            />
+          )
+        }
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInDown.delay(index * 30).duration(300)}>
-            {item.kind === 'server' ? (
-              <ServerCategoryTile category={item.server} />
-            ) : (
-              <CategoryItem category={item.local} />
-            )}
+            <ServerCategoryTile category={item} />
           </Animated.View>
         )}
       />

@@ -121,10 +121,6 @@ function RootLayoutNav() {
           options={{ headerShown: false }}
         />
         <Stack.Screen
-          name="booking/[id]"
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
           name="quote-request"
           options={{ headerShown: false, animation: 'slide_from_bottom' }}
         />

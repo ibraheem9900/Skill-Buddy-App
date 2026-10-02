@@ -8,6 +8,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { BLOG_CATEGORIES, BLOG_POSTS } from '@/data/blogData';
 import BackButton from '@/components/BackButton';
+import EmptyState from '@/components/EmptyState';
 
 export default function BlogsScreen() {
   const insets = useSafeAreaInsets();
@@ -41,6 +42,13 @@ export default function BlogsScreen() {
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <EmptyState
+            icon="book-open"
+            title={t('empty_blog_title')}
+            subtitle={t('empty_blog_sub')}
+          />
+        }
         ListHeaderComponent={
           <View style={{ marginBottom: 8 }}>
             <View style={[styles.searchBar, { backgroundColor: c.input }]}>
@@ -54,7 +62,7 @@ export default function BlogsScreen() {
               />
             </View>
 
-            {!query && (
+            {!query && featured.length > 0 && (
               <>
                 <Text style={[styles.sectionTitle, { color: c.text }]}>{t('blog_featured')}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }} contentContainerStyle={{ gap: 12 }}>
