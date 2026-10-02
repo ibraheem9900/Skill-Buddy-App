@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Platform,
   Pressable,
@@ -18,8 +17,6 @@ import { Feather, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-ico
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/context/ThemeContext';
-import { Image } from 'expo-image';
-import { BLOG_POSTS } from '@/data/blogData';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
@@ -34,31 +31,18 @@ import {
   getBookingProvider,
   getBookingKey,
 } from '@/lib/bookingFields';
-import {
-  CATEGORIES,
-  CURRENT_USER,
-  MOCK_BOOKINGS,
-  NOTIFICATIONS,
-  OFFERS,
-  SERVICES,
-} from '@/data/mockData';
-import { getPersonalizedServices } from '@/lib/personalization';
-import ServiceCard from '@/components/ServiceCard';
-import CategoryItem from '@/components/CategoryItem';
-import SpecialOfferCard from '@/components/SpecialOfferCard';
+import ServerServiceRow from '@/components/ServerServiceRow';
+import ServerCategoryTile from '@/components/ServerCategoryTile';
+import useServices from '@/hooks/useServices';
+import useCategories from '@/hooks/useCategories';
+import useSelectedLocation from '@/hooks/useSelectedLocation';
 import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
 
-const { width: SCREEN_W } = Dimensions.get('window');
-const OFFER_W = SCREEN_W - 32;
-const SNAP_INTERVAL = OFFER_W + 12;
-
-// ─── Unread notification count ────────────────────────────────────────────────
-const UNREAD_COUNT = NOTIFICATIONS.filter((n) => !n.isRead).length;
-
-// ─── Personalized services ────────────────────────────────────────────────────
-const { services: PERSONALIZED, isPersonalized: IS_PERSONALIZED } =
-  getPersonalizedServices(CURRENT_USER, SERVICES);
+// No notifications backend exists yet (the API exposes no /notifications
+// endpoint), so the header bell never shows an unread badge — the previous
+// count came from a local fixture removed with the mock data.
+const UNREAD_COUNT = 0;
 
 // ─── Badge tiers ──────────────────────────────────────────────────────────────
 const BADGE_TIERS = [
@@ -84,17 +68,6 @@ const QUICK_TILES = [
   { icon: 'account-outline',      labelKey: 'home_profile',        route: '/(tabs)/profile' as const },
 ] as const;
 
-// ─── Stars ────────────────────────────────────────────────────────────────────
-function Stars({ count }: { count: number }) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 1 }}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <MaterialIcons key={i} name="star" size={12} color={i <= count ? '#FFB800' : '#E0E0E0'} />
-      ))}
-    </View>
-  );
-}
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -103,6 +76,35 @@ export default function HomeScreen() {
   const { t } = useLanguage();
   const { user } = useAuth();
   const { activeRole } = useRole();
+
+  // The location the user picked on /location (real geo APIs). Falls back to
+  // the "Enter Your Location" prompt when nothing is selected yet — the old
+  // hardcoded "Riga, Latvia" fixture is gone.
+  const selectedLocation = useSelectedLocation();
+  const locationLabel = selectedLocation
+    ? [selectedLocation.cityName, selectedLocation.countryName].filter(Boolean).join(', ')
+    : t('location_title');
+
+  // Live catalogs (fetched once per session, module-cached): the categories
+  // row and the services section both show REAL server data — the local
+  // catalog fixtures were removed with the mock data.
+  const {
+    status: catStatus,
+    categories: apiCategories,
+    load: loadCategories,
+    refresh: refreshCategories,
+  } = useCategories();
+  const {
+    status: svcStatus,
+    services: apiServices,
+    load: loadServices,
+    refresh: refreshServices,
+  } = useServices();
+
+  React.useEffect(() => {
+    void loadCategories();
+    void loadServices();
+  }, [loadCategories, loadServices]);
   // Client dashboard summary (GET /api/v1/clients/dashboard) — CLIENT role
   // only; fresh fetch on every entry + pull-to-refresh (never cached).
   const clientDash = useClientDashboard();
@@ -112,7 +114,6 @@ export default function HomeScreen() {
   const dashLoaded = useRef(false);
   const isDark = theme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
-  const [offerIdx, setOfferIdx] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // Simulate a 500ms initial loading state for dashboard sections
@@ -173,7 +174,14 @@ export default function HomeScreen() {
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
             />
-            <View style={styles.headerGlowOrb} />
+            <View
+              style={[
+                styles.headerGlowOrb,
+                theme === 'dark'
+                  ? null
+                  : { backgroundColor: 'rgba(43, 121, 92, 0.12)' },
+              ]}
+            />
           </View>
         )}
         {/* Logo + notification row — small brand mark (height 30 → ~72px wide).
@@ -200,7 +208,7 @@ export default function HomeScreen() {
         <View style={styles.locationRow}>
           <MaterialIcons name="location-on" size={15} color="#FFB800" />
           <TouchableOpacity style={styles.locationBtn} onPress={() => router.push('/location')}>
-            <Text style={styles.locationText}>Riga, Latvia</Text>
+            <Text style={styles.locationText} numberOfLines={1}>{locationLabel}</Text>
             <Feather name="chevron-down" size={13} color="#FFF" />
           </TouchableOpacity>
         </View>
@@ -247,7 +255,7 @@ export default function HomeScreen() {
             <View style={styles.creditBody}>
               <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
               <Text style={[styles.creditValue, { color: c.text }]}>
-                {t('profile_pts', { n: CURRENT_USER.creditPoints.toLocaleString() })}
+                {t('profile_pts', { n: (user?.credit_points ?? 0).toLocaleString() })}
               </Text>
             </View>
             <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
@@ -426,46 +434,9 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        {/* Special Offers */}
-        <Animated.View entering={FadeInDown.delay(80).duration(380)} style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_special_for_you')}</Text>
-            <TouchableOpacity>
-              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={OFFERS}
-            horizontal
-            pagingEnabled={false}
-            snapToInterval={SNAP_INTERVAL}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(o) => o.id}
-            contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
-            renderItem={({ item }) => (
-              <SpecialOfferCard offer={item} cardWidth={OFFER_W} />
-            )}
-            onMomentumScrollEnd={(e) => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / SNAP_INTERVAL);
-              setOfferIdx(Math.max(0, Math.min(idx, OFFERS.length - 1)));
-            }}
-          />
-          <View style={styles.dotsRow}>
-            {OFFERS.map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.dot,
-                  offerIdx === i
-                    ? { backgroundColor: c.primary, width: 16, borderRadius: 3 }
-                    : { backgroundColor: c.border, width: 5 },
-                ]}
-              />
-            ))}
-          </View>
-        </Animated.View>
+        {/* Special Offers — removed: the API exposes no offers/promotions
+            endpoint, so the fixture-backed carousel is gone rather than
+            showing invented discounts. */}
 
         {/* Categories */}
         <Animated.View entering={FadeInDown.delay(100).duration(380)} style={styles.section}>
@@ -476,12 +447,29 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
           <FlatList
-            data={CATEGORIES.slice(0, 8)}
+            data={(apiCategories ?? []).slice(0, 8)}
             horizontal
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(cat) => cat.id}
+            keyExtractor={(cat) => String(cat.id)}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-            renderItem={({ item }) => <CategoryItem category={item} />}
+            ListEmptyComponent={
+              catStatus === 'error' && apiCategories == null ? (
+                <TouchableOpacity
+                  style={[styles.catalogErrorRow, { borderColor: c.destructive }]}
+                  onPress={() => void refreshCategories()}
+                  activeOpacity={0.8}
+                >
+                  <Feather name="wifi-off" size={14} color={c.destructive} />
+                  <Text style={[styles.catalogErrorText, { color: c.destructive }]}>{t('cats_error')}</Text>
+                  <Text style={[styles.catalogErrorRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={{ color: c.mutedForeground, fontFamily: 'Manrope_400Regular', fontSize: 13, paddingHorizontal: 4 }}>
+                  {t('empty_categories_title')}
+                </Text>
+              )
+            }
+            renderItem={({ item }) => <ServerCategoryTile category={item} />}
           />
         </Animated.View>
 
@@ -489,7 +477,7 @@ export default function HomeScreen() {
         <Animated.View entering={FadeInDown.delay(120).duration(380)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: c.text }]}>
-              {IS_PERSONALIZED ? t('home_recommended') : t('home_popular_services')}
+              {t('home_popular_services')}
             </Text>
             <TouchableOpacity onPress={() => router.push('/search')}>
               <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
@@ -506,12 +494,29 @@ export default function HomeScreen() {
             />
           ) : (
             <FlatList
-              data={PERSONALIZED}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(s) => s.id}
-              contentContainerStyle={{ paddingHorizontal: 16 }}
-              renderItem={({ item }) => <ServiceCard service={item} />}
+              data={(apiServices ?? []).slice(0, 4)}
+              scrollEnabled={false}
+              showsVerticalScrollIndicator={false}
+              keyExtractor={(s) => String(s.id)}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+              ListEmptyComponent={
+                svcStatus === 'error' && apiServices == null ? (
+                  <TouchableOpacity
+                    style={[styles.catalogErrorRow, { borderColor: c.destructive }]}
+                    onPress={() => void refreshServices()}
+                    activeOpacity={0.8}
+                  >
+                    <Feather name="wifi-off" size={14} color={c.destructive} />
+                    <Text style={[styles.catalogErrorText, { color: c.destructive }]}>{t('services_load_error')}</Text>
+                    <Text style={[styles.catalogErrorRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={{ color: c.mutedForeground, fontFamily: 'Manrope_400Regular', fontSize: 13, paddingHorizontal: 4 }}>
+                    {t('services_empty_title')}
+                  </Text>
+                )
+              }
+              renderItem={({ item }) => <ServerServiceRow service={item} />}
             />
           )}
         </Animated.View>
@@ -576,27 +581,9 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        {/* From the Blog — compact teaser, links to full Blog listing */}
-        <Animated.View entering={FadeInDown.delay(170).duration(380)} style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_from_blog')}</Text>
-            <TouchableOpacity onPress={() => router.push('/blog' as any)}>
-              <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-            {BLOG_POSTS.slice(0, 3).map((post) => (
-              <TouchableOpacity
-                key={post.id}
-                style={[styles.blogTeaserCard, { backgroundColor: c.card, borderColor: c.border }]}
-                onPress={() => router.push(`/blog/${post.id}` as any)}
-              >
-                <Image source={{ uri: post.image }} style={styles.blogTeaserImage} contentFit="cover" />
-                <Text style={[styles.blogTeaserTitle, { color: c.text }]} numberOfLines={2}>{post.title}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </Animated.View>
+        {/* From the Blog — removed: the API exposes no blog endpoint, so the
+            fixture posts are gone. The /blog screen itself still exists and
+            shows an honest empty state. */}
 
         {/* Invite Friends */}
         <Animated.View entering={FadeInDown.delay(180).duration(380)} style={{ paddingHorizontal: 16, marginTop: 16 }}>
@@ -806,8 +793,19 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
   seeAll: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, marginTop: 10 },
-  dot: { height: 5, borderRadius: 3 },
+  catalogErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    maxWidth: 320,
+  },
+  catalogErrorText: { flexShrink: 1, fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  catalogErrorRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 
   // ── Specialty cards ───────────────────────────────────────────────────────
   specialtyCard: {
@@ -860,11 +858,6 @@ const styles = StyleSheet.create({
   badgeTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   badgeFill: { height: '100%', borderRadius: 3 },
   badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
-
-  // ── Blog teaser ──────────────────────────────────────────────────────────
-  blogTeaserCard: { width: 160, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
-  blogTeaserImage: { width: '100%', height: 90 },
-  blogTeaserTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, lineHeight: 16, padding: 10 },
 
   // ── Invite card ───────────────────────────────────────────────────────────
   inviteCard: {

@@ -23,9 +23,9 @@ import type { ServiceListItem } from '@/types';
  *
  * CACHE DISCIPLINE: the catalog is fetched ONCE per app session into a
  * module-level cache and shared across consumers; `refresh()` force-refetches
- * for pull-to-refresh/retry. The Services tab falls back to the curated local
- * list while the API returns [] — the screen decides the fallback, this hook
- * only reports states (mirrors useCategories).
+ * for pull-to-refresh/retry. STRICT API: the local catalog fallback was
+ * removed with the mock data — an empty array is a real server state and
+ * screens render an honest empty state for it (mirrors useCategories).
  */
 export type ServicesStatus = 'idle' | 'loading' | 'ready' | 'error';
 

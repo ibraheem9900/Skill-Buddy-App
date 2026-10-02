@@ -1058,3 +1058,58 @@ export interface ListJobsParams {
   limit?: number;
   offset?: number;
 }
+
+/* ── Wallet ──────────────────────────────────────────────────────────────────
+ * GET /api/v1/wallet/credits  → CreditWalletDetailResponse
+ * GET /api/v1/wallet/provider → ProviderWalletDetailResponse
+ *
+ * CREDIT wallet: `balance` is an INTEGER point count (live schema).
+ * PROVIDER wallet: `balance`/`amount`/`balance_after` are decimal STRINGS on
+ * the wire (live schema) — parse before display, never render raw.
+ */
+export type CreditTransactionType = 'EARNED' | 'REDEEMED' | 'REFUND' | 'ADJUSTMENT';
+export type ProviderWalletTransactionType = 'ESCROW_RELEASE' | 'ADJUSTMENT';
+
+export interface CreditWalletResponse {
+  id: number;
+  client_id: number;
+  balance: number;
+}
+
+export interface CreditTransactionResponse {
+  id: number;
+  transaction_type: CreditTransactionType;
+  points: number;
+  balance_after: number;
+  reference_type?: string | null;
+  reference_id?: number | null;
+  description?: string | null;
+  created_at: string;
+}
+
+export interface CreditWalletDetailResponse {
+  wallet: CreditWalletResponse;
+  transactions: CreditTransactionResponse[];
+}
+
+export interface ProviderWalletResponse {
+  id: number;
+  provider_id: number;
+  balance: string;
+}
+
+export interface ProviderWalletTransactionResponse {
+  id: number;
+  transaction_type: ProviderWalletTransactionType;
+  amount: string;
+  balance_after: string;
+  reference_type?: string | null;
+  reference_id?: number | null;
+  description?: string | null;
+  created_at: string;
+}
+
+export interface ProviderWalletDetailResponse {
+  wallet: ProviderWalletResponse;
+  transactions: ProviderWalletTransactionResponse[];
+}

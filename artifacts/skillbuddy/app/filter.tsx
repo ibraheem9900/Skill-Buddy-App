@@ -3,7 +3,7 @@
  * The top area is a dimmed backdrop (tapping it dismisses).
  * The bottom panel slides up with rounded top corners, drag-to-dismiss, and real filter state.
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   PanResponder,
@@ -20,8 +20,8 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CATEGORIES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
+import useCategories from '@/hooks/useCategories';
 import RangeSlider from '@/components/RangeSlider';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -48,7 +48,24 @@ export default function FilterScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t, tCat } = useLanguage();
+  const { t } = useLanguage();
+
+  // Category tabs come from the LIVE API (GET /api/v1/categories) — the
+  // curated local list was removed with the mock data; while the backend is
+  // unseeded the tabs row simply shows only "All".
+  const {
+    status: catStatus,
+    categories: serverCategories,
+    load: loadCategories,
+    refresh: refreshCategories,
+  } = useCategories();
+
+  useEffect(() => {
+    void loadCategories();
+  }, [loadCategories]);
+
+  const catName = (id: string) =>
+    serverCategories?.find((cat) => String(cat.id) === id)?.name ?? id;
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const { filters, setFilters, resetFilters: resetContextFilters } = useServiceFilters();
@@ -60,7 +77,7 @@ export default function FilterScreen() {
   const [minPrice, setMinPrice] = useState(filters.minPrice);
   const [maxPrice, setMaxPrice] = useState(filters.maxPrice);
 
-  const catTabs = [ALL, ...CATEGORIES.slice(0, 6).map((cat) => cat.id)];
+  const catTabs = [ALL, ...(serverCategories ?? []).slice(0, 6).map((cat) => String(cat.id))];
 
   // ── Drag-to-dismiss ───────────────────────────────────────────────────────
   const translateY = useRef(new Animated.Value(0)).current;
@@ -151,11 +168,25 @@ export default function FilterScreen() {
                 onPress={() => setSelectedCat(cat)}
               >
                 <Text style={[styles.catTabText, { color: c.mutedForeground }, selectedCat === cat && { color: '#FFF' }]}>
-                  {cat === ALL ? t('services_all') : tCat(cat)}
+                  {cat === ALL ? t('services_all') : catName(cat)}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          {/* Category load failure — strict API, so a failed fetch is stated
+              instead of silently showing only the "All" tab. */}
+          {catStatus === 'error' && serverCategories == null && (
+            <TouchableOpacity
+              style={[styles.catErrorRow, { borderColor: c.destructive }]}
+              onPress={() => void refreshCategories()}
+              activeOpacity={0.8}
+            >
+              <Feather name="wifi-off" size={14} color={c.destructive} />
+              <Text style={[styles.catErrorText, { color: c.destructive }]}>{t('cats_error')}</Text>
+              <Text style={[styles.catErrorRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Price Range */}
           <Text style={[styles.sectionLabel, { color: c.text }]}>{t('filter_price_range')}</Text>
@@ -310,6 +341,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   catTabText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
+  catErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 20,
+    marginTop: 10,
+  },
+  catErrorText: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  catErrorRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'center',

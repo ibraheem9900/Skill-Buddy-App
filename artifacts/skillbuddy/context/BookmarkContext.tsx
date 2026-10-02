@@ -3,10 +3,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { catalogIdToServiceId } from '@/hooks/useClientFavorites';
 import type { Service } from '@/types';
 
 const BOOKMARKS_KEY = 'sb_bookmarks';
+
+/**
+ * Extract the numeric backend service_id from a service id. Accepts the
+ * legacy local-catalog convention ('s12') and plain numeric ids ('12').
+ * Local to this context since the shared local-catalog helper was removed
+ * with the mock data.
+ */
+function numericServiceId(id: string | number): number | null {
+  const n = Number(String(id).replace(/\D/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 interface BookmarkContextType {
   bookmarks: Service[];
@@ -59,7 +69,7 @@ export function BookmarkProvider({ children }: { children: React.ReactNode }) {
     // On failure the optimistic change is REVERTED and the user is told.
     const canSync = !!user && activeRole === 'CLIENT';
     if (!canSync || !nowSaved) return; // signed-out/provider or un-save: local only (remove is a separate task)
-    const serviceId = catalogIdToServiceId(service.id);
+    const serviceId = numericServiceId(service.id);
     if (serviceId == null) return; // non-numeric catalog id — nothing to send
     setSavingToServer(true);
     (async () => {

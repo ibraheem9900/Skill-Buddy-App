@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
@@ -87,7 +87,12 @@ export default function PostJobScreen() {
   const [geoSearch, setGeoSearch] = useState('');
 
   // ── Form values ────────────────────────────────────────────────────────────
-  const [serviceId, setServiceId] = useState<number | null>(null);
+  // Deep links from a service page ("Book now") may pre-select the service:
+  // /job/post?serviceId=123. Anything non-numeric is ignored.
+  const { serviceId: serviceIdParam } = useLocalSearchParams<{ serviceId?: string }>();
+  const [serviceId, setServiceId] = useState<number | null>(() =>
+    serviceIdParam != null && /^\d+$/.test(String(serviceIdParam)) ? Number(serviceIdParam) : null,
+  );
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dateKey, setDateKey] = useState<DateKey>('today');

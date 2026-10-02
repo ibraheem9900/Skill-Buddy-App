@@ -6,7 +6,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { NOTIFICATIONS } from '@/data/mockData';
+import EmptyState from '@/components/EmptyState';
 import type { Notification } from '@/types';
 
 function NotifItem({ item, index, c }: { item: Notification; index: number; c: any }) {
@@ -49,11 +49,16 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const unread = NOTIFICATIONS.filter((n) => !n.isRead).length;
+
+  // No notifications backend exists yet (the live API exposes no
+  // /notifications endpoint), so the list is honestly empty until it ships.
+  // Previously this screen rendered a local fixture — that mock is removed.
+  const items: Notification[] = [];
+  const unread = items.filter((n) => !n.isRead).length;
 
   const sections = [
-    { title: t('notifications_today'),     data: NOTIFICATIONS.filter((_, i) => i < 3) },
-    { title: t('notifications_yesterday'), data: NOTIFICATIONS.filter((_, i) => i >= 3) },
+    { title: t('notifications_today'),     data: items.filter((_, i) => i < 3) },
+    { title: t('notifications_yesterday'), data: items.filter((_, i) => i >= 3) },
   ];
 
   let globalIdx = 0;
@@ -87,6 +92,13 @@ export default function NotificationsScreen() {
         keyExtractor={(n) => n.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        ListEmptyComponent={
+          <EmptyState
+            icon="bell"
+            title={t('empty_notifications_title')}
+            subtitle={t('empty_notifications_sub')}
+          />
+        }
         renderSectionHeader={({ section }) => (
           <View style={[styles.sectionHdr, { backgroundColor: c.background }]}>
             <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>{section.title}</Text>

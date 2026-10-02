@@ -1,7 +1,7 @@
 const palette = {
-  primary: '#2E9E7A',
-  primaryDark: '#20735A',
-  primaryLight: '#E5F4EE',
+  primary: '#2b795c', // web light theme primary — oklch(0.52 0.09 165)
+  primaryDark: '#076246', // web --tree — oklch(0.44 0.09 165), pressed/dark green
+  primaryLight: '#e0f9ed', // web --accent — oklch(0.96 0.03 165)
   rating: '#FFB800',
   destructive: '#E74C3C',
   destructiveForeground: '#FFFFFF',
@@ -67,7 +67,9 @@ const colors = {
     primary: '#4DBFAD',
     primaryForeground: '#FFFFFF',
     primaryLight: 'rgba(77, 191, 173, 0.14)',
-    primaryDark: palette.primary,
+    // Frozen: the dark theme keeps its approved accent for pressed states —
+    // palette.primary now tracks the LIGHT theme's darker web green.
+    primaryDark: '#2E9E7A',
     secondary: '#131818',
     secondaryForeground: '#EDF2F2',
     muted: '#131818',

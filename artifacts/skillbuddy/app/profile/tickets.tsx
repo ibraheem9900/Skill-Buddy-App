@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { MOCK_TICKETS } from '@/data/ticketStore';
+import { TICKETS } from '@/data/ticketStore';
 import BackButton from '@/components/BackButton';
 import EmptyState from '@/components/EmptyState';
 import type { TicketStatus } from '@/types';
@@ -35,7 +35,7 @@ export default function MyTicketsScreen() {
       </View>
 
       <FlatList
-        data={MOCK_TICKETS}
+        data={TICKETS}
         keyExtractor={(t) => t.id}
         contentContainerStyle={{ padding: 20, paddingBottom: 40, flexGrow: 1 }}
         ListEmptyComponent={

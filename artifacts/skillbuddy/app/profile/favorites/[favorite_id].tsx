@@ -21,6 +21,8 @@ import { useBookmarks } from '@/context/BookmarkContext';
 import BackButton from '@/components/BackButton';
 import { authApi } from '@/services/api';
 import { joinFavoriteWithService, useClientFavorites } from '@/hooks/useClientFavorites';
+import useServices from '@/hooks/useServices';
+import { formatServicePrice } from '@/lib/servicePrice';
 import type { FavoriteItemResponse } from '@/types';
 
 type DetailState = 'loading' | 'ready' | 'notfound' | 'error';
@@ -53,6 +55,12 @@ export default function FavoriteDetailScreen() {
   const [removing, setRemoving] = useState(false);
   const { removeFavorite } = useClientFavorites();
   const { removeBookmark } = useBookmarks();
+  // Live catalog for the client-side join (no per-favorite detail calls).
+  const { services: catalog, load: loadCatalog } = useServices();
+
+  React.useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
   const NOTES_MAX = 500; // live schema: notes maxLength 500 (nullable)
 
   /** Destructive removal from the detail screen — confirm first (no undo);
@@ -153,7 +161,7 @@ export default function FavoriteDetailScreen() {
     }
   };
 
-  const joined = favorite ? joinFavoriteWithService(favorite) : null;
+  const joined = favorite ? joinFavoriteWithService(favorite, catalog ?? []) : null;
   const service = joined?.service ?? null;
   const savedOn = favorite?.created_at
     ? (() => {
@@ -208,7 +216,7 @@ export default function FavoriteDetailScreen() {
               activeOpacity={service ? 0.75 : 1}
             >
               {service ? (
-                <Image source={{ uri: service.image }} style={styles.serviceImage} />
+                <Image source={{ uri: service.thumbnail_url ?? undefined }} style={styles.serviceImage} />
               ) : (
                 <View style={[styles.serviceImage, styles.serviceImageFallback]}>
                   <MaterialCommunityIcons name="tag-outline" size={22} color={c.mutedForeground} />
@@ -218,11 +226,11 @@ export default function FavoriteDetailScreen() {
                 <Text style={[styles.serviceTitle, { color: c.text }]} numberOfLines={1}>
                   {service ? service.title : t('cf_unknown_service', { id: favorite.service_id })}
                 </Text>
-                {service && (
+                {service && formatServicePrice(service) ? (
                   <Text style={[styles.serviceSub, { color: c.mutedForeground }]} numberOfLines={1}>
-                    €{service.price} · {service.provider.name}
+                    {formatServicePrice(service)}
                   </Text>
-                )}
+                ) : null}
                 <Text style={[styles.serviceIdLine, { color: c.mutedForeground }]}>
                   {t('cfd_service_id', { id: favorite.service_id })}
                 </Text>

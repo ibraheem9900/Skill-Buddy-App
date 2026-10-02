@@ -6,12 +6,13 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
-import { CURRENT_USER, PROVIDER_JOB_HISTORY } from '@/data/mockData';
 import BackButton from '@/components/BackButton';
+import EmptyState from '@/components/EmptyState';
 import { authApi } from '@/services/api';
 import useProviderProfile, { formatHourlyRate } from '@/hooks/useProviderProfile';
 import useProviderDashboard from '@/hooks/useProviderDashboard';
 import useProviderStatusHistory from '@/hooks/useProviderStatusHistory';
+import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
 import type { TranslationKey } from '@/context/LanguageContext';
 
 /**
@@ -34,6 +35,16 @@ const STATUS_OPTIONS = ['active', 'on_leave', 'unavailable'] as const;
 
 type StatusOption = (typeof STATUS_OPTIONS)[number];
 
+/**
+ * Provider job-history rows.
+ *
+ * NO endpoint lists a provider's past jobs with client names/ratings
+ * (GET /jobs is the user's own job list and carries no client identity), so
+ * the list is honestly empty until such an endpoint ships — the previous
+ * fixture (3 hand-written rows) was removed with the mock data.
+ */
+const JOB_HISTORY: { id: string; clientName: string; category: string; date: string; ratingGiven: number }[] = [];
+
 /** Dot color per status value (matches the web app's vocabulary). */
 function statusDotColor(s: string, c: { success: string; warning: string; destructive: string }): string {
   if (s === 'active') return c.success;
@@ -48,6 +59,12 @@ export default function ProfessionalInfoScreen() {
   const { activeRole } = useRole();
   const isProvider = activeRole === 'PROVIDER';
   const { status, profile, errorMessage, load, refresh, seedProfile, seedCurrentStatus } = useProviderProfile();
+  // Real client stats for the CLIENT branch (GET /clients/profile).
+  const clientStats = useClientProfile();
+
+  useEffect(() => {
+    if (!isProvider) void clientStats.load();
+  }, [isProvider, clientStats.load]);
   // GET /providers/status-current — synced into the profile cache on entry.
   // 'notset' = provider has no status yet (404-style, undocumented shape).
   const [statusSync, setStatusSync] = useState<'idle' | 'loading' | 'synced' | 'notset' | 'error'>('idle');
@@ -175,9 +192,9 @@ export default function ProfessionalInfoScreen() {
         <View style={{ padding: 20 }}>
           <View style={styles.statGrid}>
             {[
-              { label: t('prof_jobs_done'), value: CURRENT_USER.jobsDone, icon: 'check-circle' as const },
-              { label: t('prof_active_jobs'), value: CURRENT_USER.activeJobs, icon: 'clock' as const },
-              { label: t('prof_due_payments'), value: `€${CURRENT_USER.duePayments}`, icon: 'dollar-sign' as const },
+              { label: t('prof_jobs_done'), value: clientStats.profile?.total_completed_jobs ?? 0, icon: 'check-circle' as const },
+              { label: t('prof_active_jobs'), value: clientStats.profile?.total_active_jobs ?? 0, icon: 'clock' as const },
+              { label: t('cstat_spent'), value: formatAmountSpent(clientStats.profile?.total_amount_spent), icon: 'dollar-sign' as const },
             ].map((s) => (
               <View key={s.label} style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
                 <Feather name={s.icon} size={18} color={c.primary} />
@@ -406,13 +423,15 @@ export default function ProfessionalInfoScreen() {
                     <Text style={[styles.skillValue, { color: c.text }]}>{profile.provider_type}</Text>
                   </View>
                 </View>
-                <View style={[styles.skillRow, { borderTopWidth: 1, borderTopColor: c.border, paddingTop: 12, marginTop: 12 }]}>
-                  <MaterialCommunityIcons name="star-circle-outline" size={18} color={c.primary} />
-                  <View>
-                    <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>{t('prof_primary_skill')}</Text>
-                    <Text style={[styles.skillValue, { color: c.text }]}>{CURRENT_USER.primarySkill}</Text>
+                {profile.bio ? (
+                  <View style={[styles.skillRow, { borderTopWidth: 1, borderTopColor: c.border, paddingTop: 12, marginTop: 12 }]}>
+                    <MaterialCommunityIcons name="text-account" size={18} color={c.primary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>{t('prov_bio')}</Text>
+                      <Text style={[styles.skillValue, { color: c.text }]}>{profile.bio}</Text>
+                    </View>
                   </View>
-                </View>
+                ) : null}
               </View>
 
               <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('prof_metrics')}</Text>
@@ -448,9 +467,16 @@ export default function ProfessionalInfoScreen() {
               <Text style={[styles.sectionTitle, { color: c.mutedForeground }]}>{t('prof_history')}</Text>
             </View>
           }
-          data={PROVIDER_JOB_HISTORY}
+          data={JOB_HISTORY}
           keyExtractor={(j) => j.id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
+          ListEmptyComponent={
+            <EmptyState
+              icon="briefcase"
+              title={t('empty_job_history_title')}
+              subtitle={t('empty_job_history_sub')}
+            />
+          }
           renderItem={({ item }) => (
             <View style={[styles.historyRow, { borderBottomColor: c.border }]}>
               <View style={{ flex: 1 }}>

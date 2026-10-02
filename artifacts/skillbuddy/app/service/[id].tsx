@@ -11,7 +11,7 @@ import {
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import Animated, {
   FadeIn,
   useSharedValue,
@@ -22,8 +22,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { SERVICES, MOCK_REVIEWS } from '@/data/mockData';
-import { getServiceById } from '@/lib/serviceLookup';
 import { formatServicePrice } from '@/lib/servicePrice';
 import { sanitizeRichText } from '@/lib/sanitizeRichText';
 import { prepareMedia, pickThumbnail, type PreparedMedia } from '@/lib/serviceMedia';
@@ -31,7 +29,6 @@ import useServiceDetail from '@/hooks/useServiceDetail';
 import MediaVideo from '@/components/MediaVideo';
 import RatingStars from '@/components/RatingStars';
 import BrandedLoader from '@/components/BrandedLoader';
-import { useBookmarks } from '@/context/BookmarkContext';
 
 const W = Dimensions.get('window').width;
 
@@ -42,9 +39,8 @@ export default function ServiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isBookmarked, toggleBookmark } = useBookmarks();
   const { colors: c } = useTheme();
-  const { t, tCat } = useLanguage();
+  const { t } = useLanguage();
 
   // SERVER vs LOCAL routing: the detail endpoint takes an INTEGER path param,
   // so a purely numeric id is a real server service id (pushed from the
@@ -68,8 +64,9 @@ export default function ServiceDetailScreen() {
     }, [isServer, loadServer])
   );
 
-  const localService = (id ? getServiceById(id) : undefined) ?? SERVICES[0];
-  const reviews = MOCK_REVIEWS.slice(0, 4);
+  // Strict API: the local catalog fixtures (SERVICES / MOCK_REVIEWS) and the
+  // id-based local lookup were removed with the mock data. Non-numeric ids
+  // (old deep links into the removed local grid) render the not-found screen.
 
   const [activeTab, setActiveTab] = useState<Tab>('service_tab_about');
   const [selectedImage, setSelectedImage] = useState<number | null>(null);
@@ -83,16 +80,7 @@ export default function ServiceDetailScreen() {
   // Gallery sources: server media (sorted by `position`, URL-less entries
   // dropped, media_type resolved to image/video) or the local images. Video
   // entries must never reach an <Image>, so every entry carries its kind.
-  const localImages = [localService.image, ...(localService.images ?? [])].filter(Boolean).slice(0, 5);
-  const galleryItems: PreparedMedia[] = isServer
-    ? prepareMedia(serverService?.media)
-    : localImages.map((url, i) => ({
-        id: i,
-        kind: 'image' as const,
-        url,
-        position: i,
-        isThumbnail: i === 0,
-      }));
+  const galleryItems: PreparedMedia[] = prepareMedia(serverService?.media);
   // Cover = the entry flagged is_thumbnail (lowest position wins — assumption
   // flagged in lib/serviceMedia); tapping a thumbnail overrides it.
   const coverItem = pickThumbnail(galleryItems);
@@ -104,11 +92,10 @@ export default function ServiceDetailScreen() {
     selectedImage !== null ? index === selectedImage : galleryItems[index] === coverItem;
 
   // ── Server-derived display fields (never fabricate provider/rating/unit) ──
-  const displayTitle = isServer && serverService ? serverService.title : localService.title;
-  const displayCategory =
-    isServer && serverService ? serverService.category_name ?? '' : tCat(localService.categoryId);
-  const serverPrice = isServer && serverService ? formatServicePrice(serverService) : null;
-  const isActive = isServer && serverService ? serverService.is_active : true;
+  const displayTitle = serverService?.title ?? '';
+  const displayCategory = serverService?.category_name ?? '';
+  const serverPrice = serverService ? formatServicePrice(serverService) : null;
+  const isActive = serverService ? serverService.is_active : true;
 
   // Rich text: server fields may carry HTML — sanitized to clean text (RN has
   // no DOM; raw tags would render literally). Local mock descriptions are
@@ -122,7 +109,6 @@ export default function ServiceDetailScreen() {
       ? (serverService.inclusion_options ?? []).map((o) => o.name)
       : null;
 
-  const bookmarked = !isServer && isBookmarked(localService.id);
   const scrollY = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -163,7 +149,9 @@ export default function ServiceDetailScreen() {
   // 404 "Service not found." (live-verified; undocumented but real) — a dead
   // link must not look like a network failure, so it gets its own screen and
   // no retry (same id can never succeed).
-  if (isServer && svcdStatus === 'notfound') {
+  // A NON-NUMERIC id lands here too: the local catalog fixtures it used to
+  // resolve were removed (strict API), so it can never load.
+  if (!isServer || svcdStatus === 'notfound') {
     return (
       <View style={[styles.root, { backgroundColor: c.surface, paddingTop: insets.top + 8 }]}>
         <TouchableOpacity style={[styles.iconBtn, styles.stateBack]} onPress={() => router.back()}>
@@ -220,8 +208,8 @@ export default function ServiceDetailScreen() {
     );
   }
 
-  // By here the server path is either local, or ready with a non-null detail.
-  const svc = isServer ? serverService! : localService;
+  // By here the server path is ready with a non-null detail.
+  const svc = serverService!;
 
   return (
     <View style={[styles.root, { backgroundColor: c.surface }]}>
@@ -236,20 +224,10 @@ export default function ServiceDetailScreen() {
         <Animated.Text style={[styles.floatingTitle, { color: c.text }, floatingTitleStyle]} numberOfLines={1}>
           {displayTitle}
         </Animated.Text>
-        {/* Bookmarks are a local-catalog concept (the favorites API stores the
-            local Service shape) — hidden for server services rather than
-            storing a fabricated entry. */}
-        {!isServer ? (
-          <TouchableOpacity style={styles.iconBtn} onPress={() => toggleBookmark(localService)}>
-            <MaterialIcons
-              name={bookmarked ? 'bookmark' : 'bookmark-border'}
-              size={22}
-              color={bookmarked ? c.primary : '#1A1A1A'}
-            />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.iconBtn} />
-        )}
+        {/* Bookmark affordance removed with the local catalog: the stored
+            bookmark shape came from the local fixtures (favorites now join the
+            server catalog in the favorites screen). */}
+        <View style={styles.iconBtn} />
       </View>
 
       <Animated.ScrollView
@@ -337,57 +315,16 @@ export default function ServiceDetailScreen() {
               <Text style={[styles.categoryLabel, { color: c.mutedForeground }]}>{displayCategory}</Text>
             ) : null}
           </View>
-          {isServer ? (
-            serverPrice ? (
-              <View style={styles.priceBox}>
-                <Text style={[styles.price, { color: c.primary }]}>{serverPrice}</Text>
-              </View>
-            ) : null
-          ) : (
+          {serverPrice ? (
             <View style={styles.priceBox}>
-              <Text style={[styles.price, { color: c.primary }]}>${localService.price}</Text>
-              <Text style={[styles.priceUnit, { color: c.mutedForeground }]}>{t('service_per_hour')}</Text>
+              <Text style={[styles.price, { color: c.primary }]}>{serverPrice}</Text>
             </View>
-          )}
+          ) : null}
         </View>
 
-        {/* Provider row — the detail API provides no provider/rating data;
-            fabricated values are shown ONLY for local catalog entries. */}
-        {!isServer && (
-          <>
-            <View style={styles.providerRow}>
-              <View style={[styles.providerInitials, { backgroundColor: c.primaryLight }]}>
-                <Text style={[styles.providerInitialsText, { color: c.primary }]}>
-                  {localService.provider.name.charAt(0)}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.providerName, { color: c.text }]}>{localService.provider.name}</Text>
-                <Text style={[styles.providerSub, { color: c.mutedForeground }]}>
-                  {localService.provider.specialty}
-                </Text>
-              </View>
-              <RatingStars rating={localService.rating} size={14} />
-              <Text style={[styles.ratingCount, { color: c.mutedForeground }]}>
-                ({localService.reviewCount})
-              </Text>
-            </View>
-
-            {/* Stats row */}
-            <View style={[styles.statsRow, { backgroundColor: c.muted }]}>
-              {[
-                { label: t('service_stat_jobs_done'), value: `${localService.provider.jobsDone}+` },
-                { label: t('service_stat_satisfaction'), value: `${localService.provider.credibility}%` },
-                { label: t('service_stat_rating'), value: `${localService.rating}★` },
-              ].map((stat) => (
-                <View key={stat.label} style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: c.text }]}>{stat.value}</Text>
-                  <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{stat.label}</Text>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
+        {/* Provider row / fabricated rating stats removed with the local
+            catalog: the detail API provides no provider or rating data, so
+            nothing is shown rather than invented. */}
 
         {/* Tabs */}
         <View style={[styles.tabRow, { borderBottomColor: c.border }]}>
@@ -410,7 +347,7 @@ export default function ServiceDetailScreen() {
         {/* About tab */}
         {activeTab === 'service_tab_about' && (
           <Animated.View entering={FadeIn} style={{ paddingHorizontal: 20, paddingTop: 16 }}>
-            {isServer ? (
+            {
               <>
                 {serverDesc ? (
                   <>
@@ -440,34 +377,7 @@ export default function ServiceDetailScreen() {
                   </>
                 ) : null}
               </>
-            ) : (
-              <>
-                <Text style={[styles.sectionTitle, { color: c.text }]}>{t('service_description')}</Text>
-                <Text style={[styles.body2, { color: c.mutedForeground }]}>
-                  {localService.description ??
-                    t('service_default_desc', {
-                      provider: localService.provider.name,
-                      category: tCat(localService.categoryId),
-                      service: localService.title.toLowerCase(),
-                    })}
-                </Text>
-                <Text style={[styles.sectionTitle, { color: c.text, marginTop: 20 }]}>
-                  {t('service_whats_included')}
-                </Text>
-                {[
-                  t('service_include_1'),
-                  t('service_include_2'),
-                  t('service_include_3'),
-                  t('service_include_4'),
-                ].map((item) => (
-                    <View key={item} style={styles.includeRow}>
-                      <Feather name="check-circle" size={16} color={c.primary} />
-                      <Text style={[styles.includeText, { color: c.text }]}>{item}</Text>
-                    </View>
-                  )
-                )}
-              </>
-            )}
+            }
           </Animated.View>
         )}
 
@@ -504,34 +414,14 @@ export default function ServiceDetailScreen() {
         {/* Reviews tab */}
         {activeTab === 'service_tab_reviews' && (
           <Animated.View entering={FadeIn} style={{ paddingTop: 16 }}>
-            {isServer ? (
-              // The service endpoints carry no reviews — never show mock
-              // reviews for a real service.
-              <View style={styles.emptyGallery}>
-                <Feather name="message-square" size={36} color={c.border} />
-                <Text style={[styles.emptyGalleryText, { color: c.mutedForeground }]}>
-                  {t('svcd_no_reviews')}
-                </Text>
-              </View>
-            ) : (
-              reviews.map((review) => (
-                <View key={review.id} style={[styles.reviewCard, { backgroundColor: c.muted }]}>
-                  <View style={styles.reviewHeader}>
-                    <View style={[styles.reviewerInitials, { backgroundColor: c.primaryLight }]}>
-                      <Text style={[styles.reviewerInitialsText, { color: c.primary }]}>
-                        {review.reviewer.name.charAt(0)}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.reviewerName, { color: c.text }]}>{review.reviewer.name}</Text>
-                      <Text style={[styles.reviewDate, { color: c.mutedForeground }]}>{review.date}</Text>
-                    </View>
-                    <RatingStars rating={review.rating} size={13} />
-                  </View>
-                  <Text style={[styles.reviewText, { color: c.mutedForeground }]}>{review.comment}</Text>
-                </View>
-              ))
-            )}
+            {/* The service endpoints carry no reviews — never show mock
+                reviews. Honest empty state until a reviews API ships. */}
+            <View style={styles.emptyGallery}>
+              <Feather name="message-square" size={36} color={c.border} />
+              <Text style={[styles.emptyGalleryText, { color: c.mutedForeground }]}>
+                {t('svcd_no_reviews')}
+              </Text>
+            </View>
           </Animated.View>
         )}
       </Animated.ScrollView>
@@ -544,7 +434,7 @@ export default function ServiceDetailScreen() {
         <TouchableOpacity
           style={[styles.bookBtn, { backgroundColor: c.primary }, isServer && !isActive && { opacity: 0.4 }]}
           disabled={isServer && !isActive}
-          onPress={() => router.push(`/booking/${svc.id}` as any)}
+          onPress={() => router.push(`/job/post?serviceId=${svc.id}` as any)}
         >
           <Text style={styles.bookBtnText}>{t('book_now')}</Text>
         </TouchableOpacity>

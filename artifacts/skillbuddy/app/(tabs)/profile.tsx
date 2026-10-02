@@ -8,10 +8,10 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
-import { CURRENT_USER } from '@/data/mockData';
 import LogoImage from '@/components/LogoImage';
 import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
 import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
+import useProviderDashboard from '@/hooks/useProviderDashboard';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -34,6 +34,13 @@ export default function ProfileScreen() {
   // Client activity stats (GET /api/v1/clients/profile) — fetched only while
   // the CLIENT role is active so provider sessions never hit this endpoint.
   const clientStats = useClientProfile();
+  // Provider-side counts (GET /providers/dashboard) — the previous numbers
+  // came from the mock user; they are real now (0 until the dashboard loads).
+  const providerStats = useProviderDashboard();
+
+  React.useEffect(() => {
+    if (activeRole === 'PROVIDER') void providerStats.load();
+  }, [activeRole, providerStats.load]);
   const { activeRole: statsRole } = useRole();
   const statsLoadedFor = useRef<'CLIENT' | 'PROVIDER' | null>(null);
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
@@ -55,13 +62,13 @@ export default function ProfileScreen() {
 
   const toggleBtnRef = useRef<View>(null);
 
-  // Prefer the real signed-in user (from signup/login) for identity fields;
-  // fall back to mock data only for stats the auth flow doesn't provide yet
-  // (jobsDone/activeJobs/creditPoints) and as a last-resort safety net.
-  const firstName = user?.first_name || CURRENT_USER.firstName;
-  const lastName = user?.last_name || CURRENT_USER.lastName;
-  const name = user ? `${firstName} ${lastName}`.trim() : CURRENT_USER.name;
-  const email = user?.email || CURRENT_USER.email;
+  // Identity comes ONLY from the signed-in user (GET /users/me via AuthContext)
+  // — the mock-user fallbacks were removed, so a signed-out profile renders
+  // empty fields instead of someone else's name and email.
+  const firstName = user?.first_name ?? '';
+  const lastName = user?.last_name ?? '';
+  const name = `${firstName} ${lastName}`.trim();
+  const email = user?.email ?? '';
   const profilePicture = user?.profile_picture;
 
   /** Avatar edit button: with a picture → Change/Remove menu; without → straight to the picker. */
@@ -116,7 +123,7 @@ export default function ProfileScreen() {
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'heart', label: t('cf_title'), route: '/profile/favorites' },
-        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: t('profile_pts', { n: CURRENT_USER.creditPoints }) },
+        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: t('profile_pts', { n: user?.credit_points ?? 0 }) },
       ],
     },
     {
@@ -294,17 +301,17 @@ export default function ProfileScreen() {
               : activeRole === 'CLIENT'
                 ? {
                     label: t('profile_stat_jobs_done'),
-                    value: clientStats.profile?.total_completed_jobs ?? CURRENT_USER.jobsDone,
+                    value: clientStats.profile?.total_completed_jobs ?? 0,
                   }
-                : { label: t('profile_stat_jobs_done'), value: CURRENT_USER.jobsDone },
+                : { label: t('profile_stat_jobs_done'), value: providerStats.summary?.total_jobs_completed ?? 0 },
             activeRole === 'CLIENT' && clientStats.status === 'loading'
               ? { label: t('profile_stat_active_jobs'), loading: true }
               : activeRole === 'CLIENT'
                 ? {
                     label: t('profile_stat_active_jobs'),
-                    value: clientStats.profile?.total_active_jobs ?? CURRENT_USER.activeJobs,
+                    value: clientStats.profile?.total_active_jobs ?? 0,
                   }
-                : { label: t('profile_stat_active_jobs'), value: CURRENT_USER.activeJobs },
+                : { label: t('profile_stat_active_jobs'), value: providerStats.summary?.total_jobs_inprogress ?? 0 },
             activeRole === 'CLIENT' && clientStats.status === 'loading'
               ? { label: t('cstat_spent'), loading: true }
               : activeRole === 'CLIENT'
@@ -312,7 +319,7 @@ export default function ProfileScreen() {
                     label: t('cstat_spent'),
                     value: formatAmountSpent(clientStats.profile?.total_amount_spent),
                   }
-                : { label: t('profile_stat_credit_pts'), value: CURRENT_USER.creditPoints },
+                : { label: t('profile_stat_credit_pts'), value: user?.credit_points ?? 0 },
           ].map((stat, i) => (
             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
               {'loading' in stat && stat.loading ? (

@@ -22,12 +22,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
-import { CATEGORIES, SERVICES } from '@/data/mockData';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 import { useLanguage } from '@/context/LanguageContext';
-import ServiceCard from '@/components/ServiceCard';
 import ServerServiceRow from '@/components/ServerServiceRow';
 import useServices from '@/hooks/useServices';
+import useCategories from '@/hooks/useCategories';
 import { parseServicePrice } from '@/lib/servicePrice';
 
 const ALL_ID = '__all__';
@@ -36,7 +35,7 @@ export default function ServicesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t, tCat } = useLanguage();
+  const { t } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -60,12 +59,27 @@ export default function ServicesScreen() {
     }, [loadServices]),
   );
 
-  // Same server-backed-with-local-fallback discipline as the categories
-  // screen: live services win the moment the backend seeds them; until then
-  // the curated local catalog keeps this tab working (the API currently
-  // returns [], so without the fallback the whole tab would be empty).
-  const useServer = (serverServices?.length ?? 0) > 0;
-  const firstLoad = svcStatus === 'loading' && serverServices == null;
+  // Category chips come from the SAME public API (GET /api/v1/categories) —
+  // no curated local list. STRICT API-ONLY: an empty catalog renders an
+  // honest empty state; the local-fallback path was removed with the mock
+  // data (the API currently returns [], and that is a real server state).
+  const {
+    status: catStatus,
+    categories: serverCategories,
+    load: loadCategories,
+  } = useCategories();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadCategories();
+    }, [loadCategories]),
+  );
+
+  const firstLoad =
+    (svcStatus === 'loading' && serverServices == null) ||
+    (catStatus === 'loading' && serverCategories == null);
+  const catalogEmpty =
+    svcStatus === 'ready' && (serverServices?.length ?? 0) === 0;
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
 
@@ -75,23 +89,8 @@ export default function ServicesScreen() {
     if (filters.categoryId) setSelectedCatId(filters.categoryId);
   }, [filters.categoryId]);
 
-  // Live-filter services by category, search query, AND the bottom-sheet
-  // filters (price range, minimum rating) — the Apply button now genuinely
-  // changes what's shown here instead of just closing the sheet.
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return SERVICES.filter((s) => {
-      const matchCat = selectedCatId === ALL_ID || s.categoryId === selectedCatId;
-      const matchQ =
-        !q ||
-        s.title.toLowerCase().includes(q) ||
-        s.category.toLowerCase().includes(q) ||
-        s.provider.name.toLowerCase().includes(q);
-      const matchPrice = s.price >= filters.minPrice && s.price <= filters.maxPrice;
-      const matchRating = !filters.minRating || s.rating >= filters.minRating;
-      return matchCat && matchQ && matchPrice && matchRating;
-    });
-  }, [query, selectedCatId, filters]);
+  // Live-filter services by search query AND the bottom-sheet filters
+  // (price range, minimum rating) — applied to the SERVER-backed list only.
 
   /**
    * Live-catalog filtering — CLIENT-SIDE by necessity: GET /api/v1/services
@@ -108,10 +107,11 @@ export default function ServicesScreen() {
    *                 the screen shows a note instead of silently hiding items
    */
   const filteredServer = useMemo(() => {
-    if (!useServer) return [];
     const q = query.trim().toLowerCase();
     const chip =
-      selectedCatId === ALL_ID ? null : CATEGORIES.find((cat) => cat.id === selectedCatId);
+      selectedCatId === ALL_ID
+        ? null
+        : (serverCategories ?? []).find((cat) => String(cat.id) === selectedCatId);
     return (serverServices ?? []).filter((s) => {
       const matchQ =
         !q ||
@@ -120,17 +120,17 @@ export default function ServicesScreen() {
         (s.category_name ?? '').toLowerCase().includes(q);
       const matchCat =
         !chip ||
-        String(s.category_id) === chip.id ||
-        (s.category_name ?? '').trim().toLowerCase() === chip.name.trim().toLowerCase();
+        String(s.category_id) === String(chip.id) ||
+        (s.category_name ?? '').trim().toLowerCase() === (chip.name ?? '').trim().toLowerCase();
       const from = parseServicePrice(s.price_from);
       const matchPrice = from === null || (from >= filters.minPrice && from <= filters.maxPrice);
       return matchQ && matchCat && matchPrice;
     });
-  }, [useServer, serverServices, query, selectedCatId, filters.minPrice, filters.maxPrice]);
+  }, [serverCategories, serverServices, query, selectedCatId, filters.minPrice, filters.maxPrice]);
 
   /** The live API exposes no rating, so a min-rating filter can't apply to it. */
-  const ratingFilterUnavailable = useServer && !!filters.minRating;
-  const resultCount = useServer ? filteredServer.length : filtered.length;
+  const ratingFilterUnavailable = !!filters.minRating && !catalogEmpty;
+  const resultCount = filteredServer.length;
 
   const handleCategoryPress = (id: string) => {
     setSelectedCatId((prev) => (prev === id ? ALL_ID : id));
@@ -145,7 +145,8 @@ export default function ServicesScreen() {
   const activeCategoryName =
     selectedCatId === ALL_ID
       ? t('services_all_services')
-      : (tCat(CATEGORIES.find((cat) => cat.id === selectedCatId)?.id ?? '') || t('services_title'));
+      : (serverCategories?.find((cat) => String(cat.id) === selectedCatId)?.name ??
+        t('services_title'));
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -236,11 +237,12 @@ export default function ServicesScreen() {
               </Text>
             </TouchableOpacity>
 
-            {CATEGORIES.map((cat) => {
-              const active = selectedCatId === cat.id;
+            {(serverCategories ?? []).map((cat) => {
+              const id = String(cat.id);
+              const active = selectedCatId === id;
               return (
                 <TouchableOpacity
-                  key={cat.id}
+                  key={id}
                   style={[
                     styles.catChip,
                     {
@@ -248,16 +250,16 @@ export default function ServicesScreen() {
                       borderColor: active ? c.primary : c.border,
                     },
                   ]}
-                  onPress={() => handleCategoryPress(cat.id)}
+                  onPress={() => handleCategoryPress(id)}
                   activeOpacity={0.8}
                 >
                   <MaterialCommunityIcons
-                    name={cat.iconName as any}
+                    name="tag"
                     size={14}
                     color={active ? '#FFF' : c.primary}
                   />
                   <Text style={[styles.catChipText, { color: active ? '#FFF' : c.text }]}>
-                    {tCat(cat.id)}
+                    {cat.name}
                   </Text>
                 </TouchableOpacity>
               );
@@ -275,8 +277,8 @@ export default function ServicesScreen() {
           </Text>
         </View>
 
-        {/* ── Live-catalog states: loading / error / local fallback ─────────── */}
-        {!useServer && svcStatus === 'error' ? (
+        {/* ── Live-catalog states: loading / error (strict API, no fallback) ── */}
+        {svcStatus === 'error' && serverServices == null ? (
           <View style={[styles.stateBanner, { backgroundColor: c.card, borderColor: c.destructive }]}>
             <Feather name="wifi-off" size={16} color={c.destructive} />
             <Text style={[styles.stateText, { color: c.destructive }]}>{t('services_load_error')}</Text>
@@ -289,10 +291,6 @@ export default function ServicesScreen() {
             <ActivityIndicator size="small" color={c.primary} />
             <Text style={[styles.stateText, { color: c.mutedForeground }]}>{t('services_loading')}</Text>
           </View>
-        ) : !useServer && svcStatus === 'ready' ? (
-          <Text style={[styles.fallbackNote, { color: c.mutedForeground }]}>
-            {t('services_local_fallback')}
-          </Text>
         ) : null}
 
         {ratingFilterUnavailable ? (
@@ -302,7 +300,17 @@ export default function ServicesScreen() {
         ) : null}
 
         {/* ── Empty state ──────────────────────────────────────────────────── */}
-        {resultCount === 0 && (
+        {catalogEmpty ? (
+          <View style={styles.emptyWrap}>
+            <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
+              <Feather name="grid" size={32} color={c.primary} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: c.text }]}>{t('services_empty_title')}</Text>
+            <Text style={[styles.emptySub, { color: c.mutedForeground }]}>
+              {t('services_empty_sub')}
+            </Text>
+          </View>
+        ) : resultCount === 0 && (
           <View style={styles.emptyWrap}>
             <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
               <Feather name="search" size={32} color={c.primary} />
@@ -335,34 +343,20 @@ export default function ServicesScreen() {
         )}
 
         {/* ── Services list ─────────────────────────────────────────────────── */}
-        {/* Live rows while the API has data (cover-fit thumbnails, formatted
-            prices, no fabricated provider/rating); otherwise the curated
-            local cards exactly as before. */}
-        {useServer
-          ? filteredServer.length > 0 && (
-              <View style={styles.servicesList}>
-                {filteredServer.map((item, index) => (
-                  <Animated.View
-                    key={`svc_${item.id}`}
-                    entering={FadeInDown.delay(index * 50).duration(300)}
-                  >
-                    <ServerServiceRow service={item} />
-                  </Animated.View>
-                ))}
-              </View>
-            )
-          : filtered.length > 0 && (
-              <View style={styles.servicesList}>
-                {filtered.map((item, index) => (
-                  <Animated.View
-                    key={item.id}
-                    entering={FadeInDown.delay(index * 50).duration(300)}
-                  >
-                    <ServiceCard service={item} variant="list" />
-                  </Animated.View>
-                ))}
-              </View>
-            )}
+        {/* Server rows only — the local-card fallback was removed with the
+            mock data (strict API). */}
+        {filteredServer.length > 0 && (
+          <View style={styles.servicesList}>
+            {filteredServer.map((item, index) => (
+              <Animated.View
+                key={`svc_${item.id}`}
+                entering={FadeInDown.delay(index * 50).duration(300)}
+              >
+                <ServerServiceRow service={item} />
+              </Animated.View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </View>
   );

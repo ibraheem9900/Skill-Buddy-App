@@ -2,7 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { buildListJobsQuery } from '@/lib/jobList';
 import { isValidJobId } from '@/lib/jobPublish';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse } from '@/types';
 
 export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
 
@@ -306,6 +306,24 @@ export const authApi = {
    * endpoint, Bearer auto-attached.
    */
   getCertifications: () => api.get<CertificationListResponse>('/api/v1/certifications'),
+  /**
+   * GET /api/v1/wallet/credits — the signed-in CLIENT's credit wallet:
+   * { wallet: { id, client_id, balance }, transactions: [...] }. `balance`
+   * and each transaction's `points`/`balance_after` are INTEGER point counts
+   * (live schema). Only 200 is documented; a signed-in user without a credit
+   * wallet yet is NOT specified — callers handle a missing/empty shape as
+   * zeros rather than guessing. Protected endpoint, Bearer auto-attached.
+   */
+  getWalletCredits: () => api.get<CreditWalletDetailResponse>('/api/v1/wallet/credits'),
+  /**
+   * GET /api/v1/wallet/provider — the signed-in PROVIDER's money wallet:
+   * { wallet: { id, provider_id, balance }, transactions: [...] }.
+   * `balance`, `amount` and `balance_after` are decimal STRINGS on the wire
+   * (live schema) — parse/format before display. `transaction_type` is
+   * ESCROW_RELEASE | ADJUSTMENT. Only 200 is documented. Protected endpoint,
+   * Bearer auto-attached.
+   */
+  getProviderWallet: () => api.get<ProviderWalletDetailResponse>('/api/v1/wallet/provider'),
   /**
    * GET /api/v1/categories — the full categories list (no parameters, no
    * pagination per the live OpenAPI). VERIFIED LIVE: PUBLIC (no auth header

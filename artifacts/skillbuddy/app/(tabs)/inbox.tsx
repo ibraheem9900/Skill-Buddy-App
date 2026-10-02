@@ -6,8 +6,13 @@ import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CHAT_THREADS } from '@/data/mockData';
+import type { ChatThread } from '@/types';
 import EmptyState from '@/components/EmptyState';
+
+// No chat backend exists yet (the live API exposes no chat/threads/messages
+// endpoints), so the inbox is honestly empty until one ships. The thread
+// rendering below stays in place so real data can flow straight into it.
+const CHAT_THREADS: ChatThread[] = [];
 
 export default function InboxScreen() {
   const insets = useSafeAreaInsets();
