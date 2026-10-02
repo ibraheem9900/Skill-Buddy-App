@@ -171,6 +171,33 @@ jobs:
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Resolved release tag: ${TAG} (app version ${APP_VERSION})"
 
+      # ── In-app update check support ─────────────────────────────────────────
+      # The app compares the installed APK's build number with the latest GitHub
+      # release (lib/appUpdate.ts). Stamp this run's number into the app config so
+      # the shipped APK can identify itself: the embedded config then carries
+      # `extra.buildRun`, while OTA manifests (published by the ota-update job
+      # from the committed app.json, which never contains buildRun) do not —
+      # that is how the app tells the installed APK apart from a JS update.
+      # Uncommitted changes are included in EAS builds; `cli.requireCommit` is
+      # explicitly false in eas.json so this stamp is never rejected.
+      - name: Stamp build number into app config (in-app update check)
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const file = path.join(process.env.APP_DIR, 'app.json');
+          const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+          const buildRun = Number(process.env.GITHUB_RUN_NUMBER);
+          if (!Number.isInteger(buildRun) || buildRun <= 0) {
+            console.error('::error title=Missing run number::GITHUB_RUN_NUMBER is not a positive integer');
+            process.exit(1);
+          }
+          config.expo.extra = { ...(config.expo.extra ?? {}), buildRun };
+          fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n');
+          console.log(`Stamped ${file} with extra.buildRun=${buildRun}`);
+          NODE
+
       # Per https://docs.expo.dev/build/building-on-ci/, `--no-wait` is the flag that
       # exits early, so `--non-interactive` WITHOUT it waits for the build to finish.
       # `--json` then prints the finished build object on stdout, which we parse

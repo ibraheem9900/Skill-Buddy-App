@@ -38,6 +38,7 @@ import useCategories from '@/hooks/useCategories';
 import useSelectedLocation from '@/hooks/useSelectedLocation';
 import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
+import UpdateBanner from '@/components/UpdateBanner';
 
 // No notifications backend exists yet (the API exposes no /notifications
 // endpoint), so the header bell never shows an unread badge — the previous
@@ -239,6 +240,11 @@ export default function HomeScreen() {
           />
         }
       >
+        {/* "Update available" banner — compares the installed APK's stamped
+            build with the latest GitHub release; hidden while up to date or
+            after the user dismisses that release. Android release builds only. */}
+        <UpdateBanner />
+
         {/* Section heading — no "Welcome back, Name" greeting, per request */}
         <Animated.View entering={FadeInDown.delay(20).duration(380)} style={[styles.section, { paddingHorizontal: 16 }]}>
           <Text style={[styles.welcomeText, { color: c.text }]}>

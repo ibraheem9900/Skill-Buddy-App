@@ -1672,6 +1672,12 @@ const en = {
   empty_job_history_title: 'No job history yet',
   empty_job_history_sub: 'Completed jobs will appear here.',
   prov_bio: 'About',
+
+  // ── App update banner ──────────────────────────────────────────────────────
+  update_available_title: 'Update available',
+  update_available_body: 'SkillBuddy {version} is ready to install with the latest fixes and improvements.',
+  update_download: 'Update now',
+  update_later: 'Later',
 };
 
 export default en;

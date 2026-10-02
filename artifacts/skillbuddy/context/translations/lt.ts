@@ -1624,6 +1624,12 @@ const lt = {
   empty_job_history_title: 'Darbų istorijos dar nėra',
   empty_job_history_sub: 'Atlikti darbai atsiras čia.',
   prov_bio: 'Apie mane',
+
+  // ── Programos atnaujinimo juosta ───────────────────────────────────────────
+  update_available_title: 'Galimas atnaujinimas',
+  update_available_body: 'SkillBuddy {version} paruošta įdiegti su naujausiais pataisymais ir patobulinimais.',
+  update_download: 'Atnaujinti dabar',
+  update_later: 'Vėliau',
 };
 
 
