@@ -392,6 +392,14 @@ const NEW_ATTACH_RM_KEYS = [
 ];
 
 /** Keys the update screen reuses from the create/shared dictionaries. */
+/** Keys added for the in-app update banner (Home → "Update available"). */
+const NEW_UPDATE_BANNER_KEYS = [
+  'update_available_title',
+  'update_available_body',
+  'update_download',
+  'update_later',
+];
+
 const REUSED_KEYS = [
   'addr_c_country',
   'addr_c_county',
@@ -472,6 +480,7 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_BLOCKER_KEYS,
     ...NEW_ATTACH_KEYS,
     ...NEW_ATTACH_RM_KEYS,
+    ...NEW_UPDATE_BANNER_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -500,6 +509,7 @@ const allNewKeys = [
   ...NEW_BLOCKER_KEYS,
   ...NEW_ATTACH_KEYS,
   ...NEW_ATTACH_RM_KEYS,
+  ...NEW_UPDATE_BANNER_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

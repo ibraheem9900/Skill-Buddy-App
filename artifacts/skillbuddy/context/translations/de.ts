@@ -1624,6 +1624,12 @@ const de = {
   empty_job_history_title: 'Noch kein Auftragsverlauf',
   empty_job_history_sub: 'Abgeschlossene Aufträge erscheinen hier.',
   prov_bio: 'Über mich',
+
+  // ── App-Update-Banner ──────────────────────────────────────────────────────
+  update_available_title: 'Update verfügbar',
+  update_available_body: 'SkillBuddy {version} steht mit den neuesten Korrekturen und Verbesserungen zur Installation bereit.',
+  update_download: 'Jetzt aktualisieren',
+  update_later: 'Später',
 };
 
 

@@ -1624,6 +1624,12 @@ const et = {
   empty_job_history_title: 'Tööde ajalugu puudub',
   empty_job_history_sub: 'Lõpetatud tööd ilmuvad siia.',
   prov_bio: 'Minust',
+
+  // ── Rakenduse uuenduse riba ────────────────────────────────────────────────
+  update_available_title: 'Uuendus saadaval',
+  update_available_body: 'SkillBuddy {version} on valmis installimiseks koos uusimate paranduste ja täiustustega.',
+  update_download: 'Uuenda kohe',
+  update_later: 'Hiljem',
 };
 
 
