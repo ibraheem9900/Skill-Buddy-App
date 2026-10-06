@@ -4,7 +4,13 @@ import { buildListJobsQuery } from '@/lib/jobList';
 import { isValidJobId } from '@/lib/jobPublish';
 import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse } from '@/types';
 
-export const BASE_URL = 'https://api.skillbuddy.zeyshan.com';
+// Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
+// build time and is supplied by Infisical via `infisical run`, so the value never
+// has to live in a local .env. The literal below is only the fallback for builds
+// that run without the variable (e.g. plain `expo start` with no secrets loaded);
+// it is a public hostname, not a secret.
+export const BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.skillbuddy.zeyshan.com';
 
 export const ACCESS_TOKEN_KEY = 'sb_access_token';
 export const REFRESH_TOKEN_KEY = 'sb_refresh_token';
