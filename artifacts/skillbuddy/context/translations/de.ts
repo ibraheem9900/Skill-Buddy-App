@@ -1630,6 +1630,30 @@ const de = {
   update_available_body: 'SkillBuddy {version} steht mit den neuesten Korrekturen und Verbesserungen zur Installation bereit.',
   update_download: 'Jetzt aktualisieren',
   update_later: 'Später',
+  // ── Post a Job: service picker + custom scheduling ─────────────────────────
+  post_sched_custom: 'Eigenes Datum & Uhrzeit',
+  post_sched_title: 'Datum & Uhrzeit wählen',
+  post_sched_hour: 'Stunde',
+  post_sched_minute: 'Minute',
+  post_sched_am: 'Vorm.',
+  post_sched_pm: 'Nachm.',
+  post_sched_apply: 'Übernehmen',
+  post_sched_prev_month: 'Vorheriger Monat',
+  post_sched_next_month: 'Nächster Monat',
+  post_sched_months: 'Januar,Februar,März,April,Mai,Juni,Juli,August,September,Oktober,November,Dezember',
+  post_sched_weekdays: 'Mo,Di,Mi,Do,Fr,Sa,So',
+  post_sched_err_pick: 'Bitte Datum und Uhrzeit wählen.',
+  post_sched_err_early: 'Buchungen müssen mindestens {n} Minuten in der Zukunft liegen.',
+  post_sched_err_late: 'Buchungen sind bis zu {n} Tage im Voraus möglich.',
+  post_sched_window_hint: 'Buchbar von {min} Minuten bis {max} Tage im Voraus.',
+  post_service_pick: 'Service auswählen',
+  post_service_pick_sub: 'Zuerst die Kategorie, dann der Service',
+  post_service_meta_error: 'Die Servicedetails konnten nicht geladen werden.',
+  post_svc_change: 'Ändern',
+  post_svc_pick_title: 'Service auswählen',
+  post_svc_pick_category: 'Kategorie auswählen',
+  post_svc_back_categories: 'Zurück zu den Kategorien',
+
 };
 
 

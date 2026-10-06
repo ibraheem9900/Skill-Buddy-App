@@ -1630,6 +1630,30 @@ const et = {
   update_available_body: 'SkillBuddy {version} on valmis installimiseks koos uusimate paranduste ja täiustustega.',
   update_download: 'Uuenda kohe',
   update_later: 'Hiljem',
+  // ── Post a Job: service picker + custom scheduling ─────────────────────────
+  post_sched_custom: 'Kohandatud kuupäev ja kellaaeg',
+  post_sched_title: 'Vali kuupäev ja kellaaeg',
+  post_sched_hour: 'Tund',
+  post_sched_minute: 'Minut',
+  post_sched_am: 'EL',
+  post_sched_pm: 'PL',
+  post_sched_apply: 'Kinnita',
+  post_sched_prev_month: 'Eelmine kuu',
+  post_sched_next_month: 'Järgmine kuu',
+  post_sched_months: 'jaanuar,veebruar,märts,aprill,mai,juuni,juuli,august,september,oktoober,november,detsember',
+  post_sched_weekdays: 'E,T,K,N,R,L,P',
+  post_sched_err_pick: 'Vali kuupäev ja kellaaeg.',
+  post_sched_err_early: 'Broneering peab algama vähemalt {n} minuti pärast.',
+  post_sched_err_late: 'Broneerida saab kuni {n} päeva ette.',
+  post_sched_window_hint: 'Broneerimine on võimalik {min} minuti kuni {max} päeva ette.',
+  post_service_pick: 'Vali teenus',
+  post_service_pick_sub: 'Esmalt kategooria, siis teenus',
+  post_service_meta_error: 'Teenuse andmeid ei õnnestunud laadida.',
+  post_svc_change: 'Muuda',
+  post_svc_pick_title: 'Vali teenus',
+  post_svc_pick_category: 'Vali kategooria',
+  post_svc_back_categories: 'Tagasi kategooriate juurde',
+
 };
 
 

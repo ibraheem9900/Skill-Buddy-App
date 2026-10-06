@@ -1630,6 +1630,30 @@ const lv = {
   update_available_body: 'SkillBuddy {version} ir gatavs instalēšanai ar jaunākajiem labojumiem un uzlabojumiem.',
   update_download: 'Atjaunināt tagad',
   update_later: 'Vēlāk',
+  // ── Post a Job: service picker + custom scheduling ─────────────────────────
+  post_sched_custom: 'Individuāls datums un laiks',
+  post_sched_title: 'Izvēlieties datumu un laiku',
+  post_sched_hour: 'Stunda',
+  post_sched_minute: 'Minūte',
+  post_sched_am: 'Priekšp.',
+  post_sched_pm: 'Pēcp.',
+  post_sched_apply: 'Apstiprināt',
+  post_sched_prev_month: 'Iepriekšējais mēnesis',
+  post_sched_next_month: 'Nākamais mēnesis',
+  post_sched_months: 'janvāris,februāris,marts,aprīlis,maijs,jūnijs,jūlijs,augusts,septembris,oktobris,novembris,decembris',
+  post_sched_weekdays: 'Pr,Ot,Tr,Ce,Pk,Se,Sv',
+  post_sched_err_pick: 'Izvēlieties datumu un laiku.',
+  post_sched_err_early: 'Rezervācijai jāsākas vismaz pēc {n} minūtēm.',
+  post_sched_err_late: 'Rezervēt var līdz {n} dienām uz priekšu.',
+  post_sched_window_hint: 'Rezervēt var no {min} minūtēm līdz {max} dienām uz priekšu.',
+  post_service_pick: 'Izvēlieties pakalpojumu',
+  post_service_pick_sub: 'Vispirms kategorija, tad pakalpojums',
+  post_service_meta_error: 'Pakalpojuma informāciju neizdevās ielādēt.',
+  post_svc_change: 'Mainīt',
+  post_svc_pick_title: 'Izvēlieties pakalpojumu',
+  post_svc_pick_category: 'Izvēlieties kategoriju',
+  post_svc_back_categories: 'Atpakaļ uz kategorijām',
+
 };
 
 

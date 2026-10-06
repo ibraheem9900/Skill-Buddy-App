@@ -31,6 +31,7 @@
     "./jobBlocker.test.ts",
     "./jobAttachment.test.ts",
     "./appUpdate.test.ts",
+    "./jobSchedule.test.ts",
     "./translations.test.ts"
   ]
 }

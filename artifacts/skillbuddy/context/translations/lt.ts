@@ -1630,6 +1630,30 @@ const lt = {
   update_available_body: 'SkillBuddy {version} paruošta įdiegti su naujausiais pataisymais ir patobulinimais.',
   update_download: 'Atnaujinti dabar',
   update_later: 'Vėliau',
+  // ── Post a Job: service picker + custom scheduling ─────────────────────────
+  post_sched_custom: 'Individuali data ir laikas',
+  post_sched_title: 'Pasirinkite datą ir laiką',
+  post_sched_hour: 'Valanda',
+  post_sched_minute: 'Minutė',
+  post_sched_am: 'Priešp.',
+  post_sched_pm: 'Popiet',
+  post_sched_apply: 'Patvirtinti',
+  post_sched_prev_month: 'Ankstesnis mėnuo',
+  post_sched_next_month: 'Kitas mėnuo',
+  post_sched_months: 'sausis,vasaris,kovas,balandis,gegužė,birželis,liepa,rugpjūtis,rugsėjis,spalis,lapkritis,gruodis',
+  post_sched_weekdays: 'Pr,An,Tr,Kt,Pn,Št,Sv',
+  post_sched_err_pick: 'Pasirinkite datą ir laiką.',
+  post_sched_err_early: 'Rezervacija turi prasidėti ne anksčiau kaip po {n} minučių.',
+  post_sched_err_late: 'Rezervuoti galima iki {n} dienų į priekį.',
+  post_sched_window_hint: 'Rezervuoti galima nuo {min} minučių iki {max} dienų į priekį.',
+  post_service_pick: 'Pasirinkite paslaugą',
+  post_service_pick_sub: 'Pirmiau kategorija, tada paslauga',
+  post_service_meta_error: 'Paslaugos informacijos įkelti nepavyko.',
+  post_svc_change: 'Keisti',
+  post_svc_pick_title: 'Pasirinkite paslaugą',
+  post_svc_pick_category: 'Pasirinkite kategoriją',
+  post_svc_back_categories: 'Atgal į kategorijas',
+
 };
 
 

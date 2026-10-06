@@ -400,6 +400,32 @@ const NEW_UPDATE_BANNER_KEYS = [
   'update_later',
 ];
 
+/** Keys added for the Post-a-Job service picker and custom scheduler. */
+const NEW_POST_FLOW_KEYS = [
+  'post_sched_custom',
+  'post_sched_title',
+  'post_sched_hour',
+  'post_sched_minute',
+  'post_sched_am',
+  'post_sched_pm',
+  'post_sched_apply',
+  'post_sched_prev_month',
+  'post_sched_next_month',
+  'post_sched_months',
+  'post_sched_weekdays',
+  'post_sched_err_pick',
+  'post_sched_err_early',
+  'post_sched_err_late',
+  'post_sched_window_hint',
+  'post_service_pick',
+  'post_service_pick_sub',
+  'post_service_meta_error',
+  'post_svc_change',
+  'post_svc_pick_title',
+  'post_svc_pick_category',
+  'post_svc_back_categories',
+];
+
 const REUSED_KEYS = [
   'addr_c_country',
   'addr_c_county',
@@ -481,6 +507,7 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_ATTACH_KEYS,
     ...NEW_ATTACH_RM_KEYS,
     ...NEW_UPDATE_BANNER_KEYS,
+    ...NEW_POST_FLOW_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -510,6 +537,7 @@ const allNewKeys = [
   ...NEW_ATTACH_KEYS,
   ...NEW_ATTACH_RM_KEYS,
   ...NEW_UPDATE_BANNER_KEYS,
+  ...NEW_POST_FLOW_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

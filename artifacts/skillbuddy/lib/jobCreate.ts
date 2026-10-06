@@ -37,6 +37,12 @@ export interface JobFormValues {
   dateKey: 'today' | 'tomorrow' | 'weekend';
   /** Which time chip is selected, e.g. '11:00 AM'. */
   timeSlot: string;
+  /**
+   * CUSTOM schedule (the date/time picker) as an ISO 8601 UTC string.
+   * When set it wins over dateKey + timeSlot, so the fast path and the custom
+   * path share one `scheduled_at` contract.
+   */
+  scheduledAtIso?: string | null;
   expectedHours: number;
   /** Numeric ids from the PUBLIC geo endpoints. */
   countryId: number | null;
@@ -136,6 +142,26 @@ export function resolveScheduledAt(
   return target.toISOString();
 }
 
+/**
+ * The one `scheduled_at` the form sends: the CUSTOM picker's ISO value when
+ * the user chose a custom slot, otherwise the date + time chips.
+ *
+ * A custom value that is not a parseable ISO 8601 date falls back to the chip
+ * pair rather than shipping `null` to the API (which would be a 422) — the
+ * screen independently blocks submission for an out-of-window slot.
+ */
+export function resolveJobScheduledAt(
+  values: Pick<JobFormValues, 'dateKey' | 'timeSlot' | 'scheduledAtIso'>,
+  now: Date = new Date()
+): string {
+  const custom = values.scheduledAtIso;
+  if (typeof custom === 'string' && custom.trim().length > 0) {
+    const parsed = new Date(custom);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return resolveScheduledAt(values.dateKey, values.timeSlot, now);
+}
+
 /** Compose a human-readable address line when the user left it blank. */
 export function composeFormattedAddress(
   parts: Array<string | null | undefined>
@@ -174,7 +200,7 @@ export function buildCreateJobRequest(
   const requestType: JobRequestType =
     values.requestType === 'urgent' ? 'URGENT' : 'REGULAR';
 
-  const scheduledAt = resolveScheduledAt(values.dateKey, values.timeSlot, now);
+  const scheduledAt = resolveJobScheduledAt(values, now);
 
   const address: JobAddressCreate = {
     country_id: values.countryId,

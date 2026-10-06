@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,33 +11,65 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import Animated, {
+  FadeInUp,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { useAppAlert } from '@/context/AlertModalContext';
 import InlineLoader from '@/components/InlineLoader';
+import BottomSheet from '@/components/BottomSheet';
+import DateTimeSheet from '@/components/DateTimeSheet';
+import ServicePickerSheet from '@/components/ServicePickerSheet';
 import { authApi } from '@/services/api';
-import useServices from '@/hooks/useServices';
 import useCountries from '@/hooks/useCountries';
+import useCategories from '@/hooks/useCategories';
+import useServiceDetail from '@/hooks/useServiceDetail';
 import { invalidateJobList } from '@/hooks/useJobList';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
 import { jobStatusLabelKey } from '@/lib/jobList';
 import {
+  BOOKING_MAX_LEAD_DAYS,
+  BOOKING_MIN_LEAD_MINUTES,
+  bookingWindow,
+  formatScheduleLabel,
+  isWithinBookingWindow,
+  splitTable,
+} from '@/lib/jobSchedule';
+import {
   buildCreateJobRequest,
   mapValidationErrors,
   type JobFormField,
 } from '@/lib/jobCreate';
-import type { AddressRegionResponse, JobResponse } from '@/types';
+import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/types';
 
 /**
  * Post a Job — creates a REAL job via POST /api/v1/jobs.
  *
+ * SERVICE (Issue 1): the screen never renders a flat list of every service.
+ * When the user arrives from "Book now" (/job/post?serviceId=123) that exact
+ * service is locked in and shown as a read-only card; the general entry point
+ * (/job/post from the Jobs tab) opens a CASCADING picker — category first,
+ * then only that category's services, both from the live API.
+ *
+ * SCHEDULE (Issues 2 & 5): the Today / Tomorrow / This Weekend chips plus the
+ * fixed time chips remain the fast path, unchanged. A "Custom date & time"
+ * action opens a real month calendar (days outside the booking window are
+ * greyed out and not tappable) with a specific hour/minute clock, and the
+ * chosen slot is what `scheduled_at` carries.
+ *
  * Every value is mapped to the live JobCreate contract:
- *   service picker  → service_id (+ category_id from the chosen service)
+ *   service picker  → service_id (+ category_id from that service)
  *   title/description → title (3..150) / description
- *   urgency chips   → request_type URGENT | REGULAR
- *   date+time chips → milestones[0].scheduled_at (ISO 8601 UTC)
+ *   urgency cards   → request_type URGENT | REGULAR
+ *   date+time       → milestones[0].scheduled_at (ISO 8601 UTC)
  *   hours stepper   → milestones[0].expected_hours (number)
  *   geo pickers + address fields → address{ country_id, county_id, city_id, ... }
  *   Post Job / Save as draft → is_draft false / true
@@ -66,6 +97,75 @@ const TITLE_MIN = 3;
 const TITLE_MAX = 150;
 const DESC_WORD_MAX = 500;
 
+/** Request-type card: the same two options, with a real press animation. */
+function UrgencyCard({
+  active,
+  icon,
+  title,
+  description,
+  accent,
+  accentSoft,
+  onAccent,
+  idle,
+  border,
+  titleColor,
+  bodyColor,
+  onPress,
+}: {
+  active: boolean;
+  icon: 'zap' | 'clock';
+  title: string;
+  description: string;
+  accent: string;
+  accentSoft: string;
+  /** Foreground for content sitting ON the accent fill (theme token, not a literal). */
+  onAccent: string;
+  idle: string;
+  border: string;
+  titleColor: string;
+  bodyColor: string;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <Animated.View style={[styles.urgencySlot, animStyle]}>
+      <Pressable
+        style={[
+          styles.urgencyOption,
+          {
+            backgroundColor: active ? accentSoft : idle,
+            borderColor: active ? accent : border,
+          },
+        ]}
+        onPressIn={() => {
+          scale.value = withSpring(0.96, { damping: 18, stiffness: 320 });
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, { damping: 16, stiffness: 280 });
+        }}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected: active }}
+      >
+        <View style={[styles.urgencyIcon, { backgroundColor: active ? accent : idle }]}>
+          <Feather name={icon} size={17} color={active ? onAccent : bodyColor} />
+        </View>
+        <Text style={[styles.urgencyTitle, { color: active ? accent : titleColor }]}>
+          {title}
+        </Text>
+        <Text style={[styles.urgencyDesc, { color: bodyColor }]}>{description}</Text>
+        {active ? (
+          <Animated.View entering={FadeInUp.duration(160)} style={[styles.urgencyBadge, { backgroundColor: accent }]}>
+            <Feather name="check" size={11} color={onAccent} />
+          </Animated.View>
+        ) : null}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function PostJobScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -74,8 +174,52 @@ export default function PostJobScreen() {
   const showAlert = useAppAlert();
   const { publish, publishing } = usePublishJob();
 
-  // ── Services (real ids — never invented) ───────────────────────────────────
-  const { status: servicesStatus, services, load: loadServices } = useServices();
+  // ── Service (Issue 1) ──────────────────────────────────────────────────────
+  // "Book now" deep links here as /job/post?serviceId=123. Anything
+  // non-numeric is ignored, so a malformed link degrades to the picker.
+  const { serviceId: serviceIdParam } = useLocalSearchParams<{ serviceId?: string }>();
+  const paramServiceId = useMemo(() => {
+    const raw = Array.isArray(serviceIdParam) ? serviceIdParam[0] : serviceIdParam;
+    return raw != null && /^\d+$/.test(String(raw)) ? Number(raw) : null;
+  }, [serviceIdParam]);
+
+  const [serviceId, setServiceId] = useState<number | null>(paramServiceId);
+  const [pickedService, setPickedService] = useState<ServiceListItem | null>(null);
+  const [serviceSheetOpen, setServiceSheetOpen] = useState(false);
+
+  useEffect(() => {
+    setServiceId(paramServiceId);
+    setPickedService(null);
+  }, [paramServiceId]);
+
+  const {
+    status: detailStatus,
+    service: detailService,
+    load: loadDetail,
+    refresh: refreshDetail,
+  } = useServiceDetail(serviceId);
+
+  // The service the user picked in the sheet already carries its category, so
+  // only the Book-now path needs the detail round trip.
+  useEffect(() => {
+    if (serviceId == null) return;
+    if (pickedService?.id === serviceId) return;
+    void loadDetail();
+  }, [serviceId, pickedService, loadDetail]);
+
+  const { categories, load: loadCategories } = useCategories();
+  useEffect(() => {
+    void loadCategories();
+  }, [loadCategories]);
+
+  const serviceCategoryId = pickedService?.category_id ?? detailService?.category_id ?? null;
+  const serviceTitle = pickedService?.title ?? detailService?.title ?? null;
+  const serviceCategoryName = useMemo(() => {
+    const direct = pickedService?.category_name ?? detailService?.category_name;
+    if (direct) return direct;
+    if (serviceCategoryId == null) return null;
+    return categories?.find((cat) => cat.id === serviceCategoryId)?.name ?? null;
+  }, [pickedService, detailService, serviceCategoryId, categories]);
 
   // ── Geo picker sources (live PUBLIC endpoints) ─────────────────────────────
   const { status: countriesStatus, countries, load: loadCountries, refresh: refreshCountries } = useCountries();
@@ -87,16 +231,13 @@ export default function PostJobScreen() {
   const [geoSearch, setGeoSearch] = useState('');
 
   // ── Form values ────────────────────────────────────────────────────────────
-  // Deep links from a service page ("Book now") may pre-select the service:
-  // /job/post?serviceId=123. Anything non-numeric is ignored.
-  const { serviceId: serviceIdParam } = useLocalSearchParams<{ serviceId?: string }>();
-  const [serviceId, setServiceId] = useState<number | null>(() =>
-    serviceIdParam != null && /^\d+$/.test(String(serviceIdParam)) ? Number(serviceIdParam) : null,
-  );
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dateKey, setDateKey] = useState<DateKey>('today');
   const [timeSlot, setTimeSlot] = useState('11:00 AM');
+  /** A confirmed custom slot; null while the quick chips are in charge. */
+  const [customAt, setCustomAt] = useState<Date | null>(null);
+  const [dateSheetOpen, setDateSheetOpen] = useState(false);
   const [hours, setHours] = useState(2);
   const [urgency, setUrgency] = useState<'urgent' | 'regular'>('regular');
   const [countryId, setCountryId] = useState<number | null>(null);
@@ -117,18 +258,15 @@ export default function PostJobScreen() {
   }, [loadCountries]);
 
   useEffect(() => {
-    void loadServices();
-  }, [loadServices]);
-
-  useEffect(() => {
     setGeoSearch('');
   }, [pickerOpen]);
 
+  // Month / weekday names for the custom-slot summary, from the dictionary
+  // (never a hardcoded English array, and no Intl dependency on device).
+  const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
+  const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
+
   const wordCount = description.trim().length ? description.trim().split(/\s+/).length : 0;
-  const selectedService = useMemo(
-    () => services?.find((service) => service.id === serviceId) ?? null,
-    [services, serviceId]
-  );
   const country = countries?.find((x) => x.id === countryId) ?? null;
   const county = counties?.find((x) => x.id === countyId) ?? null;
   const city = cities?.find((x) => x.id === cityId) ?? null;
@@ -200,6 +338,41 @@ export default function PostJobScreen() {
     setPickerOpen(null);
   };
 
+  // ── Scheduling ─────────────────────────────────────────────────────────────
+  /** The window message for a slot that the server-side limits reject. */
+  const windowErrorFor = useCallback(
+    (at: Date): string | null => {
+      const { min, max } = bookingWindow(new Date());
+      if (at.getTime() < min.getTime()) {
+        return t('post_sched_err_early', { n: BOOKING_MIN_LEAD_MINUTES });
+      }
+      if (at.getTime() > max.getTime()) {
+        return t('post_sched_err_late', { n: BOOKING_MAX_LEAD_DAYS });
+      }
+      return null;
+    },
+    [t]
+  );
+
+  /** A quick chip always wins back the fast path from a custom slot. */
+  const chooseQuickDate = (key: DateKey) => {
+    setCustomAt(null);
+    setDateKey(key);
+    clearError('date');
+  };
+
+  const chooseQuickTime = (slot: string) => {
+    setCustomAt(null);
+    setTimeSlot(slot);
+    clearError('date');
+  };
+
+  const confirmCustom = (value: Date) => {
+    setCustomAt(value);
+    setDateSheetOpen(false);
+    clearError('date');
+  };
+
   // ── Validation (mirrors the server's required fields / title bounds) ───────
   const validate = () => {
     const next: Partial<Record<JobFormField, string>> = {};
@@ -211,7 +384,14 @@ export default function PostJobScreen() {
     if (countryId == null || countyId == null || cityId == null) {
       next.address = t('post_err_address');
     }
-    if (!timeSlot) next.date = t('post_err_schedule');
+    if (customAt) {
+      // The picker already blocks out-of-window slots; this is the belt-and-
+      // braces guard for a slot that went stale while the form sat open.
+      const rangeError = windowErrorFor(customAt);
+      if (rangeError) next.date = rangeError;
+    } else if (!timeSlot) {
+      next.date = t('post_err_schedule');
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -224,6 +404,10 @@ export default function PostJobScreen() {
       message: messages.join('\n'),
       icon: 'alert-circle',
     });
+  };
+
+  const goToJob = (jobId: number) => {
+    router.replace(`/job/${jobId}` as any);
   };
 
   // Publishing a fresh draft goes through the SAME hook the job details screen
@@ -268,25 +452,25 @@ export default function PostJobScreen() {
     [showAlert, t, publish]
   );
 
-  const goToJob = (jobId: number) => {
-    router.replace(`/job/${jobId}` as any);
-  };
-
   const submit = async (isDraft: boolean) => {
     // `publishing` covers the draft→publish round trip, `submitting` the form
     // POST itself, so neither can be fired twice by a double tap.
     if (submitting || publishing) return;
     if (!validate()) return;
 
-    // Ids are guaranteed non-null by validate() above.
+    // Ids are guaranteed non-null by validate() above. A custom slot, if one is
+    // set, must be in-window — validate() rejected it otherwise.
+    if (customAt && !isWithinBookingWindow(customAt)) return;
+
     const payload = buildCreateJobRequest({
       serviceId: serviceId!,
-      serviceCategoryId: selectedService?.category_id ?? null,
+      serviceCategoryId: serviceCategoryId,
       title,
       description,
       requestType: urgency,
       dateKey,
       timeSlot,
+      scheduledAtIso: customAt ? customAt.toISOString() : null,
       expectedHours: hours,
       countryId: countryId!,
       countyId: countyId!,
@@ -366,69 +550,73 @@ export default function PostJobScreen() {
     }
   };
 
-  // ── Service picker ─────────────────────────────────────────────────────────
-  const renderServicePicker = () => {
-    if (servicesStatus === 'loading' || servicesStatus === 'idle') {
+  // ── Service section (Issue 1: no flat list, ever) ──────────────────────────
+  const renderServiceSection = () => {
+    if (serviceId == null) {
       return (
-        <View style={styles.serviceState}>
-          <InlineLoader size={18} />
-        </View>
+        <TouchableOpacity
+          style={[
+            styles.serviceEmpty,
+            { backgroundColor: c.input, borderColor: errors.service ? c.destructive : c.border },
+          ]}
+          onPress={() => setServiceSheetOpen(true)}
+          accessibilityRole="button"
+        >
+          <Feather name="briefcase" size={17} color={c.mutedForeground} />
+          <View style={styles.serviceEmptyBody}>
+            <Text style={[styles.serviceName, { color: c.text }]}>{t('post_service_pick')}</Text>
+            <Text style={[styles.serviceMeta, { color: c.mutedForeground }]}>
+              {t('post_service_pick_sub')}
+            </Text>
+          </View>
+          <Feather name="chevron-down" size={17} color={c.mutedForeground} />
+        </TouchableOpacity>
       );
     }
-    if (servicesStatus === 'error') {
-      return (
-        <View style={[styles.serviceState, { borderColor: c.border }]}>
-          <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
-            {t('post_service_load_error')}
-          </Text>
-          <TouchableOpacity onPress={() => void loadServices(true)} hitSlop={6}>
-            <Text style={[styles.serviceStateAction, { color: c.primary }]}>{t('addr_retry')}</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    if (!services || services.length === 0) {
-      return (
-        <View style={[styles.serviceState, { borderColor: c.border }]}>
-          <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
-            {t('post_service_empty')}
-          </Text>
-        </View>
-      );
-    }
+
+    const loadingMeta = detailStatus === 'loading' && pickedService == null;
+    const metaFailed =
+      pickedService == null &&
+      (detailStatus === 'error' || detailStatus === 'notfound' || detailStatus === 'invalid');
+
     return (
-      <View style={styles.serviceList}>
-        {services.map((service) => {
-          const active = service.id === serviceId;
-          return (
-            <TouchableOpacity
-              key={service.id}
-              style={[
-                styles.serviceRow,
-                {
-                  backgroundColor: active ? c.primaryLight : c.input,
-                  borderColor: active ? c.primary : c.border,
-                },
-              ]}
-              onPress={() => {
-                setServiceId(service.id);
-                clearError('service');
-              }}
-            >
-              <View style={{ flex: 1 }}>
+      <View>
+        <View style={[styles.lockedCard, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
+          <View style={styles.lockedBody}>
+            {loadingMeta ? (
+              <InlineLoader size={16} />
+            ) : (
+              <>
                 <Text style={[styles.serviceName, { color: c.text }]} numberOfLines={1}>
-                  {service.title}
+                  {serviceTitle ?? t('post_service')}
                 </Text>
-                {service.category_name ? (
+                {serviceCategoryName ? (
                   <Text style={[styles.serviceMeta, { color: c.mutedForeground }]} numberOfLines={1}>
-                    {service.category_name}
+                    {serviceCategoryName}
                   </Text>
                 ) : null}
-              </View>
-              {active ? <Feather name="check-circle" size={18} color={c.primary} /> : null}
+              </>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => setServiceSheetOpen(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.lockedAction, { color: c.primary }]}>{t('post_svc_change')}</Text>
+          </TouchableOpacity>
+        </View>
+        {metaFailed ? (
+          <View style={styles.inlineError}>
+            <Feather name="alert-circle" size={12} color={c.mutedForeground} />
+            <Text style={[styles.error, { color: c.mutedForeground, marginTop: 0 }]}>
+              {t('post_service_meta_error')}
+            </Text>
+            <TouchableOpacity onPress={() => void refreshDetail()} hitSlop={6}>
+              <Text style={[styles.serviceStateAction, { color: c.primary }]}>{t('cats_retry')}</Text>
             </TouchableOpacity>
-          );
-        })}
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -495,103 +683,36 @@ export default function PostJobScreen() {
     </View>
   );
 
-  // ── Geo modal ──────────────────────────────────────────────────────────────
-  const pickerModal = () => {
-    if (!pickerOpen) return null;
-    const isCountry = pickerOpen === 'country';
-    const source: Array<{ id: number; name: string }> | null = isCountry
-      ? countries
-      : pickerOpen === 'county'
-        ? counties
-        : cities;
-    const loadingNow = isCountry ? countriesStatus === 'loading' : geoLoading;
-    const errorNow = isCountry ? countriesStatus === 'error' : geoError;
-    const query = geoSearch.trim().toLowerCase();
-    const options = source?.filter((o) => !query || o.name.toLowerCase().includes(query)) ?? null;
-    const selectedId = isCountry ? countryId : pickerOpen === 'county' ? countyId : cityId;
-    const titleKey =
-      pickerOpen === 'country' ? 'addr_c_country' : pickerOpen === 'county' ? 'addr_c_county' : 'addr_c_city';
+  // ── Geo modal (Issue 4: one sheet pattern for country / county / city) ─────
+  const geoKind = pickerOpen ?? 'country';
+  const geoIsCountry = geoKind === 'country';
+  const geoSource: Array<{ id: number; name: string }> | null = geoIsCountry
+    ? countries
+    : geoKind === 'county'
+      ? counties
+      : cities;
+  const geoLoadingNow = geoIsCountry ? countriesStatus === 'loading' : geoLoading;
+  const geoErrorNow = geoIsCountry ? countriesStatus === 'error' : geoError;
+  const geoQuery = geoSearch.trim().toLowerCase();
+  const geoOptions = geoSource?.filter((o) => !geoQuery || o.name.toLowerCase().includes(geoQuery)) ?? null;
+  const geoSelectedId = geoIsCountry ? countryId : geoKind === 'county' ? countyId : cityId;
+  const geoTitleKey: TranslationKey =
+    geoKind === 'country' ? 'addr_c_country' : geoKind === 'county' ? 'addr_c_county' : 'addr_c_city';
 
-    const retry = isCountry
-      ? () => void refreshCountries()
-      : pickerOpen === 'county'
-        ? () => countryId != null && void loadCounties(countryId)
-        : () => countyId != null && void loadCities(countyId);
+  const geoRetry = geoIsCountry
+    ? () => void refreshCountries()
+    : geoKind === 'county'
+      ? () => countryId != null && void loadCounties(countryId)
+      : () => countyId != null && void loadCities(countyId);
 
-    const pick = (id: number) => {
-      if (isCountry) handleCountry(id);
-      else if (pickerOpen === 'county') handleCounty(id);
-      else handleCity(id);
-    };
-
-    return (
-      <Modal visible transparent animationType="slide" onRequestClose={() => setPickerOpen(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(null)}>
-          <Pressable style={[styles.modalSheet, { backgroundColor: c.background, borderColor: c.border }]}>
-            <View style={[styles.modalHead, { borderBottomColor: c.border }]}>
-              <Text style={[styles.modalTitle, { color: c.text }]}>{t(titleKey)}</Text>
-              <TouchableOpacity onPress={() => setPickerOpen(null)} hitSlop={8}>
-                <Feather name="x" size={20} color={c.mutedForeground} />
-              </TouchableOpacity>
-            </View>
-
-            {isCountry ? (
-              <View style={[styles.searchRow, { borderBottomColor: c.border }]}>
-                <Feather name="search" size={16} color={c.mutedForeground} />
-                <TextInput
-                  style={[styles.searchInput, { color: c.text }]}
-                  placeholder={t('geo_search')}
-                  placeholderTextColor={c.mutedForeground}
-                  value={geoSearch}
-                  onChangeText={setGeoSearch}
-                  autoCorrect={false}
-                />
-              </View>
-            ) : null}
-
-            {loadingNow ? (
-              <View style={styles.modalState}>
-                <InlineLoader size={22} />
-              </View>
-            ) : errorNow ? (
-              <View style={styles.modalState}>
-                <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
-                  {t('addr_c_err_network')}
-                </Text>
-                <TouchableOpacity onPress={retry} hitSlop={6}>
-                  <Text style={[styles.serviceStateAction, { color: c.primary }]}>{t('addr_retry')}</Text>
-                </TouchableOpacity>
-              </View>
-            ) : options && options.length === 0 ? (
-              <View style={styles.modalState}>
-                <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
-                  {t('geo_no_match')}
-                </Text>
-              </View>
-            ) : (
-              <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
-                {(options ?? []).map((option) => {
-                  const active = option.id === selectedId;
-                  return (
-                    <TouchableOpacity
-                      key={option.id}
-                      style={[styles.optionRow, { borderBottomColor: c.border }]}
-                      onPress={() => pick(option.id)}
-                    >
-                      <Text style={[styles.optionText, { color: c.text }]}>{option.name}</Text>
-                      {active ? <Feather name="check" size={16} color={c.primary} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-    );
+  const geoPick = (id: number) => {
+    if (geoIsCountry) handleCountry(id);
+    else if (geoKind === 'county') handleCounty(id);
+    else handleCity(id);
   };
 
   const busy = submitting !== null;
+  const quickDimmed = customAt != null;
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -604,7 +725,7 @@ export default function PostJobScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Service */}
         <Text style={[styles.label, { color: c.text }]}>{t('post_service')}</Text>
-        {renderServicePicker()}
+        {renderServiceSection()}
         {errors.service ? (
           <Text style={[styles.error, { color: c.destructive }]}>{errors.service}</Text>
         ) : null}
@@ -650,9 +771,12 @@ export default function PostJobScreen() {
           <Text style={[styles.error, { color: c.destructive }]}>{errors.description}</Text>
         ) : null}
 
-        {/* Date */}
+        {/* Date — the quick path, dimmed (not removed) while a custom slot is set */}
         <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
-        <View style={styles.chipWrapRow}>
+        <Animated.View
+          layout={LinearTransition.duration(220)}
+          style={[styles.chipWrapRow, quickDimmed && styles.dimmed]}
+        >
           {DATE_KEYS.map((key) => {
             const label =
               key === 'today'
@@ -660,37 +784,83 @@ export default function PostJobScreen() {
                 : key === 'tomorrow'
                   ? t('post_date_tomorrow')
                   : t('post_date_weekend');
+            const active = !quickDimmed && dateKey === key;
             return (
               <TouchableOpacity
                 key={key}
-                style={[styles.chip, { backgroundColor: dateKey === key ? c.primary : c.muted }]}
-                onPress={() => {
-                  setDateKey(key);
-                  clearError('date');
-                }}
+                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                onPress={() => chooseQuickDate(key)}
               >
-                <Text style={[styles.chipText, { color: dateKey === key ? '#FFF' : c.text }]}>{label}</Text>
+                <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}>
+                  {label}
+                </Text>
               </TouchableOpacity>
             );
           })}
-        </View>
+        </Animated.View>
 
-        {/* Time */}
+        {/* Time — quick chips + the custom entry point (Issues 2 & 5) */}
         <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-        <View style={styles.chipWrapRow}>
-          {TIME_SLOTS.map((slot) => (
-            <TouchableOpacity
-              key={slot}
-              style={[styles.chip, { backgroundColor: timeSlot === slot ? c.primary : c.muted }]}
-              onPress={() => {
-                setTimeSlot(slot);
-                clearError('date');
-              }}
+        <Animated.View
+          layout={LinearTransition.duration(220)}
+          style={[styles.chipWrapRow, quickDimmed && styles.dimmed]}
+        >
+          {TIME_SLOTS.map((slot) => {
+            const active = !quickDimmed && timeSlot === slot;
+            return (
+              <TouchableOpacity
+                key={slot}
+                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                onPress={() => chooseQuickTime(slot)}
+              >
+                <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}>
+                  {slot}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
+
+        <Animated.View layout={LinearTransition.duration(220)} style={styles.customWrap}>
+          {customAt == null ? (
+            <Animated.View key="custom-cta" entering={FadeInUp.duration(200)} exiting={FadeOut.duration(140)}>
+              <TouchableOpacity
+                style={[styles.customCta, { borderColor: c.primary, backgroundColor: c.primaryLight }]}
+                onPress={() => setDateSheetOpen(true)}
+                accessibilityRole="button"
+              >
+                <Feather name="calendar" size={15} color={c.primary} />
+                <Text style={[styles.customCtaText, { color: c.primary }]}>
+                  {t('post_sched_custom')}
+                </Text>
+                <Feather name="chevron-right" size={15} color={c.primary} />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : (
+            <Animated.View
+              key="custom-card"
+              entering={FadeInUp.duration(200)}
+              exiting={FadeOut.duration(140)}
+              style={[styles.customCard, { borderColor: c.primary, backgroundColor: c.primaryLight }]}
             >
-              <Text style={[styles.chipText, { color: timeSlot === slot ? '#FFF' : c.text }]}>{slot}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+              <View style={styles.customCardBody}>
+                <Text style={[styles.customCardLabel, { color: c.mutedForeground }]}>
+                  {t('post_sched_custom')}
+                </Text>
+                <Text style={[styles.customCardValue, { color: c.text }]} numberOfLines={1}>
+                  {formatScheduleLabel(customAt, months, weekdays)}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setDateSheetOpen(true)} hitSlop={8} accessibilityRole="button">
+                <Feather name="edit-2" size={15} color={c.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setCustomAt(null)} hitSlop={8} accessibilityRole="button">
+                <Feather name="x" size={16} color={c.mutedForeground} />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </Animated.View>
+
         {errors.date ? <Text style={[styles.error, { color: c.destructive }]}>{errors.date}</Text> : null}
 
         {/* Expected hours */}
@@ -714,41 +884,37 @@ export default function PostJobScreen() {
         </View>
         {errors.hours ? <Text style={[styles.error, { color: c.destructive }]}>{errors.hours}</Text> : null}
 
-        {/* Request type */}
+        {/* Request type — same meaning, real selected/unselected states */}
         <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
         <View style={styles.urgencyRow}>
-          <TouchableOpacity
-            style={[
-              styles.urgencyOption,
-              {
-                backgroundColor: urgency === 'urgent' ? c.urgentLight : c.muted,
-                borderColor: urgency === 'urgent' ? c.urgent : c.border,
-              },
-            ]}
+          <UrgencyCard
+            active={urgency === 'urgent'}
+            icon="zap"
+            title={t('post_urgent')}
+            description={t('post_urgent_desc')}
+            accent={c.urgent}
+            accentSoft={c.urgentLight}
+            onAccent={c.primaryForeground}
+            idle={c.muted}
+            border={c.border}
+            titleColor={c.text}
+            bodyColor={c.mutedForeground}
             onPress={() => setUrgency('urgent')}
-          >
-            <Feather name="zap" size={20} color={urgency === 'urgent' ? c.urgent : c.mutedForeground} />
-            <Text style={[styles.urgencyTitle, { color: urgency === 'urgent' ? c.urgent : c.text }]}>
-              {t('post_urgent')}
-            </Text>
-            <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>{t('post_urgent_desc')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.urgencyOption,
-              {
-                backgroundColor: urgency === 'regular' ? c.successLight : c.muted,
-                borderColor: urgency === 'regular' ? c.success : c.border,
-              },
-            ]}
+          />
+          <UrgencyCard
+            active={urgency === 'regular'}
+            icon="clock"
+            title={t('post_regular')}
+            description={t('post_regular_desc')}
+            accent={c.success}
+            accentSoft={c.successLight}
+            onAccent={c.primaryForeground}
+            idle={c.muted}
+            border={c.border}
+            titleColor={c.text}
+            bodyColor={c.mutedForeground}
             onPress={() => setUrgency('regular')}
-          >
-            <Feather name="clock" size={20} color={urgency === 'regular' ? c.success : c.mutedForeground} />
-            <Text style={[styles.urgencyTitle, { color: urgency === 'regular' ? c.success : c.text }]}>
-              {t('post_regular')}
-            </Text>
-            <Text style={[styles.urgencyDesc, { color: c.mutedForeground }]}>{t('post_regular_desc')}</Text>
-          </TouchableOpacity>
+          />
         </View>
 
         {/* Address */}
@@ -785,7 +951,7 @@ export default function PostJobScreen() {
           onPress={() => void submit(false)}
           disabled={busy}
         >
-          {submitting === 'post' ? <InlineLoader size={20} /> : <Text style={styles.submitText}>{t('post_submit')}</Text>}
+          {submitting === 'post' ? <InlineLoader size={20} /> : <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('post_submit')}</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -801,7 +967,89 @@ export default function PostJobScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {pickerModal()}
+      {/* Location sheets — country / county / city, one identical pattern */}
+      <BottomSheet
+        visible={pickerOpen !== null}
+        onClose={() => setPickerOpen(null)}
+        title={t(geoTitleKey)}
+        header={
+          <View style={[styles.searchRow, { borderBottomColor: c.border }]}>
+            <Feather name="search" size={15} color={c.mutedForeground} />
+            <TextInput
+              style={[styles.searchInput, { color: c.text }]}
+              placeholder={t('geo_search')}
+              placeholderTextColor={c.mutedForeground}
+              value={geoSearch}
+              onChangeText={setGeoSearch}
+              autoCorrect={false}
+            />
+          </View>
+        }
+      >
+        {geoLoadingNow ? (
+          <View style={styles.modalState}>
+            <InlineLoader size={22} />
+          </View>
+        ) : geoErrorNow ? (
+          <View style={styles.modalState}>
+            <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
+              {t('addr_c_err_network')}
+            </Text>
+            <TouchableOpacity onPress={geoRetry} hitSlop={6}>
+              <Text style={[styles.serviceStateAction, { color: c.primary }]}>{t('addr_retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : geoOptions && geoOptions.length === 0 ? (
+          <View style={styles.modalState}>
+            <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>{t('geo_no_match')}</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.modalListPad} keyboardShouldPersistTaps="handled">
+            {(geoOptions ?? []).map((option) => {
+              const active = option.id === geoSelectedId;
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.optionRow,
+                    {
+                      backgroundColor: active ? c.primaryLight : c.input,
+                      borderColor: active ? c.primary : c.border,
+                    },
+                  ]}
+                  onPress={() => geoPick(option.id)}
+                >
+                  <Text style={[styles.optionText, { color: c.text }]} numberOfLines={1}>
+                    {option.name}
+                  </Text>
+                  {active ? <Feather name="check" size={16} color={c.primary} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+      </BottomSheet>
+
+      {/* Cascading category → service picker */}
+      <ServicePickerSheet
+        visible={serviceSheetOpen}
+        onClose={() => setServiceSheetOpen(false)}
+        selectedId={serviceId}
+        onSelect={(service) => {
+          setPickedService(service);
+          setServiceId(service.id);
+          clearError('service');
+          setServiceSheetOpen(false);
+        }}
+      />
+
+      {/* Custom date & time */}
+      <DateTimeSheet
+        visible={dateSheetOpen}
+        onClose={() => setDateSheetOpen(false)}
+        value={customAt}
+        onConfirm={confirmCustom}
+      />
     </View>
   );
 }
@@ -826,38 +1074,105 @@ const styles = StyleSheet.create({
   textArea: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14, minHeight: 110 },
   textAreaSmall: { minHeight: 64 },
   error: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 4 },
+  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   fieldWrap: { marginBottom: 12 },
   chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  dimmed: { opacity: 0.45 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  customWrap: { marginTop: 10 },
+  customCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  customCtaText: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  customCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  customCardBody: { flex: 1 },
+  customCardLabel: { fontFamily: 'Manrope_500Medium', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 },
+  customCardValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginTop: 3 },
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 12, padding: 8 },
   stepperBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   stepperValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   urgencyRow: { flexDirection: 'row', gap: 10 },
-  urgencyOption: { flex: 1, borderWidth: 1.5, borderRadius: 14, padding: 14, alignItems: 'center', gap: 6 },
+  urgencySlot: { flex: 1 },
+  urgencyOption: { borderWidth: 1.5, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 12, alignItems: 'center', gap: 7 },
+  urgencyIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   urgencyTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
   urgencyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center', lineHeight: 15 },
-  serviceList: { gap: 8 },
-  serviceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  urgencyBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  serviceEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  serviceEmptyBody: { flex: 1 },
+  lockedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  lockedBody: { flex: 1 },
+  lockedAction: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
   serviceName: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
   serviceMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
-  serviceState: { borderWidth: 1, borderRadius: 12, padding: 16, alignItems: 'center', gap: 8 },
   serviceStateText: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
   serviceStateAction: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
   pickerInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   pickerText: { fontFamily: 'Manrope_400Regular', fontSize: 14, flex: 1 },
   submitBtn: { marginTop: 28, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
   draftBtn: { marginTop: 12, borderRadius: 14, paddingVertical: 15, alignItems: 'center', borderWidth: 1.5 },
   draftText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, maxHeight: '78%' },
-  modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1 },
-  modalTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1 },
-  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, paddingVertical: 4 },
-  modalList: { maxHeight: 380 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+  },
+  searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, paddingVertical: 2 },
+  modalListPad: { padding: 16, gap: 8 },
   modalState: { padding: 32, alignItems: 'center', gap: 10 },
-  optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1 },
-  optionText: { fontFamily: 'Manrope_500Medium', fontSize: 14 },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  optionText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
 });
