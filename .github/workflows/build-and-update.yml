@@ -92,6 +92,32 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli@latest
 
+      # ── Keep OTA and APK fingerprints in sync ─────────────────────────────
+      # The apk-build job stamps `extra.buildRun` into app.json before it builds,
+      # so the APK's runtimeVersion (fingerprint) is computed from a stamped config.
+      # The OTA manifest must be published from the same stamped config, otherwise
+      # Expo's fingerprint policy rejects the update on any device whose installed
+      # runtimeVersion matches the APK's (the common case for an existing user).
+      # Uncommitted changes are included in EAS updates; `cli.requireCommit` is
+      # explicitly false in eas.json so this stamp is never rejected.
+      - name: Stamp build number into app config (keep OTA + APK fingerprints in sync)
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const file = path.join(process.env.APP_DIR, 'app.json');
+          const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+          const buildRun = Number(process.env.GITHUB_RUN_NUMBER);
+          if (!Number.isInteger(buildRun) || buildRun <= 0) {
+            console.error('::error title=Missing run number::GITHUB_RUN_NUMBER is not a positive integer');
+            process.exit(1);
+          }
+          config.expo.extra = { ...(config.expo.extra ?? {}), buildRun };
+          fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n');
+          console.log(`Stamped ${file} with extra.buildRun=${buildRun}`);
+          NODE
+
       - name: Push OTA update
         working-directory: ${{ env.APP_DIR }}
         env:
