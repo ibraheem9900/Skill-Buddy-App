@@ -45,9 +45,7 @@
         "projectId": "69424157-1237-431e-bedc-525512a0fbc6"
       }
     },
-    "runtimeVersion": {
-      "policy": "fingerprint"
-    },
+    "runtimeVersion": "1.0.1",
     "updates": {
       "url": "https://u.expo.dev/69424157-1237-431e-bedc-525512a0fbc6"
     }
