@@ -1,8 +1,9 @@
 /**
  * jobSchedule.ts
  *
- * Pure helpers behind the Post-Job custom date & time picker. No React, no
- * axios, no Intl — every rule here is unit-testable without a renderer.
+ * Pure helpers behind the Post-Job calendar (the separate DATE picker). No
+ * React, no axios, no Intl — every rule here is unit-testable without a
+ * renderer.
  *
  * ── BOOKING WINDOW ─────────────────────────────────────────────────────────
  * The live OpenAPI (GET /openapi.json) was checked for a per-service or
@@ -13,23 +14,19 @@
  * category field carries one either. So the backend does not publish a
  * booking window and cannot enforce one that the client can read.
  *
- * The window below is therefore an APP-LEVEL policy, derived from what the
- * product already tells the user (Urgent "within 12 hours", Regular "within
- * 72 hours" — those are BIDDING windows, not scheduling caps) and from the
- * fact that the feature request explicitly asks for long-term bookings. It is
- * declared in exactly one place so that, once Zeyshan confirms the real
- * server-side limits, only these two constants change.
+ * The window below is therefore an APP-LEVEL policy for how far ahead a
+ * calendar may be paged. It is declared in exactly one place so that, once
+ * Zeyshan confirms the real server-side limits, only these two constants
+ * change. (`JobRequest.MAX_MILESTONES` documents the OTHER limit — a
+ * MULTI_DAY booking may span at most one week; that cap lives in
+ * lib/jobBooking.ts.)
  *
  *   MIN_LEAD_MINUTES  you cannot book a slot that has already started; the
  *                     job needs to be live with a little notice.
- *   MAX_LEAD_DAYS     how far into the future a single one-time visit may be
- *                     scheduled.
+ *   MAX_LEAD_DAYS     how far into the future a booking may be scheduled.
  */
 export const BOOKING_MIN_LEAD_MINUTES = 60;
 export const BOOKING_MAX_LEAD_DAYS = 90;
-
-/** Minute options offered by the custom time picker. */
-export const MINUTE_STEP = 15;
 
 export interface BookingWindow {
   /** Earliest instant that may be scheduled. */

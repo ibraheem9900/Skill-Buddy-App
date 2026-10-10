@@ -37,6 +37,9 @@ const TEST_FILES = [
   'jobAttachment.test.js',
   'appUpdate.test.js',
   'jobSchedule.test.js',
+  'jobBooking.test.js',
+  'jobCreateError.test.js',
+  'bid.test.js',
   'translations.test.js',
 ];
 

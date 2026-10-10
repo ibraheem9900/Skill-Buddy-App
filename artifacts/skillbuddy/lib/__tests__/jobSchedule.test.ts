@@ -1,6 +1,6 @@
 /**
  * Unit tests for the Post-a-Job booking window and calendar helpers
- * (lib/jobSchedule.ts) plus the custom-slot rule in lib/jobCreate.ts.
+ * (lib/jobSchedule.ts) plus the milestone rule in lib/jobCreate.ts.
  *
  * Run through the project's own harness: `pnpm run test`. No React, no axios,
  * no network — only the rules that decide which days and times may be booked.
@@ -25,7 +25,7 @@ import {
   startOfDay,
   toIsoDateTime,
 } from '../jobSchedule';
-import { resolveJobScheduledAt } from '../jobCreate';
+import { resolveMilestones, type JobFormValues } from '../jobCreate';
 
 declare const console: { log: (msg: string) => void };
 
@@ -161,41 +161,59 @@ eq('an ISO string always ends in Z', String(toIsoDateTime(saturday)).endsWith('Z
 eq('toIsoDateTime rejects null', toIsoDateTime(null), null);
 eq('toIsoDateTime rejects an Invalid Date', toIsoDateTime(new Date('nope')), null);
 
-/* --------------------------------- the custom slot wins in jobCreate */
+/* --------------------------- what scheduled_at carries in jobCreate */
 
 const CUSTOM_ISO = new Date(2026, 10, 20, 16, 30, 0, 0).toISOString();
 
+/** The wizard's form values, with only the schedule fields filled in. */
+const formValues = (overrides: Partial<JobFormValues>): JobFormValues => ({
+  serviceId: 1,
+  serviceCategoryId: null,
+  title: 'A title',
+  description: 'A description',
+  requestType: 'regular',
+  bookingType: 'one_time',
+  expectedHours: 2,
+  countryId: 1,
+  countyId: 1,
+  cityId: 1,
+  houseNumber: '',
+  streetAddress: '',
+  postalCode: '',
+  landmark: '',
+  formattedAddress: '',
+  isDraft: false,
+  ...overrides,
+});
+
 eq(
-  'a confirmed custom slot is what scheduled_at carries',
-  resolveJobScheduledAt({ dateKey: 'today', timeSlot: '9:00 AM', scheduledAtIso: CUSTOM_ISO }, NOW),
+  'the clock picker\'s instant is what scheduled_at carries',
+  resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO }))[0].scheduled_at,
   CUSTOM_ISO
 );
 eq(
-  'without a custom slot the chips resolve as before',
-  resolveJobScheduledAt({ dateKey: 'today', timeSlot: '9:00 AM', scheduledAtIso: null }, NOW),
-  new Date(2026, 8, 12, 9, 0, 0, 0).toISOString()
-);
-eq(
-  'an empty custom value falls back to the chips',
-  resolveJobScheduledAt({ dateKey: 'tomorrow', timeSlot: '1:00 PM', scheduledAtIso: '' }, NOW),
-  new Date(2026, 8, 13, 13, 0, 0, 0).toISOString()
-);
-eq(
-  'an unparseable custom value falls back to the chips instead of sending null',
-  resolveJobScheduledAt({ dateKey: 'today', timeSlot: '11:00 AM', scheduledAtIso: 'not-a-date' }, NOW),
-  new Date(2026, 8, 12, 11, 0, 0, 0).toISOString()
-);
-eq(
-  'the custom value is normalised to UTC',
-  resolveJobScheduledAt(
-    { dateKey: 'today', timeSlot: '9:00 AM', scheduledAtIso: '2026-11-20T16:30:00+02:00' },
-    NOW
-  ),
+  'an offset instant is normalised to UTC',
+  resolveMilestones(formValues({ scheduledAtIso: '2026-11-20T16:30:00+02:00' }))[0].scheduled_at,
   new Date('2026-11-20T16:30:00+02:00').toISOString()
 );
 check(
-  'the resolved custom value never loses its Z suffix',
-  resolveJobScheduledAt({ dateKey: 'today', timeSlot: '9:00 AM', scheduledAtIso: CUSTOM_ISO }, NOW).endsWith('Z')
+  'the resolved instant never loses its Z suffix',
+  String(resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO }))[0].scheduled_at).endsWith('Z')
+);
+eq(
+  'an unparseable instant never becomes a null scheduled_at',
+  resolveMilestones(formValues({ scheduledAtIso: 'not-a-date' })).length,
+  0
+);
+eq(
+  'a missing instant never becomes a null scheduled_at',
+  resolveMilestones(formValues({ scheduledAtIso: null })).length,
+  0
+);
+eq(
+  'the expected hours ride along as a number',
+  resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO, expectedHours: 5 }))[0].expected_hours,
+  5
 );
 
 /* ------------------------------------------------------------------ report */

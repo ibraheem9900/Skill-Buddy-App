@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BackHandler,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,12 +13,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, {
+  FadeIn,
   FadeInUp,
-  FadeOut,
-  LinearTransition,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
@@ -25,80 +27,107 @@ import BackButton from '@/components/BackButton';
 import { useAppAlert } from '@/context/AlertModalContext';
 import InlineLoader from '@/components/InlineLoader';
 import BottomSheet from '@/components/BottomSheet';
-import DateTimeSheet from '@/components/DateTimeSheet';
+import DateRangePickerSheet from '@/components/DateRangePickerSheet';
+import TimePickerSheet from '@/components/TimePickerSheet';
 import ServicePickerSheet from '@/components/ServicePickerSheet';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { authApi } from '@/services/api';
 import useCountries from '@/hooks/useCountries';
 import useCategories from '@/hooks/useCategories';
 import useServiceDetail from '@/hooks/useServiceDetail';
+import useAddresses from '@/hooks/useAddresses';
 import { invalidateJobList } from '@/hooks/useJobList';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
 import { jobStatusLabelKey } from '@/lib/jobList';
+import { splitTable, startOfDay } from '@/lib/jobSchedule';
 import {
-  BOOKING_MAX_LEAD_DAYS,
-  BOOKING_MIN_LEAD_MINUTES,
-  bookingWindow,
-  formatScheduleLabel,
-  isWithinBookingWindow,
-  splitTable,
-} from '@/lib/jobSchedule';
+  MAX_EXPECTED_HOURS,
+  MIN_EXPECTED_HOURS,
+  type BookingErrorKey,
+  type BookingKind,
+  type ClockTime,
+  type OneTimeDay,
+  buildMultiDayMilestones,
+  buildOneTimeMilestones,
+  clampExpectedHours,
+  enumerateDays,
+  formatDayLabel,
+  formatRangeLabel,
+  formatTimeLabel,
+  oneTimeDay,
+  validateMultiDay,
+  validateOneTime,
+} from '@/lib/jobBooking';
+import {
+  buildProfileAddressPayload,
+  profileAddressDiffers,
+  type ProfileAddressForm,
+} from '@/lib/profileAddressSync';
 import {
   buildCreateJobRequest,
+  classifyCreateJobFailure,
+  createJobErrorCopy,
+  firstErrorStep,
   mapValidationErrors,
   type JobFormField,
 } from '@/lib/jobCreate';
 import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/types';
 
 /**
- * Post a Job — creates a REAL job via POST /api/v1/jobs.
+ * Post a Job — a four-step wizard that creates a REAL job via POST /api/v1/jobs.
  *
- * SERVICE (Issue 1): the screen never renders a flat list of every service.
- * When the user arrives from "Book now" (/job/post?serviceId=123) that exact
- * service is locked in and shown as a read-only card; the general entry point
- * (/job/post from the Jobs tab) opens a CASCADING picker — category first,
- * then only that category's services, both from the live API.
+ *   Step 1  Job Details    service (locked from "Book now" or the cascading
+ *                          picker), title, description
+ *   Step 2  Booking Type   One-time | Long-term — the API's BookingType enum
+ *                          is exactly ONE_TIME | MULTI_DAY (live OpenAPI), so
+ *                          the long-term card maps to MULTI_DAY
+ *   Step 3  Date & Time    one-time: Today/Tomorrow + the CLOCK picker;
+ *                          long-term: the CALENDAR range picker + the clock,
+ *                          then one milestone per day
+ *   Step 4  Service Address country/county/city + street fields, prefilled from
+ *                          the profile's saved address (GET /api/v1/addresses)
  *
- * SCHEDULE (Issues 2 & 5): the Today / Tomorrow / This Weekend chips plus the
- * fixed time chips remain the fast path, unchanged. A "Custom date & time"
- * action opens a real month calendar (days outside the booking window are
- * greyed out and not tappable) with a specific hour/minute clock, and the
- * chosen slot is what `scheduled_at` carries.
+ * The date picker and the time picker are separate components and are never
+ * combined: DateTimeSheet (one sheet holding a calendar AND hour chips) is gone
+ * along with the Today/Tomorrow/Weekend chips and the six hardcoded time slots.
  *
- * Every value is mapped to the live JobCreate contract:
- *   service picker  → service_id (+ category_id from that service)
- *   title/description → title (3..150) / description
- *   urgency cards   → request_type URGENT | REGULAR
- *   date+time       → milestones[0].scheduled_at (ISO 8601 UTC)
- *   hours stepper   → milestones[0].expected_hours (number)
- *   geo pickers + address fields → address{ country_id, county_id, city_id, ... }
- *   Post Job / Save as draft → is_draft false / true
- *
- * booking_type is always ONE_TIME: the form schedules a single visit, and
- * JobCreate exposes no top-level scheduled_at, so milestones[] carries it.
- *
- * REMOVED ON PURPOSE (no counterpart in JobCreate, and the spec has no job
- * attachment endpoint at all): the photo picker and the hourly-rate/budget
- * fields. Nothing inert is left on screen.
+ * SCHEDULE: every instant is composed from LOCAL calendar parts and serialised
+ * with toISOString(), so the API receives UTC and a booking made late at night
+ * for "Tomorrow" still lands on tomorrow's local date. ONE_TIME sends one
+ * milestone; MULTI_DAY (max 7 days, the week the schema documents) sends one per
+ * day, each carrying the same per-day expected hours.
  *
  * AUTH/401: the shared axios client refreshes an expired token once and
  * replays the request; if the session is truly over it clears the session
- * (AuthContext) and this screen shows a sign-in-again message. No bespoke
- * token handling lives here.
+ * (AuthContext) and this screen shows a sign-in-again message.
+ *
+ * REMOVED ON PURPOSE (no counterpart in JobCreate): the photo picker and the
+ * hourly-rate/budget fields.
  */
-
-const TIME_SLOTS = ['9:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '5:00 PM', '7:00 PM'];
-
-const DATE_KEYS = ['today', 'tomorrow', 'weekend'] as const;
-type DateKey = (typeof DATE_KEYS)[number];
 
 const TITLE_MIN = 3;
 /** Server cap on JobCreate.title. */
 const TITLE_MAX = 150;
 const DESC_WORD_MAX = 500;
 
-/** Request-type card: the same two options, with a real press animation. */
-function UrgencyCard({
+const STEP_KEYS: TranslationKey[] = [
+  'post_step_details',
+  'post_step_booking',
+  'post_step_schedule',
+  'post_step_address',
+];
+const STEP_COUNT = STEP_KEYS.length;
+
+/** Which field each step's validation can flag, so errors render in place. */
+type StepErrors = Partial<Record<JobFormField, BookingErrorKey | string>>;
+
+/**
+ * Request-type card. BOTH cards share one structure — same width, same
+ * minHeight, same icon circle, same badge slot — so the selected and
+ * unselected states line up exactly; a selection springs the card.
+ */
+function RequestTypeCard({
   active,
   icon,
   title,
@@ -118,7 +147,7 @@ function UrgencyCard({
   description: string;
   accent: string;
   accentSoft: string;
-  /** Foreground for content sitting ON the accent fill (theme token, not a literal). */
+  /** Foreground for content sitting ON the accent fill (theme token). */
   onAccent: string;
   idle: string;
   border: string;
@@ -130,17 +159,17 @@ function UrgencyCard({
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   return (
-    <Animated.View style={[styles.urgencySlot, animStyle]}>
+    <Animated.View style={[styles.optionSlot, animStyle]}>
       <Pressable
         style={[
-          styles.urgencyOption,
+          styles.optionCard,
           {
             backgroundColor: active ? accentSoft : idle,
             borderColor: active ? accent : border,
           },
         ]}
         onPressIn={() => {
-          scale.value = withSpring(0.96, { damping: 18, stiffness: 320 });
+          scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
         }}
         onPressOut={() => {
           scale.value = withSpring(1, { damping: 16, stiffness: 280 });
@@ -149,20 +178,109 @@ function UrgencyCard({
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
       >
-        <View style={[styles.urgencyIcon, { backgroundColor: active ? accent : idle }]}>
+        <View style={[styles.optionIcon, { backgroundColor: active ? accent : idle }]}>
           <Feather name={icon} size={17} color={active ? onAccent : bodyColor} />
         </View>
-        <Text style={[styles.urgencyTitle, { color: active ? accent : titleColor }]}>
-          {title}
+        <Text style={[styles.optionTitle, { color: active ? accent : titleColor }]}>{title}</Text>
+        <Text style={[styles.optionDesc, { color: bodyColor }]} numberOfLines={3}>
+          {description}
         </Text>
-        <Text style={[styles.urgencyDesc, { color: bodyColor }]}>{description}</Text>
-        {active ? (
-          <Animated.View entering={FadeInUp.duration(160)} style={[styles.urgencyBadge, { backgroundColor: accent }]}>
-            <Feather name="check" size={11} color={onAccent} />
-          </Animated.View>
-        ) : null}
+        {/* One badge slot in both states: an empty ring or a check, never moved. */}
+        <View
+          style={[
+            styles.optionBadge,
+            active
+              ? { backgroundColor: accent, borderColor: accent }
+              : { borderColor: border, backgroundColor: 'transparent' },
+          ]}
+        >
+          {active ? <Feather name="check" size={11} color={onAccent} /> : null}
+        </View>
       </Pressable>
     </Animated.View>
+  );
+}
+
+/** Booking-type card: identical structure to the request-type card. */
+function BookingTypeCard({
+  active,
+  icon,
+  title,
+  description,
+  onPress,
+}: {
+  active: boolean;
+  icon: 'calendar' | 'repeat';
+  title: string;
+  description: string;
+  onPress: () => void;
+}) {
+  const { colors: c } = useTheme();
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <Animated.View style={[styles.optionSlot, animStyle]}>
+      <Pressable
+        style={[
+          styles.optionCard,
+          {
+            backgroundColor: active ? c.primaryLight : c.muted,
+            borderColor: active ? c.primary : c.border,
+          },
+        ]}
+        onPressIn={() => {
+          scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, { damping: 16, stiffness: 280 });
+        }}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected: active }}
+      >
+        <View style={[styles.optionIcon, { backgroundColor: active ? c.primary : c.muted }]}>
+          <Feather name={icon} size={17} color={active ? c.primaryForeground : c.mutedForeground} />
+        </View>
+        <Text style={[styles.optionTitle, { color: active ? c.primary : c.text }]}>{title}</Text>
+        <Text style={[styles.optionDesc, { color: c.mutedForeground }]} numberOfLines={3}>
+          {description}
+        </Text>
+        <View
+          style={[
+            styles.optionBadge,
+            active
+              ? { backgroundColor: c.primary, borderColor: c.primary }
+              : { borderColor: c.border, backgroundColor: 'transparent' },
+          ]}
+        >
+          {active ? <Feather name="check" size={11} color={c.primaryForeground} /> : null}
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** Small pulsing bars shown while the profile address is fetched. */
+function AddressSkeleton() {
+  const { colors: c } = useTheme();
+  const pulse = useSharedValue(0.5);
+
+  useEffect(() => {
+    pulse.value = withRepeat(withTiming(1, { duration: 700 }), -1, true);
+  }, [pulse]);
+
+  const animStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <View style={styles.skeletonWrap}>
+      {[0, 1, 2].map((row) => (
+        <Animated.View
+          key={row}
+          style={[styles.skeletonRow, { backgroundColor: c.skeletonBase }, animStyle]}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -173,10 +291,17 @@ export default function PostJobScreen() {
   const { t } = useLanguage();
   const showAlert = useAppAlert();
   const { publish, publishing } = usePublishJob();
+  // The profile's saved address (GET /api/v1/addresses) — prefill source for
+  // step 4 and the target of the write-back after a successful post.
+  const {
+    status: profileStatus,
+    address: savedAddress,
+    load: loadProfileAddress,
+    create: createProfileAddress,
+    update: updateProfileAddress,
+  } = useAddresses();
 
-  // ── Service (Issue 1) ──────────────────────────────────────────────────────
-  // "Book now" deep links here as /job/post?serviceId=123. Anything
-  // non-numeric is ignored, so a malformed link degrades to the picker.
+  // ── Service ────────────────────────────────────────────────────────────────
   const { serviceId: serviceIdParam } = useLocalSearchParams<{ serviceId?: string }>();
   const paramServiceId = useMemo(() => {
     const raw = Array.isArray(serviceIdParam) ? serviceIdParam[0] : serviceIdParam;
@@ -199,8 +324,6 @@ export default function PostJobScreen() {
     refresh: refreshDetail,
   } = useServiceDetail(serviceId);
 
-  // The service the user picked in the sheet already carries its category, so
-  // only the Book-now path needs the detail round trip.
   useEffect(() => {
     if (serviceId == null) return;
     if (pickedService?.id === serviceId) return;
@@ -221,7 +344,26 @@ export default function PostJobScreen() {
     return categories?.find((cat) => cat.id === serviceCategoryId)?.name ?? null;
   }, [pickedService, detailService, serviceCategoryId, categories]);
 
-  // ── Geo picker sources (live PUBLIC endpoints) ─────────────────────────────
+  // ── Shared wizard state ────────────────────────────────────────────────────
+  const [step, setStep] = useState(0);
+  const [stepErrors, setStepErrors] = useState<StepErrors>({});
+
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+
+  const [bookingKind, setBookingKind] = useState<BookingKind>('one_time');
+  const [oneTimeDayKind, setOneTimeDayKind] = useState<OneTimeDay>('today');
+  const [oneTimeClock, setOneTimeClock] = useState<ClockTime | null>(null);
+  const [rangeStart, setRangeStart] = useState<Date | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
+  const [multiClock, setMultiClock] = useState<ClockTime | null>(null);
+  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+  const [dateSheetOpen, setDateSheetOpen] = useState(false);
+
+  const [hours, setHours] = useState(2);
+  const [urgency, setUrgency] = useState<'urgent' | 'regular'>('regular');
+
+  // ── Address (step 4) ──────────────────────────────────────────────────────
   const { status: countriesStatus, countries, load: loadCountries, refresh: refreshCountries } = useCountries();
   const [counties, setCounties] = useState<AddressRegionResponse[] | null>(null);
   const [cities, setCities] = useState<AddressRegionResponse[] | null>(null);
@@ -230,16 +372,6 @@ export default function PostJobScreen() {
   const [pickerOpen, setPickerOpen] = useState<'country' | 'county' | 'city' | null>(null);
   const [geoSearch, setGeoSearch] = useState('');
 
-  // ── Form values ────────────────────────────────────────────────────────────
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [dateKey, setDateKey] = useState<DateKey>('today');
-  const [timeSlot, setTimeSlot] = useState('11:00 AM');
-  /** A confirmed custom slot; null while the quick chips are in charge. */
-  const [customAt, setCustomAt] = useState<Date | null>(null);
-  const [dateSheetOpen, setDateSheetOpen] = useState(false);
-  const [hours, setHours] = useState(2);
-  const [urgency, setUrgency] = useState<'urgent' | 'regular'>('regular');
   const [countryId, setCountryId] = useState<number | null>(null);
   const [countyId, setCountyId] = useState<number | null>(null);
   const [cityId, setCityId] = useState<number | null>(null);
@@ -248,10 +380,16 @@ export default function PostJobScreen() {
   const [postalCode, setPostalCode] = useState('');
   const [landmark, setLandmark] = useState('');
   const [formattedAddress, setFormattedAddress] = useState('');
+  /** Prefill happens once, and never overwrites something the user typed. */
+  const prefilled = useRef(false);
 
-  const [errors, setErrors] = useState<Partial<Record<JobFormField, string>>>({});
-  /** null = idle; otherwise WHICH button is submitting (blocks both). */
   const [submitting, setSubmitting] = useState<'post' | 'draft' | null>(null);
+  /**
+   * The REAL in-flight lock. `submitting` is React state, so two taps inside the
+   * same frame both read the old value and would fire two POSTs — two jobs. This
+   * ref flips synchronously, before the request, and is cleared in `finally`.
+   */
+  const inFlight = useRef(false);
 
   useEffect(() => {
     void loadCountries();
@@ -261,8 +399,13 @@ export default function PostJobScreen() {
     setGeoSearch('');
   }, [pickerOpen]);
 
-  // Month / weekday names for the custom-slot summary, from the dictionary
-  // (never a hardcoded English array, and no Intl dependency on device).
+  // Load the profile's saved address for the step-4 prefill.
+  useEffect(() => {
+    void loadProfileAddress();
+  }, [loadProfileAddress]);
+
+  // Month / weekday names for every date label, from the dictionary (never a
+  // hardcoded English array, and no Intl dependency on device).
   const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
   const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
 
@@ -272,13 +415,15 @@ export default function PostJobScreen() {
   const city = cities?.find((x) => x.id === cityId) ?? null;
 
   const clearError = useCallback((field: JobFormField) => {
-    setErrors((prev) => {
+    setStepErrors((prev) => {
       if (!prev[field]) return prev;
       const next = { ...prev };
       delete next[field];
       return next;
     });
   }, []);
+
+  const clearAllErrors = useCallback(() => setStepErrors({}), []);
 
   // ── Geo handlers ───────────────────────────────────────────────────────────
   const loadCounties = useCallback(async (id: number) => {
@@ -318,6 +463,7 @@ export default function PostJobScreen() {
     clearError('country_id');
     clearError('county_id');
     clearError('city_id');
+    clearError('address');
     setPickerOpen(null);
     void loadCounties(id);
   };
@@ -328,6 +474,7 @@ export default function PostJobScreen() {
     setCities(null);
     clearError('county_id');
     clearError('city_id');
+    clearError('address');
     setPickerOpen(null);
     void loadCities(id);
   };
@@ -335,68 +482,167 @@ export default function PostJobScreen() {
   const handleCity = (id: number) => {
     setCityId(id);
     clearError('city_id');
+    clearError('address');
     setPickerOpen(null);
   };
 
-  // ── Scheduling ─────────────────────────────────────────────────────────────
-  /** The window message for a slot that the server-side limits reject. */
-  const windowErrorFor = useCallback(
-    (at: Date): string | null => {
-      const { min, max } = bookingWindow(new Date());
-      if (at.getTime() < min.getTime()) {
-        return t('post_sched_err_early', { n: BOOKING_MIN_LEAD_MINUTES });
+  // ── Prefill from the saved profile address ────────────────────────────────
+  useEffect(() => {
+    if (prefilled.current) return;
+    if (profileStatus !== 'ready') return;
+    const saved = savedAddress;
+    prefilled.current = true;
+    if (!saved) return;
+
+    const savedCountryId = saved.country?.id ?? null;
+    setCountryId(savedCountryId);
+    setCountyId(saved.county?.id ?? null);
+    setCityId(saved.city?.id ?? null);
+    setHouseNumber(saved.house_number ?? '');
+    setStreetAddress(saved.street_address ?? '');
+    setPostalCode(saved.postal_code ?? '');
+    setLandmark(saved.landmark ?? '');
+    setFormattedAddress(saved.formatted_address ?? '');
+    if (savedCountryId != null) void loadCounties(savedCountryId);
+    if (saved.county?.id != null) void loadCities(saved.county.id);
+  }, [profileStatus, savedAddress, loadCounties, loadCities]);
+
+  // ── Step navigation ───────────────────────────────────────────────────────
+  const goBack = useCallback(() => {
+    clearAllErrors();
+    if (step === 0) {
+      router.back();
+      return;
+    }
+    setStep((prev) => Math.max(0, prev - 1));
+  }, [clearAllErrors, router, step]);
+
+  // Android hardware back = previous step; on step 1 the navigator keeps its
+  // normal behaviour (leaving the screen), exactly as before.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (step === 0) return false;
+      clearAllErrors();
+      setStep((prev) => Math.max(0, prev - 1));
+      return true;
+    });
+    return () => sub.remove();
+  }, [clearAllErrors, step]);
+
+  const goNext = () => {
+    const errors = validateStep(step);
+    setStepErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setStep((prev) => Math.min(STEP_COUNT - 1, prev + 1));
+  };
+
+  // ── Per-step validation ───────────────────────────────────────────────────
+  function validateStep(target: number): StepErrors {
+    const next: StepErrors = {};
+    if (target === 0) {
+      if (serviceId == null) next.service = t('post_err_service');
+      if (title.trim().length < TITLE_MIN) next.title = t('post_err_title_min');
+      if (!description.trim()) next.description = t('post_err_desc');
+      else if (wordCount > DESC_WORD_MAX) next.description = t('post_err_desc_long');
+    }
+    if (target === 1) {
+      // One-time is preselected, so this step is always answerable.
+    }
+    if (target === 2) {
+      const now = new Date();
+      if (bookingKind === 'one_time') {
+        const error = validateOneTime(oneTimeDayKind, oneTimeClock, now);
+        if (error) next.time = t(error);
+      } else {
+        const error = validateMultiDay(rangeStart, rangeEnd, multiClock, now);
+        if (error) next.date = t(error);
       }
-      if (at.getTime() > max.getTime()) {
-        return t('post_sched_err_late', { n: BOOKING_MAX_LEAD_DAYS });
+      if (hours < MIN_EXPECTED_HOURS) next.hours = t('post_err_hours');
+    }
+    if (target === 3) {
+      if (countryId == null || countyId == null || cityId == null) {
+        next.address = t('post_err_address');
       }
-      return null;
-    },
-    [t]
+    }
+    return next;
+  }
+
+  /** Live schedule problems for the visible step, without pressing Next. */
+  const scheduleError = useMemo(() => {
+    if (step !== 2) return null;
+    const now = new Date();
+    const error =
+      bookingKind === 'one_time'
+        ? validateOneTime(oneTimeDayKind, oneTimeClock, now)
+        : validateMultiDay(rangeStart, rangeEnd, multiClock, now);
+    return error ? t(error) : null;
+  }, [step, bookingKind, oneTimeDayKind, oneTimeClock, rangeStart, rangeEnd, multiClock, t]);
+
+  // ── Picker wiring ─────────────────────────────────────────────────────────
+  const today = startOfDay(new Date());
+  const activeDay =
+    bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : (rangeStart ?? null);
+  const activeClock = bookingKind === 'one_time' ? oneTimeClock : multiClock;
+
+  const timeFieldLabel = activeClock
+    ? formatTimeLabel(activeClock.hour, activeClock.minute, {
+        am: t('post_sched_am'),
+        pm: t('post_sched_pm'),
+      })
+    : t('post_time_pick');
+
+  const days = useMemo(
+    () => (rangeStart && rangeEnd ? enumerateDays(rangeStart, rangeEnd) : []),
+    [rangeStart, rangeEnd]
   );
 
-  /** A quick chip always wins back the fast path from a custom slot. */
-  const chooseQuickDate = (key: DateKey) => {
-    setCustomAt(null);
-    setDateKey(key);
-    clearError('date');
-  };
+  const milestonePreview = useMemo(() => {
+    if (bookingKind !== 'multi_day' || !multiClock || days.length === 0) return [];
+    return days.map((day, index) => ({
+      key: `${day.toISOString()}-${index}`,
+      label: t('post_milestone_n', { n: index + 1 }),
+      day: formatDayLabel(day, months, weekdays),
+      time: timeFieldLabel,
+    }));
+  }, [bookingKind, multiClock, days, t, months, weekdays, timeFieldLabel]);
 
-  const chooseQuickTime = (slot: string) => {
-    setCustomAt(null);
-    setTimeSlot(slot);
-    clearError('date');
-  };
-
-  const confirmCustom = (value: Date) => {
-    setCustomAt(value);
-    setDateSheetOpen(false);
-    clearError('date');
-  };
-
-  // ── Validation (mirrors the server's required fields / title bounds) ───────
-  const validate = () => {
-    const next: Partial<Record<JobFormField, string>> = {};
-    const trimmedTitle = title.trim();
-    if (trimmedTitle.length < TITLE_MIN) next.title = t('post_err_title_min');
-    if (!description.trim()) next.description = t('post_err_desc');
-    else if (wordCount > DESC_WORD_MAX) next.description = t('post_err_desc_long');
-    if (serviceId == null) next.service = t('post_err_service');
-    if (countryId == null || countyId == null || cityId == null) {
-      next.address = t('post_err_address');
+  // ── Profile address sync (only after a successful non-draft post) ─────────
+  const syncProfileAddress = useCallback(async (): Promise<boolean> => {
+    const form: ProfileAddressForm = {
+      countryId,
+      countyId,
+      cityId,
+      streetAddress,
+      houseNumber,
+      postalCode,
+      landmark,
+    };
+    if (!profileAddressDiffers(form, savedAddress)) return false;
+    const payload = buildProfileAddressPayload(form, formattedAddress);
+    try {
+      if (savedAddress?.id != null) await updateProfileAddress(savedAddress.id, payload);
+      else await createProfileAddress(payload);
+      return true;
+    } catch {
+      // The job is already posted — a failed profile sync must not surface as a
+      // job failure, and it must not modify anything client-side either.
+      return false;
     }
-    if (customAt) {
-      // The picker already blocks out-of-window slots; this is the belt-and-
-      // braces guard for a slot that went stale while the form sat open.
-      const rangeError = windowErrorFor(customAt);
-      if (rangeError) next.date = rangeError;
-    } else if (!timeSlot) {
-      next.date = t('post_err_schedule');
-    }
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
+  }, [
+    countryId,
+    countyId,
+    cityId,
+    streetAddress,
+    houseNumber,
+    postalCode,
+    landmark,
+    formattedAddress,
+    savedAddress,
+    updateProfileAddress,
+    createProfileAddress,
+  ]);
 
-  // ── Error handling ─────────────────────────────────────────────────────────
+  // ── Error handling ────────────────────────────────────────────────────────
   const showUnmapped = (messages: string[]) => {
     if (messages.length === 0) return;
     showAlert({
@@ -410,9 +656,6 @@ export default function PostJobScreen() {
     router.replace(`/job/${jobId}` as any);
   };
 
-  // Publishing a fresh draft goes through the SAME hook the job details screen
-  // uses, so 422 / 401 / network handling and the list invalidation are
-  // identical in both places instead of being re-implemented here.
   const publishDraft = useCallback(
     async (jobId: number) => {
       setSubmitting('draft');
@@ -431,7 +674,6 @@ export default function PostJobScreen() {
 
       if (outcome.kind === 'busy') return;
       if (outcome.kind === 'unauthorized') {
-        // The session is over; the job itself is safely saved as a draft.
         showAlert({
           title: t('post_err_session_title'),
           message: t('post_err_session_msg'),
@@ -442,7 +684,6 @@ export default function PostJobScreen() {
 
       showAlert({
         title: t('post_publish_failed_title'),
-        // The backend's own readable text wins when it sent one.
         message: outcome.message ?? t(publishErrorKey(outcome.kind)),
         icon: 'alert-triangle',
       });
@@ -452,26 +693,65 @@ export default function PostJobScreen() {
     [showAlert, t, publish]
   );
 
-  const submit = async (isDraft: boolean) => {
-    // `publishing` covers the draft→publish round trip, `submitting` the form
-    // POST itself, so neither can be fired twice by a double tap.
-    if (submitting || publishing) return;
-    if (!validate()) return;
+  const showPostedAlert = (created: JobResponse, addressUpdated: boolean) => {
+    if (addressUpdated) {
+      showAlert({
+        title: t('post_success_title'),
+        message: t('post_success_msg_addr'),
+        icon: 'check-circle',
+        buttons: [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
+      });
+      return;
+    }
+    const createdStatusKey = jobStatusLabelKey(created.status);
+    showAlert({
+      title: t('post_success_title'),
+      message:
+        created.status === 'OPEN' || !createdStatusKey
+          ? t('post_success_msg')
+          : t('post_success_msg_status', { status: t(createdStatusKey) }),
+      icon: 'check-circle',
+      buttons: [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
+    });
+  };
 
-    // Ids are guaranteed non-null by validate() above. A custom slot, if one is
-    // set, must be in-window — validate() rejected it otherwise.
-    if (customAt && !isWithinBookingWindow(customAt)) return;
+  const submit = async (isDraft: boolean) => {
+    if (submitting || publishing || inFlight.current) return;
+    // Every step is validated at submit time: a later step can go stale while
+    // the user re-reads an earlier one, and nothing should slip through. The
+    // first offending step is the one shown, with its own inline messages.
+    const perStep = [validateStep(0), validateStep(1), validateStep(2), validateStep(3)];
+    const merged: StepErrors = Object.assign({}, ...perStep);
+    if (Object.keys(merged).length > 0) {
+      setStepErrors(merged);
+      const firstBad = perStep.findIndex((errors) => Object.keys(errors).length > 0);
+      if (firstBad >= 0) setStep(firstBad);
+      return;
+    }
+
+    const now = new Date();
+    const milestones =
+      bookingKind === 'one_time'
+        ? buildOneTimeMilestones(
+            oneTimeDay(oneTimeDayKind, now),
+            oneTimeClock as ClockTime,
+            clampExpectedHours(hours)
+          )
+        : buildMultiDayMilestones(days, multiClock as ClockTime, clampExpectedHours(hours));
 
     const payload = buildCreateJobRequest({
       serviceId: serviceId!,
-      serviceCategoryId: serviceCategoryId,
+      serviceCategoryId,
       title,
       description,
       requestType: urgency,
-      dateKey,
-      timeSlot,
-      scheduledAtIso: customAt ? customAt.toISOString() : null,
-      expectedHours: hours,
+      bookingType: bookingKind,
+      scheduledAtIso: milestones[0]?.scheduled_at ?? null,
+      milestones: milestones.map((m) => ({
+        scheduledAtIso: m.scheduled_at,
+        expectedHours: Number(m.expected_hours),
+      })),
+      expectedHours: clampExpectedHours(hours),
       countryId: countryId!,
       countyId: countyId!,
       cityId: cityId!,
@@ -483,81 +763,86 @@ export default function PostJobScreen() {
       isDraft,
     });
 
+    inFlight.current = true;
     setSubmitting(isDraft ? 'draft' : 'post');
+
+    // ONLY the request itself is guarded here. Everything after a confirmed 201
+    // (list invalidation, the profile-address write-back, the success alert) runs
+    // OUTSIDE this try/catch, so an exception thrown while handling a job that
+    // really was created can never be reported as "the job failed to post".
+    let created: JobResponse | null = null;
     try {
       const { data } = await authApi.createJob(payload);
-      // The created job's server identity — id, status and bidding window are
-      // the fields the flow needs (bidding_ends_at drives the bidding timer).
-      const created: JobResponse = data;
-      // The job list caches nothing, but a mounted list would still be showing
-      // pre-create data; this tells it to refetch so the new job appears.
-      invalidateJobList();
-      // Publish is offered ONLY for a job the SERVER itself reports as DRAFT.
-      // If the response says anything else, the action is not offered at all —
-      // publishing a job that is not a draft would be wrong.
-      const publishable = isDraftJob(created);
-      if (isDraft) {
-        showAlert({
-          title: t('post_draft_title'),
-          message: t('post_draft_msg'),
-          icon: 'save',
-          buttons: publishable
-            ? [
-                { text: t('post_publish_now'), onPress: () => void publishDraft(created.id) },
-                { text: t('post_view_job'), style: 'cancel', onPress: () => goToJob(created.id) },
-              ]
-            : [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
-        });
-      } else {
-        // The status is rendered as a TRANSLATED label, never as the raw enum.
-        const createdStatusKey = jobStatusLabelKey(created.status);
-        showAlert({
-          title: t('post_success_title'),
-          message:
-            created.status === 'OPEN' || !createdStatusKey
-              ? t('post_success_msg')
-              : t('post_success_msg_status', { status: t(createdStatusKey) }),
-          icon: 'check-circle',
-          buttons: [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
-        });
-      }
+      created = data;
     } catch (err: any) {
-      const status: number | undefined = err?.response?.status;
-      if (status === 422) {
+      // One classifier decides every outcome. A genuine connectivity failure is
+      // the ONLY one that may say "check your connection" — a 5xx, a rejected
+      // 4xx, a timeout or an exception thrown client-side each get their own
+      // message, never the connection one.
+      const failure = classifyCreateJobFailure(err);
+
+      if (failure.kind === 'invalid') {
         const mapped = mapValidationErrors(err?.response?.data?.detail);
-        setErrors(mapped.fieldErrors);
-        // Anything we could not attach to an input is surfaced instead of
-        // being swallowed, and nothing is dropped from the form.
-        showUnmapped(mapped.formErrors);
-      } else if (status === 401) {
-        // The client already refreshed + retried once; getting here means the
-        // session is over and it has been cleared for us.
-        showAlert({
-          title: t('post_err_session_title'),
-          message: t('post_err_session_msg'),
-          icon: 'lock',
-        });
+        setStepErrors((prev) => ({ ...prev, ...mapped.fieldErrors }));
+        // A 422 names FIELDS while the screen shows STEPS: jump to the earliest
+        // step that owns an offending field so the messages are visible.
+        const step = firstErrorStep(mapped.fieldErrors);
+        if (step !== null) setStep(step);
+        if (mapped.formErrors.length > 0) showUnmapped(mapped.formErrors);
+        else if (step === null) showUnmapped([t('post_err_invalid_msg')]);
       } else {
-        // Network / timeout / 5xx — keep everything the user typed.
+        const copy = createJobErrorCopy(failure.kind);
         showAlert({
-          title: t('post_err_network_title'),
-          message: t('post_err_network_msg'),
-          icon: 'wifi-off',
+          title: t(copy.titleKey),
+          // The undocumented 4xx family passes the backend's own readable text
+          // through; 5xx/unknown/timeout/network always use translated copy.
+          message:
+            copy.preferServerMessage && failure.message ? failure.message : t(copy.messageKey),
+          icon: copy.icon,
         });
       }
     } finally {
+      inFlight.current = false;
       setSubmitting(null);
     }
+
+    // No 201 → the dialog above is the whole outcome, and every entered value is
+    // still on screen for the retry.
+    if (!created) return;
+
+    invalidateJobList();
+    const publishable = isDraftJob(created);
+
+    if (isDraft) {
+      // Drafts NEVER touch the saved profile address.
+      showAlert({
+        title: t('post_draft_title'),
+        message: t('post_draft_msg'),
+        icon: 'save',
+        buttons: publishable
+          ? [
+              { text: t('post_publish_now'), onPress: () => void publishDraft(created.id) },
+              { text: t('post_view_job'), style: 'cancel', onPress: () => goToJob(created.id) },
+            ]
+          : [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
+      });
+      return;
+    }
+
+    // Only a CONFIRMED 201 with is_draft false writes the address back, and
+    // only when it actually differs from what the profile holds.
+    const addressUpdated = await syncProfileAddress();
+    showPostedAlert(created, addressUpdated);
   };
 
-  // ── Service section (Issue 1: no flat list, ever) ──────────────────────────
+  // ── Service section ───────────────────────────────────────────────────────
   const renderServiceSection = () => {
     if (serviceId == null) {
       return (
         <TouchableOpacity
           style={[
             styles.serviceEmpty,
-            { backgroundColor: c.input, borderColor: errors.service ? c.destructive : c.border },
+            { backgroundColor: c.input, borderColor: stepErrors.service ? c.destructive : c.border },
           ]}
           onPress={() => setServiceSheetOpen(true)}
           accessibilityRole="button"
@@ -621,7 +906,7 @@ export default function PostJobScreen() {
     );
   };
 
-  // ── Address picker rows ────────────────────────────────────────────────────
+  // ── Address helpers ───────────────────────────────────────────────────────
   const pickerRow = (
     field: 'country_id' | 'county_id' | 'city_id',
     labelKey: TranslationKey,
@@ -635,7 +920,7 @@ export default function PostJobScreen() {
         style={[
           styles.input,
           styles.pickerInput,
-          { backgroundColor: c.input, borderColor: errors[field] ? c.destructive : c.border },
+          { backgroundColor: c.input, borderColor: stepErrors[field] ? c.destructive : c.border },
         ]}
         onPress={onPress}
         disabled={disabled}
@@ -648,8 +933,8 @@ export default function PostJobScreen() {
         </Text>
         <Feather name="chevron-down" size={16} color={c.mutedForeground} />
       </TouchableOpacity>
-      {errors[field] ? (
-        <Text style={[styles.error, { color: c.destructive }]}>{errors[field]}</Text>
+      {stepErrors[field] ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors[field]}</Text>
       ) : null}
     </View>
   );
@@ -667,7 +952,11 @@ export default function PostJobScreen() {
         style={[
           styles.input,
           options?.multiline && styles.textAreaSmall,
-          { backgroundColor: c.input, color: c.text, borderColor: errors[field] ? c.destructive : c.border },
+          {
+            backgroundColor: c.input,
+            color: c.text,
+            borderColor: stepErrors[field] ? c.destructive : c.border,
+          },
         ]}
         value={value}
         onChangeText={(v) => {
@@ -677,13 +966,13 @@ export default function PostJobScreen() {
         multiline={options?.multiline}
         placeholderTextColor={c.mutedForeground}
       />
-      {errors[field] ? (
-        <Text style={[styles.error, { color: c.destructive }]}>{errors[field]}</Text>
+      {stepErrors[field] ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors[field]}</Text>
       ) : null}
     </View>
   );
 
-  // ── Geo modal (Issue 4: one sheet pattern for country / county / city) ─────
+  // ── Geo modal ─────────────────────────────────────────────────────────────
   const geoKind = pickerOpen ?? 'country';
   const geoIsCountry = geoKind === 'country';
   const geoSource: Array<{ id: number; name: string }> | null = geoIsCountry
@@ -712,262 +1001,449 @@ export default function PostJobScreen() {
   };
 
   const busy = submitting !== null;
-  const quickDimmed = customAt != null;
+  const profileLoading = profileStatus === 'loading' || profileStatus === 'idle';
+
+  // ── Step bodies ───────────────────────────────────────────────────────────
+  const renderDetailsStep = () => (
+    <>
+      <Text style={[styles.label, { color: c.text }]}>{t('post_service')}</Text>
+      {renderServiceSection()}
+      {stepErrors.service ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.service}</Text>
+      ) : null}
+
+      <Text style={[styles.label, { color: c.text }]}>{t('post_job_title')}</Text>
+      <TextInput
+        style={[
+          styles.input,
+          { backgroundColor: c.input, color: c.text, borderColor: stepErrors.title ? c.destructive : c.border },
+        ]}
+        placeholder={t('post_title_placeholder')}
+        placeholderTextColor={c.mutedForeground}
+        value={title}
+        onChangeText={(v) => {
+          setTitle(v);
+          clearError('title');
+        }}
+        maxLength={TITLE_MAX}
+      />
+      {stepErrors.title ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.title}</Text>
+      ) : null}
+
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_description')}</Text>
+        <Text
+          style={[
+            styles.counter,
+            { color: wordCount > DESC_WORD_MAX ? c.destructive : c.mutedForeground },
+          ]}
+        >
+          {t('post_words', { n: wordCount })}
+        </Text>
+      </View>
+      <TextInput
+        style={[
+          styles.textArea,
+          {
+            backgroundColor: c.input,
+            color: c.text,
+            borderColor: stepErrors.description ? c.destructive : c.border,
+          },
+        ]}
+        placeholder={t('post_desc_placeholder')}
+        placeholderTextColor={c.mutedForeground}
+        value={description}
+        onChangeText={(v) => {
+          setDescription(v);
+          clearError('description');
+        }}
+        multiline
+        numberOfLines={5}
+        textAlignVertical="top"
+      />
+      {stepErrors.description ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.description}</Text>
+      ) : null}
+    </>
+  );
+
+  const renderBookingStep = () => (
+    <>
+      <Text style={[styles.label, { color: c.text, marginTop: 4 }]}>{t('post_booking_pick')}</Text>
+      <View style={styles.optionRow}>
+        <BookingTypeCard
+          active={bookingKind === 'one_time'}
+          icon="calendar"
+          title={t('post_booking_one_time')}
+          description={t('post_booking_one_time_desc')}
+          onPress={() => setBookingKind('one_time')}
+        />
+        <BookingTypeCard
+          active={bookingKind === 'multi_day'}
+          icon="repeat"
+          title={t('post_booking_long_term')}
+          description={t('post_booking_long_term_desc')}
+          onPress={() => setBookingKind('multi_day')}
+        />
+      </View>
+      <Text style={[styles.hint, { color: c.mutedForeground }]}>
+        {bookingKind === 'one_time' ? t('post_booking_one_time_note') : t('post_booking_long_term_note')}
+      </Text>
+    </>
+  );
+
+  const renderScheduleStep = () => (
+    <>
+      {bookingKind === 'one_time' ? (
+        <>
+          <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
+          <View style={styles.chipWrapRow}>
+            {(['today', 'tomorrow'] as OneTimeDay[]).map((kind) => {
+              const active = oneTimeDayKind === kind;
+              return (
+                <TouchableOpacity
+                  key={kind}
+                  style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                  onPress={() => {
+                    setOneTimeDayKind(kind);
+                    clearError('date');
+                    clearError('time');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}>
+                    {t(kind === 'today' ? 'post_date_today' : 'post_date_tomorrow')}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+          <TouchableOpacity
+            style={[
+              styles.input,
+              styles.fieldButton,
+              {
+                backgroundColor: c.input,
+                borderColor: stepErrors.time || stepErrors.date ? c.destructive : c.border,
+              },
+            ]}
+            onPress={() => setTimeSheetOpen(true)}
+            accessibilityRole="button"
+          >
+            <Feather name="clock" size={15} color={activeClock ? c.primary : c.mutedForeground} />
+            <Text
+              style={[styles.fieldButtonText, { color: activeClock ? c.text : c.mutedForeground }]}
+            >
+              {timeFieldLabel}
+            </Text>
+            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
+          <TouchableOpacity
+            style={[
+              styles.input,
+              styles.fieldButton,
+              {
+                backgroundColor: c.input,
+                borderColor: stepErrors.date ? c.destructive : c.border,
+              },
+            ]}
+            onPress={() => setDateSheetOpen(true)}
+            accessibilityRole="button"
+          >
+            <Feather
+              name="calendar"
+              size={15}
+              color={rangeStart ? c.primary : c.mutedForeground}
+            />
+            <Text
+              style={[
+                styles.fieldButtonText,
+                { color: rangeStart ? c.text : c.mutedForeground },
+              ]}
+              numberOfLines={1}
+            >
+              {rangeStart && rangeEnd
+                ? formatRangeLabel(rangeStart, rangeEnd, months, weekdays)
+                : t('post_dates_pick')}
+            </Text>
+            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+          </TouchableOpacity>
+
+          <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+          <TouchableOpacity
+            style={[
+              styles.input,
+              styles.fieldButton,
+              {
+                backgroundColor: c.input,
+                borderColor: stepErrors.time ? c.destructive : c.border,
+                opacity: rangeStart ? 1 : 0.55,
+              },
+            ]}
+            onPress={() => rangeStart && setTimeSheetOpen(true)}
+            disabled={!rangeStart}
+            accessibilityRole="button"
+          >
+            <Feather name="clock" size={15} color={multiClock ? c.primary : c.mutedForeground} />
+            <Text
+              style={[styles.fieldButtonText, { color: multiClock ? c.text : c.mutedForeground }]}
+            >
+              {timeFieldLabel}
+            </Text>
+            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+          </TouchableOpacity>
+          {!rangeStart ? (
+            <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_time_after_dates')}</Text>
+          ) : null}
+
+          {milestonePreview.length > 0 ? (
+            <View style={styles.milestoneWrap}>
+              <Text style={[styles.label, { color: c.text }]}>{t('post_milestones')}</Text>
+              {milestonePreview.map((item, index) => (
+                <Animated.View
+                  key={item.key}
+                  entering={FadeInUp.delay(index * 45).duration(260)}
+                  style={[
+                    styles.milestoneRow,
+                    { backgroundColor: c.primaryLight, borderColor: c.primary },
+                  ]}
+                >
+                  <View style={[styles.milestoneDot, { backgroundColor: c.primary }]}>
+                    <Text style={[styles.milestoneDotText, { color: c.primaryForeground }]}>
+                      {index + 1}
+                    </Text>
+                  </View>
+                  <View style={styles.milestoneBody}>
+                    <Text style={[styles.milestoneTitle, { color: c.text }]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                    <Text style={[styles.milestoneMeta, { color: c.mutedForeground }]} numberOfLines={1}>
+                      {item.day}
+                    </Text>
+                  </View>
+                  <Text style={[styles.milestoneTime, { color: c.primary }]}>{item.time}</Text>
+                </Animated.View>
+              ))}
+            </View>
+          ) : null}
+        </>
+      )}
+
+      {stepErrors.date || stepErrors.time ? (
+        <Animated.View entering={FadeIn.duration(180)} style={styles.inlineError}>
+          <Feather name="alert-circle" size={13} color={c.destructive} />
+          <Text style={[styles.error, { color: c.destructive, marginTop: 0, flex: 1 }]}>
+            {stepErrors.time ?? stepErrors.date}
+          </Text>
+        </Animated.View>
+      ) : scheduleError ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>{scheduleError}</Text>
+      ) : null}
+
+      <Text style={[styles.label, { color: c.text }]}>
+        {bookingKind === 'one_time' ? t('post_hours') : t('post_hours_per_day')}
+      </Text>
+      <View style={[styles.stepper, { backgroundColor: c.input, borderColor: c.border }]}>
+        <TouchableOpacity
+          style={[styles.stepperBtn, { backgroundColor: c.muted }]}
+          onPress={() => setHours((h) => Math.max(MIN_EXPECTED_HOURS, h - 1))}
+          accessibilityRole="button"
+        >
+          <Feather name="minus" size={16} color={c.text} />
+        </TouchableOpacity>
+        <Text style={[styles.stepperValue, { color: c.text }]}>
+          {hours === 1 ? t('post_hours_value', { n: hours }) : t('post_hours_value_plural', { n: hours })}
+        </Text>
+        <TouchableOpacity
+          style={[styles.stepperBtn, { backgroundColor: c.muted }]}
+          onPress={() => setHours((h) => Math.min(MAX_EXPECTED_HOURS, h + 1))}
+          accessibilityRole="button"
+        >
+          <Feather name="plus" size={16} color={c.text} />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
+      <View style={styles.optionRow}>
+        <RequestTypeCard
+          active={urgency === 'urgent'}
+          icon="zap"
+          title={t('post_urgent')}
+          description={t('post_urgent_desc')}
+          accent={c.urgent}
+          accentSoft={c.urgentLight}
+          onAccent={c.primaryForeground}
+          idle={c.muted}
+          border={c.border}
+          titleColor={c.text}
+          bodyColor={c.mutedForeground}
+          onPress={() => setUrgency('urgent')}
+        />
+        <RequestTypeCard
+          active={urgency === 'regular'}
+          icon="clock"
+          title={t('post_regular')}
+          description={t('post_regular_desc')}
+          accent={c.success}
+          accentSoft={c.successLight}
+          onAccent={c.primaryForeground}
+          idle={c.muted}
+          border={c.border}
+          titleColor={c.text}
+          bodyColor={c.mutedForeground}
+          onPress={() => setUrgency('regular')}
+        />
+      </View>
+    </>
+  );
+
+  const renderAddressStep = () => (
+    <>
+      {profileLoading ? <AddressSkeleton /> : null}
+      {stepErrors.address ? (
+        <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.address}</Text>
+      ) : null}
+      {pickerRow(
+        'country_id',
+        'addr_c_country',
+        country?.name ?? null,
+        countriesStatus === 'loading',
+        () => setPickerOpen('country')
+      )}
+      {pickerRow(
+        'county_id',
+        'addr_c_county',
+        county?.name ?? null,
+        countryId == null,
+        () => setPickerOpen('county')
+      )}
+      {pickerRow('city_id', 'addr_c_city', city?.name ?? null, countyId == null, () =>
+        setPickerOpen('city')
+      )}
+      {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
+      {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
+      {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode)}
+      {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
+      {textField('formatted_address', 'addr_c_formatted', formattedAddress, setFormattedAddress, {
+        multiline: true,
+      })}
+    </>
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]}>{t('post_a_job')}</Text>
-        <View style={{ width: 22 }} />
+        <BackButton onPress={goBack} />
+        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>
+          {t(STEP_KEYS[step])}
+        </Text>
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Service */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_service')}</Text>
-        {renderServiceSection()}
-        {errors.service ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errors.service}</Text>
-        ) : null}
-
-        {/* Title */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_job_title')}</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: errors.title ? c.destructive : c.border }]}
-          placeholder={t('post_title_placeholder')}
-          placeholderTextColor={c.mutedForeground}
-          value={title}
-          onChangeText={(v) => {
-            setTitle(v);
-            clearError('title');
-          }}
-          maxLength={TITLE_MAX}
-        />
-        {errors.title ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errors.title}</Text>
-        ) : null}
-
-        {/* Description */}
-        <View style={styles.labelRow}>
-          <Text style={[styles.label, { color: c.text }]}>{t('post_description')}</Text>
-          <Text style={[styles.counter, { color: wordCount > DESC_WORD_MAX ? c.destructive : c.mutedForeground }]}>
-            {t('post_words', { n: wordCount })}
-          </Text>
+      {/* Progress: filled segments + "Step n of 4". */}
+      <View style={[styles.progressWrap, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+        <View style={styles.progressTrack}>
+          {STEP_KEYS.map((key, index) => (
+            <View
+              key={key}
+              style={[
+                styles.progressSegment,
+                { backgroundColor: index <= step ? c.primary : c.muted },
+              ]}
+            />
+          ))}
         </View>
-        <TextInput
-          style={[styles.textArea, { backgroundColor: c.input, color: c.text, borderColor: errors.description ? c.destructive : c.border }]}
-          placeholder={t('post_desc_placeholder')}
-          placeholderTextColor={c.mutedForeground}
-          value={description}
-          onChangeText={(v) => {
-            setDescription(v);
-            clearError('description');
-          }}
-          multiline
-          numberOfLines={5}
-          textAlignVertical="top"
-        />
-        {errors.description ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errors.description}</Text>
-        ) : null}
+        <Text style={[styles.progressLabel, { color: c.mutedForeground }]}>
+          {t('post_step_of', { n: step + 1, total: STEP_COUNT })}
+        </Text>
+      </View>
 
-        {/* Date — the quick path, dimmed (not removed) while a custom slot is set */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
-        <Animated.View
-          layout={LinearTransition.duration(220)}
-          style={[styles.chipWrapRow, quickDimmed && styles.dimmed]}
-        >
-          {DATE_KEYS.map((key) => {
-            const label =
-              key === 'today'
-                ? t('post_date_today')
-                : key === 'tomorrow'
-                  ? t('post_date_tomorrow')
-                  : t('post_date_weekend');
-            const active = !quickDimmed && dateKey === key;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
-                onPress={() => chooseQuickDate(key)}
-              >
-                <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        bottomOffset={110}
+      >
+        <Animated.View key={`step-${step}`} entering={FadeInUp.duration(260)} style={styles.stepBody}>
+          {step === 0 ? renderDetailsStep() : null}
+          {step === 1 ? renderBookingStep() : null}
+          {step === 2 ? renderScheduleStep() : null}
+          {step === 3 ? renderAddressStep() : null}
         </Animated.View>
+      </KeyboardAwareScrollViewCompat>
 
-        {/* Time — quick chips + the custom entry point (Issues 2 & 5) */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-        <Animated.View
-          layout={LinearTransition.duration(220)}
-          style={[styles.chipWrapRow, quickDimmed && styles.dimmed]}
-        >
-          {TIME_SLOTS.map((slot) => {
-            const active = !quickDimmed && timeSlot === slot;
-            return (
-              <TouchableOpacity
-                key={slot}
-                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
-                onPress={() => chooseQuickTime(slot)}
-              >
-                <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}>
-                  {slot}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </Animated.View>
-
-        <Animated.View layout={LinearTransition.duration(220)} style={styles.customWrap}>
-          {customAt == null ? (
-            <Animated.View key="custom-cta" entering={FadeInUp.duration(200)} exiting={FadeOut.duration(140)}>
-              <TouchableOpacity
-                style={[styles.customCta, { borderColor: c.primary, backgroundColor: c.primaryLight }]}
-                onPress={() => setDateSheetOpen(true)}
-                accessibilityRole="button"
-              >
-                <Feather name="calendar" size={15} color={c.primary} />
-                <Text style={[styles.customCtaText, { color: c.primary }]}>
-                  {t('post_sched_custom')}
-                </Text>
-                <Feather name="chevron-right" size={15} color={c.primary} />
-              </TouchableOpacity>
-            </Animated.View>
-          ) : (
-            <Animated.View
-              key="custom-card"
-              entering={FadeInUp.duration(200)}
-              exiting={FadeOut.duration(140)}
-              style={[styles.customCard, { borderColor: c.primary, backgroundColor: c.primaryLight }]}
+      {/* Bottom action bar — safe-area padded so the Android nav bar never
+          covers it, with the final step's two post actions. */}
+      <View
+        style={[
+          styles.bar,
+          {
+            backgroundColor: c.surface,
+            borderTopColor: c.border,
+            paddingBottom: Math.max(insets.bottom, 12),
+          },
+        ]}
+      >
+        {step === STEP_COUNT - 1 ? (
+          <>
+            <TouchableOpacity
+              style={[styles.submitBtn, { backgroundColor: c.primary, opacity: busy ? 0.6 : 1 }]}
+              onPress={() => void submit(false)}
+              disabled={busy}
+              accessibilityRole="button"
             >
-              <View style={styles.customCardBody}>
-                <Text style={[styles.customCardLabel, { color: c.mutedForeground }]}>
-                  {t('post_sched_custom')}
+              {submitting === 'post' ? (
+                <InlineLoader size={20} />
+              ) : (
+                <Text style={[styles.submitText, { color: c.primaryForeground }]}>
+                  {t('post_submit')}
                 </Text>
-                <Text style={[styles.customCardValue, { color: c.text }]} numberOfLines={1}>
-                  {formatScheduleLabel(customAt, months, weekdays)}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setDateSheetOpen(true)} hitSlop={8} accessibilityRole="button">
-                <Feather name="edit-2" size={15} color={c.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setCustomAt(null)} hitSlop={8} accessibilityRole="button">
-                <Feather name="x" size={16} color={c.mutedForeground} />
-              </TouchableOpacity>
-            </Animated.View>
-          )}
-        </Animated.View>
-
-        {errors.date ? <Text style={[styles.error, { color: c.destructive }]}>{errors.date}</Text> : null}
-
-        {/* Expected hours */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_hours')}</Text>
-        <View style={[styles.stepper, { backgroundColor: c.input, borderColor: errors.hours ? c.destructive : c.border }]}>
-          <TouchableOpacity
-            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-            onPress={() => setHours((h) => Math.max(1, h - 1))}
-          >
-            <Feather name="minus" size={16} color={c.text} />
-          </TouchableOpacity>
-          <Text style={[styles.stepperValue, { color: c.text }]}>
-            {hours === 1 ? t('post_hours_value', { n: hours }) : t('post_hours_value_plural', { n: hours })}
-          </Text>
-          <TouchableOpacity
-            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-            onPress={() => setHours((h) => Math.min(24, h + 1))}
-          >
-            <Feather name="plus" size={16} color={c.text} />
-          </TouchableOpacity>
-        </View>
-        {errors.hours ? <Text style={[styles.error, { color: c.destructive }]}>{errors.hours}</Text> : null}
-
-        {/* Request type — same meaning, real selected/unselected states */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
-        <View style={styles.urgencyRow}>
-          <UrgencyCard
-            active={urgency === 'urgent'}
-            icon="zap"
-            title={t('post_urgent')}
-            description={t('post_urgent_desc')}
-            accent={c.urgent}
-            accentSoft={c.urgentLight}
-            onAccent={c.primaryForeground}
-            idle={c.muted}
-            border={c.border}
-            titleColor={c.text}
-            bodyColor={c.mutedForeground}
-            onPress={() => setUrgency('urgent')}
-          />
-          <UrgencyCard
-            active={urgency === 'regular'}
-            icon="clock"
-            title={t('post_regular')}
-            description={t('post_regular_desc')}
-            accent={c.success}
-            accentSoft={c.successLight}
-            onAccent={c.primaryForeground}
-            idle={c.muted}
-            border={c.border}
-            titleColor={c.text}
-            bodyColor={c.mutedForeground}
-            onPress={() => setUrgency('regular')}
-          />
-        </View>
-
-        {/* Address */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_address')}</Text>
-        {errors.address ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errors.address}</Text>
-        ) : null}
-        {pickerRow(
-          'country_id',
-          'addr_c_country',
-          country?.name ?? null,
-          countriesStatus === 'loading',
-          () => setPickerOpen('country')
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.draftBtn, { borderColor: c.primary, opacity: busy ? 0.6 : 1 }]}
+              onPress={() => void submit(true)}
+              disabled={busy}
+              accessibilityRole="button"
+            >
+              {submitting === 'draft' ? (
+                <InlineLoader size={20} />
+              ) : (
+                <Text style={[styles.draftText, { color: c.primary }]}>{t('post_save_draft')}</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.barRow}>
+            <TouchableOpacity
+              style={[styles.barBack, { borderColor: c.border }]}
+              onPress={goBack}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.barBackText, { color: c.text }]}>{t('post_back')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.barNext, { backgroundColor: c.primary }]}
+              onPress={goNext}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.barNextText, { color: c.primaryForeground }]}>
+                {t('post_next')}
+              </Text>
+              <Feather name="arrow-right" size={16} color={c.primaryForeground} />
+            </TouchableOpacity>
+          </View>
         )}
-        {pickerRow(
-          'county_id',
-          'addr_c_county',
-          county?.name ?? null,
-          countryId == null,
-          () => setPickerOpen('county')
-        )}
-        {pickerRow('city_id', 'addr_c_city', city?.name ?? null, countyId == null, () => setPickerOpen('city'))}
-        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
-        {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
-        {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode)}
-        {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
-        {textField('formatted_address', 'addr_c_formatted', formattedAddress, setFormattedAddress, {
-          multiline: true,
-        })}
+      </View>
 
-        {/* Actions */}
-        <TouchableOpacity
-          style={[styles.submitBtn, { backgroundColor: c.primary, opacity: busy ? 0.6 : 1 }]}
-          onPress={() => void submit(false)}
-          disabled={busy}
-        >
-          {submitting === 'post' ? <InlineLoader size={20} /> : <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('post_submit')}</Text>}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.draftBtn, { borderColor: c.primary, opacity: busy ? 0.6 : 1 }]}
-          onPress={() => void submit(true)}
-          disabled={busy}
-        >
-          {submitting === 'draft' ? (
-            <InlineLoader size={20} />
-          ) : (
-            <Text style={[styles.draftText, { color: c.primary }]}>{t('post_save_draft')}</Text>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
-
-      {/* Location sheets — country / county / city, one identical pattern */}
+      {/* Country / county / city — one identical sheet pattern */}
       <BottomSheet
         visible={pickerOpen !== null}
         onClose={() => setPickerOpen(null)}
@@ -1001,7 +1477,9 @@ export default function PostJobScreen() {
           </View>
         ) : geoOptions && geoOptions.length === 0 ? (
           <View style={styles.modalState}>
-            <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>{t('geo_no_match')}</Text>
+            <Text style={[styles.serviceStateText, { color: c.mutedForeground }]}>
+              {t('geo_no_match')}
+            </Text>
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.modalListPad} keyboardShouldPersistTaps="handled">
@@ -1011,7 +1489,7 @@ export default function PostJobScreen() {
                 <TouchableOpacity
                   key={option.id}
                   style={[
-                    styles.optionRow,
+                    styles.optionLarge,
                     {
                       backgroundColor: active ? c.primaryLight : c.input,
                       borderColor: active ? c.primary : c.border,
@@ -1043,12 +1521,36 @@ export default function PostJobScreen() {
         }}
       />
 
-      {/* Custom date & time */}
-      <DateTimeSheet
+      {/* Time — its own clock picker, never combined with the calendar. */}
+      <TimePickerSheet
+        visible={timeSheetOpen}
+        onClose={() => setTimeSheetOpen(false)}
+        title={t('post_time_picker_title')}
+        value={activeClock}
+        day={activeDay}
+        onConfirm={(value) => {
+          if (bookingKind === 'one_time') setOneTimeClock(value);
+          else setMultiClock(value);
+          clearError('time');
+          clearError('date');
+          setTimeSheetOpen(false);
+        }}
+      />
+
+      {/* Dates — calendar only, range mode, 7-day cap built in. */}
+      <DateRangePickerSheet
         visible={dateSheetOpen}
         onClose={() => setDateSheetOpen(false)}
-        value={customAt}
-        onConfirm={confirmCustom}
+        title={t('post_date_picker_title')}
+        value={rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null}
+        minDay={today}
+        onConfirm={(range) => {
+          setRangeStart(range.start);
+          setRangeEnd(range.end);
+          clearError('date');
+          clearError('time');
+          setDateSheetOpen(false);
+        }}
       />
     </View>
   );
@@ -1058,70 +1560,124 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
   },
-  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
-  scroll: { padding: 20, paddingBottom: 60, gap: 6 },
+  headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18, flex: 1, textAlign: 'center' },
+  progressWrap: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    gap: 6,
+  },
+  progressTrack: { flexDirection: 'row', gap: 6 },
+  progressSegment: { flex: 1, height: 4, borderRadius: 2 },
+  progressLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, letterSpacing: 0.3 },
+  scroll: { padding: 20, paddingBottom: 36, gap: 6 },
+  stepBody: { gap: 2 },
   label: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 16, marginBottom: 8 },
   smallLabel: { fontFamily: 'Manrope_500Medium', fontSize: 12, marginBottom: 6 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
   counter: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginBottom: 8 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14 },
-  textArea: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'Manrope_400Regular', fontSize: 14, minHeight: 110 },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 14,
+  },
+  textArea: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 14,
+    minHeight: 110,
+  },
   textAreaSmall: { minHeight: 64 },
+  fieldButton: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  fieldButtonText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
   error: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 4 },
-  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 8, lineHeight: 16 },
+  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   fieldWrap: { marginBottom: 12 },
   chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  dimmed: { opacity: 0.45 },
-  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
-  chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
-  customWrap: { marginTop: 10 },
-  customCta: {
+  chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
+  chipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     borderWidth: 1,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    padding: 8,
   },
-  customCtaText: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
-  customCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  customCardBody: { flex: 1 },
-  customCardLabel: { fontFamily: 'Manrope_500Medium', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 },
-  customCardValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginTop: 3 },
-  stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 12, padding: 8 },
   stepperBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   stepperValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
-  urgencyRow: { flexDirection: 'row', gap: 10 },
-  urgencySlot: { flex: 1 },
-  urgencyOption: { borderWidth: 1.5, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 12, alignItems: 'center', gap: 7 },
-  urgencyIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  urgencyTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
-  urgencyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center', lineHeight: 15 },
-  urgencyBadge: {
+  optionRow: { flexDirection: 'row', gap: 10 },
+  optionSlot: { flex: 1 },
+  optionCard: {
+    flex: 1,
+    minHeight: 168,
+    borderWidth: 1.5,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 7,
+  },
+  optionIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  optionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14, minHeight: 20, textAlign: 'center' },
+  optionDesc: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    textAlign: 'center',
+    lineHeight: 15,
+    minHeight: 45,
+  },
+  optionBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 10,
+    right: 10,
     width: 18,
     height: 18,
     borderRadius: 9,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  optionLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  milestoneWrap: { marginTop: 4 },
+  milestoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  milestoneDot: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  milestoneDotText: { fontFamily: 'Manrope_700Bold', fontSize: 11 },
+  milestoneBody: { flex: 1 },
+  milestoneTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  milestoneMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
+  milestoneTime: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
   serviceEmpty: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1149,10 +1705,31 @@ const styles = StyleSheet.create({
   serviceStateAction: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
   pickerInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   pickerText: { fontFamily: 'Manrope_400Regular', fontSize: 14, flex: 1 },
-  submitBtn: { marginTop: 28, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  bar: {
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    gap: 10,
+  },
+  barRow: { flexDirection: 'row', gap: 10 },
+  barBack: { flex: 1, borderWidth: 1.5, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  barBackText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  barNext: {
+    flex: 2,
+    borderRadius: 14,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  barNextText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  submitBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
-  draftBtn: { marginTop: 12, borderRadius: 14, paddingVertical: 15, alignItems: 'center', borderWidth: 1.5 },
+  draftBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center', borderWidth: 1.5 },
   draftText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  skeletonWrap: { gap: 10, marginBottom: 14 },
+  skeletonRow: { height: 42, borderRadius: 12 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1164,15 +1741,5 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 14, paddingVertical: 2 },
   modalListPad: { padding: 16, gap: 8 },
   modalState: { padding: 32, alignItems: 'center', gap: 10 },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
   optionText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
 });

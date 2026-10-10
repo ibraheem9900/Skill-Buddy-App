@@ -1,29 +1,50 @@
 /**
  * jobCreate.ts
  *
- * Pure helpers behind the Post-Job form (POST /api/v1/jobs):
+ * Pure helpers behind the Post-Job wizard (POST /api/v1/jobs):
  *
- *  1. buildCreateJobRequest — turns raw form values into the EXACT JobCreate
- *     body: snake_case keys, integers as integers, ISO 8601 UTC dates, an
- *     array of milestones with a numeric expected_hours, and `is_draft`
- *     true/false.
- *  2. resolveScheduledAt — converts the form's date chip + time chip into an
- *     ISO 8601 UTC string.
- *  3. mapValidationErrors — turns a FastAPI 422 body into per-field messages
- *     so each error can be shown under the input it belongs to.
+ *  1. buildCreateJobRequest — turns the wizard's raw form values into the EXACT
+ *     JobCreate body: snake_case keys, integers as integers, ISO 8601 UTC dates,
+ *     the booking_type that matches the wizard's step 2, and one milestone per
+ *     booked day with a numeric expected_hours.
+ *  2. mapValidationErrors — turns a FastAPI 422 body into per-field messages so
+ *     each error can be shown under the input it belongs to.
  *
- * No React and no axios here, so every rule above is unit-testable without a
- * renderer or a live token.
+ * No React and no axios here, so every rule above is unit-testable.
+ *
+ * ── BOOKING_TYPE / MILESTONES AS THE LIVE OPENAPI DEFINES THEM ──────────────
+ *   BookingType enum: "ONE_TIME" | "MULTI_DAY"
+ *     "ONE_TIME  -> a single occurrence (one milestone).
+ *      MULTI_DAY -> up to JobRequest.MAX_MILESTONES occurrences within
+ *                   one week, each tracked as its own JobMilestone."
+ *   JobMilestoneCreate: { scheduled_at (required), expected_hours }
+ *   JobCreate.required: [service_id, title, milestones, address]
+ *
+ * So ONE_TIME ships exactly one milestone and MULTI_DAY ships one per booked
+ * day (the wizard caps that at 7 — the "one week" the schema documents). The
+ * day-by-day arithmetic lives in lib/jobBooking.ts; this module only maps the
+ * wizard's values onto the wire contract.
  */
 
+import { MAX_MILESTONE_DAYS, bookingTypeFor, clampExpectedHours } from '@/lib/jobBooking';
+import { firstErrorMessage } from '@/lib/jobList';
 import type {
   CreateJobRequest,
   JobAddressCreate,
+  JobMilestoneCreate,
   JobRequestType,
   ValidationErrorDetail,
 } from '@/types';
 
-/** The Post-Job form's raw values (screen state). */
+/** One booked day of a long-term job, as the wizard's form state holds it. */
+export interface JobMilestoneInput {
+  /** ISO 8601 UTC, composed from the local day + clock time. */
+  scheduledAtIso: string;
+  /** Per-day expected hours (the same value applies to every day). */
+  expectedHours: number;
+}
+
+/** The Post-Job wizard's raw values (shared screen state). */
 export interface JobFormValues {
   /** Selected SERVICE id from GET /api/v1/services — never invented. */
   serviceId: number | null;
@@ -33,16 +54,16 @@ export interface JobFormValues {
   description: string;
   /** Form uses 'urgent' | 'regular'; the API uses URGENT | REGULAR. */
   requestType: 'urgent' | 'regular';
-  /** Which date chip is selected. */
-  dateKey: 'today' | 'tomorrow' | 'weekend';
-  /** Which time chip is selected, e.g. '11:00 AM'. */
-  timeSlot: string;
+  /** Form uses 'one_time' | 'multi_day'; the API uses ONE_TIME | MULTI_DAY. */
+  bookingType: 'one_time' | 'multi_day';
   /**
-   * CUSTOM schedule (the date/time picker) as an ISO 8601 UTC string.
-   * When set it wins over dateKey + timeSlot, so the fast path and the custom
-   * path share one `scheduled_at` contract.
+   * ONE_TIME only: the single chosen instant as ISO 8601 UTC (the step-3
+   * Today/Tomorrow choice combined with the clock-picker time).
    */
   scheduledAtIso?: string | null;
+  /** MULTI_DAY only: one entry per booked day (1..7). */
+  milestones?: JobMilestoneInput[];
+  /** Expected hours — the single value for ONE_TIME, per day for MULTI_DAY. */
   expectedHours: number;
   /** Numeric ids from the PUBLIC geo endpoints. */
   countryId: number | null;
@@ -57,12 +78,13 @@ export interface JobFormValues {
   isDraft: boolean;
 }
 
-/** Form error keys the screen can render under an input. */
+/** Form error keys the wizard can render under an input. */
 export type JobFormField =
   | 'title'
   | 'description'
   | 'service'
   | 'date'
+  | 'time'
   | 'hours'
   | 'address'
   | 'country_id'
@@ -98,68 +120,12 @@ function text(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** '9:00 AM' / '1:00 PM' / '12:30 PM' → { h, m }. Returns null if unreadable. */
-export function parseTimeSlot(slot: string): { h: number; m: number } | null {
-  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(slot ?? '').trim());
-  if (!match) return null;
-
-  const hour12 = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  if (hour12 < 1 || hour12 > 12 || minutes > 59) return null;
-
-  let hours = hour12 % 12;
-  if (/PM/i.test(match[3])) hours += 12;
-  return { h: hours, m: minutes };
-}
-
-/**
- * Resolve the form's date + time chips into an ISO 8601 UTC string.
- *
- * DATE CHIPS (deterministic — the app has no date-picker dependency):
- *   today    → today
- *   tomorrow → +1 day
- *   weekend  → the next Saturday on or after that date (Sunday rolls a week)
- * The chip is applied in the device's LOCAL time zone, then serialised with
- * toISOString() so the API always receives UTC ("...Z").
- */
-export function resolveScheduledAt(
-  dateKey: JobFormValues['dateKey'],
-  timeSlot: string,
-  now: Date = new Date()
-): string {
-  const time = parseTimeSlot(timeSlot) ?? { h: 9, m: 0 };
-
-  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (dateKey === 'tomorrow') {
-    target.setDate(target.getDate() + 1);
-  } else if (dateKey === 'weekend') {
-    // getDay(): 0 = Sunday, 6 = Saturday. Next Saturday on/after today.
-    const delta = (6 - target.getDay() + 7) % 7;
-    target.setDate(target.getDate() + delta);
-  }
-
-  target.setHours(time.h, time.m, 0, 0);
-  return target.toISOString();
-}
-
-/**
- * The one `scheduled_at` the form sends: the CUSTOM picker's ISO value when
- * the user chose a custom slot, otherwise the date + time chips.
- *
- * A custom value that is not a parseable ISO 8601 date falls back to the chip
- * pair rather than shipping `null` to the API (which would be a 422) — the
- * screen independently blocks submission for an out-of-window slot.
- */
-export function resolveJobScheduledAt(
-  values: Pick<JobFormValues, 'dateKey' | 'timeSlot' | 'scheduledAtIso'>,
-  now: Date = new Date()
-): string {
-  const custom = values.scheduledAtIso;
-  if (typeof custom === 'string' && custom.trim().length > 0) {
-    const parsed = new Date(custom);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-  }
-  return resolveScheduledAt(values.dateKey, values.timeSlot, now);
+/** A usable ISO instant, or null (rejects '' and Invalid Date). */
+function isoInstant(value: string | null | undefined): string | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
 }
 
 /** Compose a human-readable address line when the user left it blank. */
@@ -174,16 +140,39 @@ export function composeFormattedAddress(
 }
 
 /**
+ * The `milestones[]` array the request carries.
+ *
+ * ONE_TIME  → exactly one milestone from `scheduledAtIso` (the only schedule
+ *             channel JobCreate offers; there is no top-level scheduled_at).
+ * MULTI_DAY → one milestone per booked day, capped at the documented week.
+ *
+ * Unusable entries are dropped rather than shipped as `null` scheduled_at
+ * (which would be a 422), and when nothing usable remains the ONE_TIME instant
+ * is used as a last resort so the array is never empty.
+ */
+export function resolveMilestones(values: JobFormValues): JobMilestoneCreate[] {
+  const hours = clampExpectedHours(values.expectedHours);
+  const single = isoInstant(values.scheduledAtIso);
+
+  if (values.bookingType === 'multi_day') {
+    const days = (values.milestones ?? [])
+      .map((entry) => isoInstant(entry?.scheduledAtIso))
+      .filter((iso): iso is string => iso !== null)
+      .slice(0, MAX_MILESTONE_DAYS);
+    if (days.length > 0) {
+      return days.map((scheduledAt) => ({ scheduled_at: scheduledAt, expected_hours: hours }));
+    }
+  }
+
+  return single ? [{ scheduled_at: single, expected_hours: hours }] : [];
+}
+
+/**
  * Build the exact POST /api/v1/jobs body (schema JobCreate).
  *
  * The caller must have validated the REQUIRED selections first, which is why
  * `serviceId` / geo ids are narrowed to non-null here — the API requires
  * service_id and address, and the ids must be real server ids.
- *
- * ONE_TIME only: the existing form schedules a single visit, so booking_type
- * is always ONE_TIME and exactly one milestone is sent. That is also the only
- * channel for the schedule — JobCreate exposes no top-level scheduled_at /
- * expected_hours (see the createJob doc comment).
  *
  * latitude/longitude are OMITTED (there is no map picker in the app) rather
  * than zero-filled, matching the address screens' rule.
@@ -194,13 +183,10 @@ export function buildCreateJobRequest(
     countryId: number;
     countyId: number;
     cityId: number;
-  },
-  now: Date = new Date()
+  }
 ): CreateJobRequest {
   const requestType: JobRequestType =
     values.requestType === 'urgent' ? 'URGENT' : 'REGULAR';
-
-  const scheduledAt = resolveJobScheduledAt(values, now);
 
   const address: JobAddressCreate = {
     country_id: values.countryId,
@@ -225,13 +211,8 @@ export function buildCreateJobRequest(
     title: values.title.trim(),
     description: text(values.description),
     request_type: requestType,
-    booking_type: 'ONE_TIME',
-    milestones: [
-      {
-        scheduled_at: scheduledAt,
-        expected_hours: values.expectedHours,
-      },
-    ],
+    booking_type: bookingTypeFor(values.bookingType),
+    milestones: resolveMilestones(values),
     address,
     is_draft: values.isDraft,
   };
@@ -299,4 +280,261 @@ export function mapValidationErrors(
   }
 
   return { fieldErrors, formErrors };
+}
+
+/* ── Which wizard step owns each field ────────────────────────────────────── */
+
+/**
+ * The screen's four steps, by index:
+ *   0 Job Details · 1 Booking Type · 2 Date & Time · 3 Service Address
+ *
+ * A 422 body names FIELDS, not steps, so a field on an earlier step would
+ * otherwise leave the user looking at an error they cannot see. The request-type
+ * cards (URGENT / REGULAR) live on the step-2 body, not on step 1.
+ */
+export const JOB_FIELD_STEPS: Record<JobFormField, number> = {
+  service: 0,
+  title: 0,
+  description: 0,
+  date: 2,
+  time: 2,
+  hours: 2,
+  address: 3,
+  country_id: 3,
+  county_id: 3,
+  city_id: 3,
+  house_number: 3,
+  street_address: 3,
+  postal_code: 3,
+  landmark: 3,
+  formatted_address: 3,
+};
+
+/**
+ * The EARLIEST step that carries a mapped field error, or null when nothing is
+ * mapped. Errors are resolved top-down like the client-side validation is, so
+ * the user is never sent past a step that is still wrong.
+ */
+export function firstErrorStep(
+  fieldErrors: Partial<Record<JobFormField, string>>
+): number | null {
+  let lowest: number | null = null;
+  for (const field of Object.keys(fieldErrors) as JobFormField[]) {
+    if (!fieldErrors[field]) continue;
+    const step = JOB_FIELD_STEPS[field];
+    if (typeof step !== 'number') continue;
+    if (lowest === null || step < lowest) lowest = step;
+  }
+  return lowest;
+}
+
+/* ── Why a createJob call failed ──────────────────────────────────────────── */
+
+/**
+ * Every way POST /api/v1/jobs can fail here, kept apart on purpose so the UI can
+ * never again answer all of them with "check your connection".
+ *
+ *   network       no response at all — offline, DNS, connection refused. The
+ *                 ONLY case that may claim a connectivity problem.
+ *   timeout       the request was sent and never came back (axios
+ *                 ECONNABORTED/ETIMEDOUT).
+ *   unauthorized  401 that survived the shared client's refresh + single replay.
+ *   invalid       422 — field-by-field; mapped, never shown as a dialog alone.
+ *   badrequest    400 (undocumented).
+ *   forbidden     403 (undocumented).
+ *   notfound      404 (undocumented).
+ *   conflict      409 (undocumented).
+ *   server        5xx.
+ *   unknown       anything else — including an exception thrown client-side
+ *                 after a 201, which must NEVER masquerade as a connection
+ *                 problem.
+ */
+export type CreateJobFailureKind =
+  | 'network'
+  | 'timeout'
+  | 'unauthorized'
+  | 'invalid'
+  | 'badrequest'
+  | 'forbidden'
+  | 'notfound'
+  | 'conflict'
+  | 'server'
+  | 'unknown';
+
+export interface CreateJobFailure {
+  kind: CreateJobFailureKind;
+  /**
+   * The backend's own readable text (a plain-string `detail`, or the first
+   * `detail[].msg`), when it sent one. null when there is nothing usable.
+   */
+  message: string | null;
+}
+
+/** Axios' timeout shape, without importing axios into a pure module. */
+const TIMEOUT_CODES = ['ECONNABORTED', 'ETIMEDOUT'];
+/** Axios' transport-failure code: offline, DNS failure, refused, TLS. */
+const NETWORK_CODE = 'ERR_NETWORK';
+/** A request that was cancelled is not a connectivity problem. */
+const CANCELED_CODE = 'ERR_CANCELED';
+
+function errorCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function isTimeout(err: unknown, code: string | undefined): boolean {
+  if (typeof code === 'string' && TIMEOUT_CODES.includes(code)) return true;
+  const message = (err as { message?: unknown } | null | undefined)?.message;
+  return typeof message === 'string' && message.toLowerCase().includes('timeout');
+}
+
+/**
+ * Is there POSITIVE evidence that the request went out and no HTTP response came
+ * back? Only axios' own transport code, or an error axios itself produced,
+ * counts. A bare `throw new Error(...)` from our own code must NOT qualify —
+ * that is the whole point of this classifier: a client-side exception may never
+ * be reported as "check your connection".
+ */
+function isTransportFailure(err: unknown, code: string | undefined): boolean {
+  if (code === NETWORK_CODE) return true;
+  const isAxiosError = (err as { isAxiosError?: unknown } | null | undefined)?.isAxiosError;
+  return isAxiosError === true;
+}
+
+/**
+ * Bucket a rejected createJob call. Never throws: a malformed error object
+ * degrades to 'unknown' rather than crashing the screen, and a response-less
+ * error is only called a connectivity failure when it really is one.
+ */
+export function classifyCreateJobFailure(err: unknown): CreateJobFailure {
+  const anyErr = err as
+    | { response?: { status?: number; data?: unknown }; code?: string }
+    | null
+    | undefined;
+  const status = anyErr?.response?.status;
+  const message = firstErrorMessage(anyErr?.response?.data);
+
+  if (typeof status !== 'number') {
+    // No HTTP response. Three very different situations live here, so they are
+    // told apart rather than all being called "network".
+    const code = errorCode(err);
+    if (isTimeout(err, code)) return { kind: 'timeout', message };
+    if (code === CANCELED_CODE) return { kind: 'unknown', message };
+    if (isTransportFailure(err, code)) return { kind: 'network', message };
+    return { kind: 'unknown', message };
+  }
+
+  if (status === 401) return { kind: 'unauthorized', message };
+  if (status === 422) return { kind: 'invalid', message };
+  if (status === 400) return { kind: 'badrequest', message };
+  if (status === 403) return { kind: 'forbidden', message };
+  if (status === 404) return { kind: 'notfound', message };
+  if (status === 409) return { kind: 'conflict', message };
+  if (status >= 500) return { kind: 'server', message };
+  return { kind: 'unknown', message };
+}
+
+/**
+ * The icon each bucket shows. A NARROW union (not Feather's whole glyph map) so
+ * this module stays free of any React Native import — every value is a real
+ * Feather name, which is all AppAlertConfig.icon accepts.
+ */
+export type CreateJobErrorIcon =
+  | 'wifi-off'
+  | 'clock'
+  | 'lock'
+  | 'alert-circle'
+  | 'alert-triangle';
+
+/** Translation keys for every bucket. */
+export type CreateJobErrorKey =
+  | 'post_err_network_title'
+  | 'post_err_network_msg'
+  | 'post_err_timeout_title'
+  | 'post_err_timeout_msg'
+  | 'post_err_session_title'
+  | 'post_err_session_msg'
+  | 'post_err_invalid_title'
+  | 'post_err_invalid_msg'
+  | 'post_err_rejected_title'
+  | 'post_err_rejected_msg'
+  | 'post_err_server_title'
+  | 'post_err_server_msg'
+  | 'post_err_unknown_title'
+  | 'post_err_unknown_msg';
+
+export interface CreateJobErrorCopy {
+  titleKey: CreateJobErrorKey;
+  messageKey: CreateJobErrorKey;
+  icon: CreateJobErrorIcon;
+  /**
+   * true when the bucket should PREFER the backend's own message over the
+   * translated one (the undocumented 4xx family, where the server knows more
+   * than we do). Never true for 5xx or unknown — a stack trace or a raw server
+   * string is not user copy.
+   */
+  preferServerMessage: boolean;
+}
+
+/**
+ * The dialog copy for a bucket. 'network' keeps the ORIGINAL connection wording
+ * and is the only bucket allowed to say it; 'invalid' and 'unauthorized' are
+ * listed for totality even though the screen handles 422/401 before this.
+ */
+export function createJobErrorCopy(kind: CreateJobFailureKind): CreateJobErrorCopy {
+  switch (kind) {
+    case 'timeout':
+      return {
+        titleKey: 'post_err_timeout_title',
+        messageKey: 'post_err_timeout_msg',
+        icon: 'clock',
+        preferServerMessage: false,
+      };
+    case 'unauthorized':
+      return {
+        titleKey: 'post_err_session_title',
+        messageKey: 'post_err_session_msg',
+        icon: 'lock',
+        preferServerMessage: false,
+      };
+    case 'invalid':
+      return {
+        titleKey: 'post_err_invalid_title',
+        messageKey: 'post_err_invalid_msg',
+        icon: 'alert-circle',
+        preferServerMessage: false,
+      };
+    case 'badrequest':
+    case 'forbidden':
+    case 'notfound':
+    case 'conflict':
+      return {
+        titleKey: 'post_err_rejected_title',
+        messageKey: 'post_err_rejected_msg',
+        icon: 'alert-circle',
+        preferServerMessage: true,
+      };
+    case 'server':
+      return {
+        titleKey: 'post_err_server_title',
+        messageKey: 'post_err_server_msg',
+        icon: 'alert-triangle',
+        preferServerMessage: false,
+      };
+    case 'unknown':
+      return {
+        titleKey: 'post_err_unknown_title',
+        messageKey: 'post_err_unknown_msg',
+        icon: 'alert-triangle',
+        preferServerMessage: false,
+      };
+    case 'network':
+    default:
+      return {
+        titleKey: 'post_err_network_title',
+        messageKey: 'post_err_network_msg',
+        icon: 'wifi-off',
+        preferServerMessage: false,
+      };
+  }
 }
