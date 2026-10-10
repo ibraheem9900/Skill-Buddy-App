@@ -324,9 +324,12 @@ export type BidSubmitErrorKey =
  * Translated copy per bucket. `unauthorized` is absent on purpose: it never
  * reaches the screen (the caller sends the provider to login, the same rule the
  * other job actions follow). 400 and 409 share the "no longer allowed" copy,
- * which is what an unverified provider, a duplicate bid or a closed window
- * tends to be — but the backend's own `detail` always wins when it sent one, so
- * nothing here guesses at WHICH of those it was.
+ * which is what a duplicate bid or a closed window tends to be — but the
+ * backend's own `detail` always wins when it sent one, so nothing here guesses
+ * at WHICH of those it was.
+ *
+ * `forbidden` is the bucket that is NOT left to the backend's wording — see
+ * bidSubmitFailureMessage below.
  */
 export function bidSubmitErrorKey(kind: JobActionFailureKind): BidSubmitErrorKey {
   switch (kind) {
@@ -349,13 +352,24 @@ export function bidSubmitErrorKey(kind: JobActionFailureKind): BidSubmitErrorKey
 /**
  * The body copy for a failed submit: the backend's own message when it sent one
  * (a 422 `detail[].msg`, or a plain-string `detail`), otherwise the translated
- * copy for the bucket — so "your provider account is not verified" reaches the
- * provider exactly as the backend worded it.
+ * copy for the bucket.
+ *
+ * ONE DELIBERATE EXCEPTION — the 403 `forbidden` bucket. VERIFIED LIVE against
+ * the deployed backend: POST /jobs/{job_id}/bids answers a provider whose
+ * profile has is_active=false with
+ * `403 {"detail":"Only approved, active providers can bid on jobs."}`.
+ * That sentence states the rule but not the situation, and activation is a
+ * backend/admin decision this app must never make on the provider's behalf — so
+ * the 403 always renders our own actionable copy ("your account is not activated
+ * yet") instead of the backend's line. Every other bucket still prefers the
+ * backend's wording verbatim, so a message we did not anticipate still reaches
+ * the provider unchanged.
  */
 export function bidSubmitFailureMessage(
   failure: Pick<JobActionFailure, 'kind' | 'message'>,
   translate: (key: BidSubmitErrorKey) => string
 ): string {
+  if (failure.kind === 'forbidden') return translate('jobd_bid_err_forbidden');
   return failure.message ?? translate(bidSubmitErrorKey(failure.kind));
 }
 

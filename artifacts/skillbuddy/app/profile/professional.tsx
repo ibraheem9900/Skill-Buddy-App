@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -20,20 +20,43 @@ import type { TranslationKey } from '@/context/LanguageContext';
  * - CLIENT branch: unchanged (mock client stats — no endpoint in this task).
  * - PROVIDER branch: live GET /api/v1/providers/profile via useProviderProfile
  *   (fetched once per session on entry; refresh button for manual reload).
- *   Status editor (POST /api/v1/providers/status) lives on the availability
- *   card; the Activity Overview card reads GET /providers/dashboard.
+ *   The availability card edits `is_available` via
+ *   authApi.updateProviderAvailability; the Activity Overview card reads
+ *   GET /providers/dashboard and the status log reads
+ *   GET /providers/status-history.
  *   Known mock leftovers in the ready state, flagged for follow-up tasks:
  *   primary/secondary skills and the job-history list (no endpoints yet).
  */
 
-/** Status values the web app already ships against POST /providers/status
- * (dashboard.index.tsx STATUS_OPTIONS). The live schema has NO server-side
- * enum (free string 1–30) — this set keeps mobile and web consistent.
- * Flagged for team confirmation before locking the vocabulary.
+/**
+ * The availability card edits the profile's `is_available` boolean — nothing else.
+ *
+ * WHY THIS REPLACED THE OLD STATUS-POSTING EDITOR (verified live against the
+ * deployed backend): that editor POSTed the web app's lowercase vocabulary —
+ * 'active' / 'on_leave' / 'unavailable' — to POST /api/v1/providers/status, and
+ * the endpoint accepts NONE of them. Twelve probed values came back
+ * `400 {"detail":"Invalid provider status."}`; the only two it takes are the
+ * approval states APPROVED and SUSPENDED, and it logs an approval-state history
+ * rather than availability. So that editor could never succeed, and it was
+ * editing the wrong field: availability is `is_available`, which
+ * PATCH /providers/profile does accept.
+ *
+ * ACTIVATION IS DELIBERATELY NOT EDITABLE HERE. Bidding is gated on the separate
+ * `is_active` flag — POST /jobs/{job_id}/bids answers a provider whose profile
+ * has is_active=false with `403 {"detail":"Only approved, active providers can
+ * bid on jobs."}` (verified live) — so this screen never sends `is_active`.
+ * Activation/verification is a backend/admin decision; the bid screen reports
+ * the refusal rather than working around it.
  */
-const STATUS_OPTIONS = ['active', 'on_leave', 'unavailable'] as const;
+const AVAILABILITY_OPTIONS = ['available', 'unavailable'] as const;
 
-type StatusOption = (typeof STATUS_OPTIONS)[number];
+type AvailabilityOption = (typeof AVAILABILITY_OPTIONS)[number];
+
+/** Chip copy per option — reuses the profile's existing availability strings. */
+const AVAILABILITY_LABEL_KEYS: Record<AvailabilityOption, TranslationKey> = {
+  available: 'prov_available',
+  unavailable: 'prov_unavailable',
+};
 
 /**
  * Provider job-history rows.
@@ -74,46 +97,43 @@ export default function ProfessionalInfoScreen() {
   // Status change log (GET /providers/status-history) — separate cache.
   const { state: histState, entries: histEntries, errorMessage: histError, load: loadHistory, refresh: refreshHistory } = useProviderStatusHistory();
   const router = useRouter();
-  // ── Status editor state (POST /providers/status) ──
+  // ── Availability editor state (PATCH /providers/profile) ──
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
-  const [statusValue, setStatusValue] = useState<StatusOption | null>(null);
-  const [statusReason, setStatusReason] = useState('');
+  const [statusValue, setStatusValue] = useState<AvailabilityOption | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
 
+  // The approval-state head (GET /providers/status-current) — read-only here.
+  // It is no longer what the editor writes; availability is is_available.
   const currentStatus = profile?.current_status?.status ?? null;
 
   const openStatusEditor = () => {
-    setStatusValue((currentStatus as StatusOption) ?? null);
-    setStatusReason(profile?.current_status?.reason ?? '');
+    setStatusValue(profile ? (profile.is_available ? 'available' : 'unavailable') : null);
     setStatusEditorOpen(true);
   };
 
   /**
-   * POST /api/v1/providers/status — on 200 the response IS the new current
-   * status; seed it into the cached profile's current_status (server truth,
-   * no optimistic guess) and refresh the read-only dashboard card so the
-   * snapshot's is_available falls in line. 422 detail[] logged + surfaced.
+   * PATCH /api/v1/providers/profile { is_available } — availability only.
+   *
+   * On 200 the response IS the whole profile, so it replaces the cached copy
+   * (server truth, never an optimistic guess) and the read-only dashboard card
+   * is refreshed so its is_available snapshot falls in line. The body carries
+   * `is_available` ONLY, never `is_active`: activation is the backend's
+   * decision, and bidding is gated on it. 422 detail[] logged + surfaced; any
+   * other rejection is reported generically rather than guessed at.
    */
   const handleStatusSave = async () => {
-    if (!statusValue || statusSaving) return;
-    if (statusValue !== 'active' && !statusReason.trim()) {
-      Alert.alert(t('ps_title'), t('ps_reason_required'));
-      return;
-    }
-    if (statusReason.trim().length > 500) return;
+    if (!statusValue || statusSaving || !profile) return;
     setStatusSaving(true);
     try {
-      const { data } = await authApi.updateProviderStatus(statusValue, statusReason.trim() || undefined);
-      seedProfile({ ...profile!, current_status: { status: data.status, reason: data.reason ?? null, is_current: data.is_current ?? true } });
+      const { data } = await authApi.updateProviderAvailability(statusValue === 'available');
+      seedProfile(data);
       setStatusEditorOpen(false);
       setStatusValue(null);
-      setStatusReason('');
       Alert.alert(t('ps_title'), t('ps_success'));
       void refreshDashboard();
-      void refreshHistory(); // newest entry == POST response; refresh keeps the log honest
     } catch (err: any) {
       if (err?.response?.status === 422) {
-        console.warn('[providers/status] 422 detail:', err.response.data?.detail);
+        console.warn('[providers/profile] 422 detail:', err.response.data?.detail);
         Alert.alert(t('ps_title'), t('ps_err_invalid'));
       } else if (err?.response) {
         Alert.alert(t('ps_title'), t('ps_err_generic'));
@@ -236,14 +256,17 @@ export default function ProfessionalInfoScreen() {
         <FlatList
           ListHeaderComponent={
             <View style={{ padding: 20, paddingBottom: 0 }}>
-              {/* Availability from current_status (falls back to is_available).
-                  "Change" opens the inline status editor (POST /providers/status). */}
+              {/* Availability — the profile's own is_available boolean, which is
+                  exactly what "Change" edits (authApi.updateProviderAvailability).
+                  The approval-state head (current_status) is NOT the availability
+                  value and is never shown as one; it only feeds the reason line
+                  below. */}
               <View style={[styles.availCard, { backgroundColor: c.card, borderColor: c.border }]}>
-                <View style={[styles.availDot, { backgroundColor: currentStatus ? statusDotColor(currentStatus, c) : profile.is_available ? c.success : c.warning }]} />
+                <View style={[styles.availDot, { backgroundColor: profile.is_available ? c.success : c.warning }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.availLabel, { color: c.mutedForeground }]}>{t('prov_availability')}</Text>
                   <Text style={[styles.availValue, { color: c.text }]}>
-                    {currentStatus ?? (profile.is_available ? t('prov_available') : t('prov_unavailable'))}
+                    {profile.is_available ? t('prov_available') : t('prov_unavailable')}
                   </Text>
                   {statusSync === 'loading' && !currentStatus ? (
                     <View style={[styles.statusSyncSkeleton, { backgroundColor: c.border }]} />
@@ -271,7 +294,7 @@ export default function ProfessionalInfoScreen() {
                 <View style={[styles.statusEditor, { backgroundColor: c.card, borderColor: c.border }]}>
                   <Text style={[styles.statusEditorLabel, { color: c.mutedForeground }]}>{t('ps_pick_status')}</Text>
                   <View style={styles.statusChips}>
-                    {STATUS_OPTIONS.map((opt) => {
+                    {AVAILABILITY_OPTIONS.map((opt) => {
                       const selected = statusValue === opt;
                       return (
                         <TouchableOpacity
@@ -283,26 +306,12 @@ export default function ProfessionalInfoScreen() {
                           onPress={() => setStatusValue(opt)}
                           disabled={statusSaving}
                         >
-                          <View style={[styles.statusChipDot, { backgroundColor: statusDotColor(opt, c) }]} />
-                          <Text style={[styles.statusChipText, { color: selected ? c.primary : c.text }]}>{t(`ps_status_${opt}` as TranslationKey)}</Text>
+                          <View style={[styles.statusChipDot, { backgroundColor: opt === 'available' ? c.success : c.warning }]} />
+                          <Text style={[styles.statusChipText, { color: selected ? c.primary : c.text }]}>{t(AVAILABILITY_LABEL_KEYS[opt])}</Text>
                         </TouchableOpacity>
                       );
                     })}
                   </View>
-                  <Text style={[styles.statusEditorLabel, { color: c.mutedForeground }]}>
-                    {t('ps_reason_label')}
-                    {statusValue && statusValue !== 'active' ? ` (${t('ps_reason_required_mark')})` : ''}
-                  </Text>
-                  <TextInput
-                    style={[styles.statusReasonInput, { borderColor: c.border, color: c.text, backgroundColor: c.background }]}
-                    value={statusReason}
-                    onChangeText={setStatusReason}
-                    placeholder={t('ps_reason_placeholder')}
-                    placeholderTextColor={c.mutedForeground}
-                    multiline
-                    maxLength={500}
-                    editable={!statusSaving}
-                  />
                   <TouchableOpacity
                     style={[styles.statusSaveBtn, { backgroundColor: c.primary, opacity: !statusValue || statusSaving ? 0.5 : 1 }]}
                     onPress={handleStatusSave}
@@ -546,7 +555,6 @@ const styles = StyleSheet.create({
   statusChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   statusChipDot: { width: 8, height: 8, borderRadius: 4 },
   statusChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'capitalize' },
-  statusReasonInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontFamily: 'Manrope_400Regular', fontSize: 13, minHeight: 60, textAlignVertical: 'top' },
   statusSaveBtn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 2 },
   statusSaveText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
   shEmpty: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 10 },

@@ -253,6 +253,29 @@ export const authApi = {
   updateProviderProfile: (data: { bio: string; hourly_rate: number; provider_type: string; is_available: boolean; is_active: boolean; service_radius: number }) =>
     api.patch<ProviderProfile>('/api/v1/providers/profile', data),
   /**
+   * PATCH /api/v1/providers/profile with ONLY `is_available` — the availability
+   * control on /profile/professional uses this instead of updateProviderProfile
+   * above, for two reasons:
+   *
+   * 1. `is_active` must NEVER be sent from this app. It is the backend's
+   *    activation flag, and bidding is gated on it — VERIFIED LIVE:
+   *    POST /jobs/{job_id}/bids answers a provider whose profile has
+   *    is_active=false with `403 {"detail":"Only approved, active providers can
+   *    bid on jobs."}`. Letting a screen set it would hand every provider their
+   *    own activation, so activation/verification stays a backend/admin
+   *    decision (the bid screen surfaces the 403 instead of working around it).
+   * 2. A partial body is legal here: ProviderProfileUpdateRequest has NO
+   *    required field (live-spec verified), so a single-field PATCH is accepted
+   *    and leaves bio/hourly_rate/provider_type/service_radius untouched — which
+   *    is what an availability toggle must do rather than re-submitting a whole
+   *    profile form it never showed.
+   *
+   * 200 returns the COMPLETE ProviderProfile — the source of truth the caller
+   * seeds into its cache (never an optimistic guess). JSON, Bearer auto-attached.
+   */
+  updateProviderAvailability: (isAvailable: boolean) =>
+    api.patch<ProviderProfile>('/api/v1/providers/profile', { is_available: isAvailable }),
+  /**
    * GET /api/v1/providers/dashboard — lightweight READ-ONLY summary (jobs
    * completed / in-progress, is_available, is_active). NOT the profile —
    * deliberately lacks bio/rate/type/radius and must never pre-fill the edit

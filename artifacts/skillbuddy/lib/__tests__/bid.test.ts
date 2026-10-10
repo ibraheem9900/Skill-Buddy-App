@@ -199,20 +199,33 @@ eq('a malformed detail entry is skipped, not crashed on', bidFieldError([{ loc: 
 eq('422 shares the generic copy bucket', bidSubmitErrorKey('invalid'), 'jobd_bid_err_invalid');
 eq('400 shares "no longer allowed"', bidSubmitErrorKey('badrequest'), 'jobd_bid_err_notallowed');
 eq('409 shares "no longer allowed"', bidSubmitErrorKey('conflict'), 'jobd_bid_err_notallowed');
-eq('403 has its own copy (unverified / not allowed)', bidSubmitErrorKey('forbidden'), 'jobd_bid_err_forbidden');
+eq('403 has its own copy (not activated / not allowed)', bidSubmitErrorKey('forbidden'), 'jobd_bid_err_forbidden');
 eq('404 has its own copy', bidSubmitErrorKey('notfound'), 'jobd_bid_err_notfound');
 eq('a 5xx is a server error', bidSubmitErrorKey('server'), 'jobd_bid_err_server');
 eq('no response at all is a network error', bidSubmitErrorKey('network'), 'jobd_bid_err_network');
 eq('an unrecognised failure is a server error', bidSubmitErrorKey('unknown'), 'jobd_bid_err_server');
 
 eq(
-  "the backend's own refusal text wins over the app's copy",
-  bidSubmitFailureMessage({ kind: 'forbidden', message: 'Provider not verified' }, () => 'fallback'),
-  'Provider not verified'
+  'a 403 shows the actionable activation copy, NOT the backend wording',
+  bidSubmitFailureMessage(
+    { kind: 'forbidden', message: 'Only approved, active providers can bid on jobs.' },
+    () => 'activation copy'
+  ),
+  'activation copy'
 );
 eq(
-  'a refusal with no text falls back to the translated bucket',
-  bidSubmitFailureMessage({ kind: 'forbidden', message: null }, () => 'fallback'),
+  'a 403 with no text at all still shows the activation copy',
+  bidSubmitFailureMessage({ kind: 'forbidden', message: null }, () => 'activation copy'),
+  'activation copy'
+);
+eq(
+  "every other bucket still prefers the backend's own refusal text",
+  bidSubmitFailureMessage({ kind: 'badrequest', message: 'Job not open for bidding' }, () => 'fallback'),
+  'Job not open for bidding'
+);
+eq(
+  'and falls back to the translated bucket when the backend sent nothing',
+  bidSubmitFailureMessage({ kind: 'badrequest', message: null }, () => 'fallback'),
   'fallback'
 );
 
