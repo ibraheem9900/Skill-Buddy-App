@@ -400,10 +400,9 @@ const NEW_UPDATE_BANNER_KEYS = [
   'update_later',
 ];
 
-/** Keys added for the Post-a-Job service picker and custom scheduler. */
+/** Keys added for the Post-a-Job service picker and the clock/calendar
+ * pickers (the combined date+time sheet's own keys were removed with it). */
 const NEW_POST_FLOW_KEYS = [
-  'post_sched_custom',
-  'post_sched_title',
   'post_sched_hour',
   'post_sched_minute',
   'post_sched_am',
@@ -413,10 +412,6 @@ const NEW_POST_FLOW_KEYS = [
   'post_sched_next_month',
   'post_sched_months',
   'post_sched_weekdays',
-  'post_sched_err_pick',
-  'post_sched_err_early',
-  'post_sched_err_late',
-  'post_sched_window_hint',
   'post_service_pick',
   'post_service_pick_sub',
   'post_service_meta_error',
@@ -424,6 +419,55 @@ const NEW_POST_FLOW_KEYS = [
   'post_svc_pick_title',
   'post_svc_pick_category',
   'post_svc_back_categories',
+];
+
+/** Keys added for the 4-step Post-a-Job wizard (booking type, pickers,
+ * milestones, address prefill). */
+const NEW_POST_WIZARD_KEYS = [
+  'post_step_of',
+  'post_step_details',
+  'post_step_booking',
+  'post_step_schedule',
+  'post_step_address',
+  'post_next',
+  'post_back',
+  'post_booking_pick',
+  'post_booking_one_time',
+  'post_booking_one_time_desc',
+  'post_booking_one_time_note',
+  'post_booking_long_term',
+  'post_booking_long_term_desc',
+  'post_booking_long_term_note',
+  'post_time_pick',
+  'post_dates_pick',
+  'post_time_after_dates',
+  'post_time_picker_title',
+  'post_date_picker_title',
+  'post_err_time',
+  'post_err_time_past',
+  'post_err_dates_pick',
+  'post_err_dates_past',
+  'post_err_dates_max',
+  'post_dates_hint',
+  'post_dates_max_last',
+  'post_days_selected',
+  'post_hours_per_day',
+  'post_milestones',
+  'post_milestone_n',
+  'post_success_msg_addr',
+  'post_urgent_desc',
+  'post_regular_desc',
+  // Post-failure copy: every createJob failure bucket now has its own message,
+  // and only the network bucket may mention the connection.
+  'post_err_timeout_title',
+  'post_err_timeout_msg',
+  'post_err_server_title',
+  'post_err_server_msg',
+  'post_err_rejected_title',
+  'post_err_rejected_msg',
+  'post_err_unknown_title',
+  'post_err_unknown_msg',
+  'post_err_invalid_msg',
 ];
 
 const REUSED_KEYS = [
@@ -475,6 +519,68 @@ function check(label: string, condition: boolean): void {
   else failures.push(label);
 }
 
+/**
+ * Provider bidding (Module 4C): the Submit Bid screen's copy plus the nine
+ * validation keys lib/bid's validators return. Every one of these is reachable
+ * through t(), so every one must exist in all five dictionaries.
+ */
+const NEW_BID_KEYS = [
+  'bid_err_price_required',
+  'bid_err_price_invalid',
+  'bid_err_price_positive',
+  'bid_err_price_decimals',
+  'bid_err_price_too_large',
+  'bid_err_eta_required',
+  'bid_err_eta_invalid',
+  'bid_err_eta_range',
+  'bid_err_message_too_long',
+  'jobd_bid_screen_title',
+  'jobd_bid_your_bid',
+  'jobd_bid_price_label',
+  'jobd_bid_price_ph',
+  'jobd_bid_price_vat_note',
+  'jobd_bid_eta_label',
+  'jobd_bid_eta_hint',
+  'jobd_bid_eta_hours_label',
+  'jobd_bid_eta_minutes_label',
+  'jobd_bid_message_label',
+  'jobd_bid_message_ph',
+  'jobd_bid_message_optional',
+  'jobd_bid_submit',
+  'jobd_bid_submitting',
+  'jobd_bid_success_title',
+  'jobd_bid_success_msg',
+  'jobd_bid_closed_title',
+  'jobd_bid_closed_msg',
+  'jobd_bid_unavailable_title',
+  'jobd_bid_unavailable_msg',
+  'jobd_bid_locked_title',
+  'jobd_bid_locked_msg',
+  'jobd_bid_close_cta',
+  'jobd_bid_action_place',
+  'jobd_bid_action_view',
+  'jobd_bid_no_message',
+  'jobd_bid_summary_price',
+  'jobd_bid_summary_eta',
+  'jobd_bid_summary_message',
+  'jobd_bid_summary_status',
+  'jobd_bid_summary_submitted',
+  'jobd_bid_eta_now',
+  'jobd_bid_eta_min',
+  'jobd_bid_eta_hm',
+  'jobd_bid_err_invalid',
+  'jobd_bid_err_notallowed',
+  'jobd_bid_err_forbidden',
+  'jobd_bid_err_notfound',
+  'jobd_bid_err_server',
+  'jobd_bid_err_network',
+  'bid_status_pending',
+  'bid_status_accepted',
+  'bid_status_rejected',
+  'bid_status_withdrawn',
+  'bid_status_expired',
+];
+
 const canonical = new Set(Object.keys(en as unknown as Record<string, string>));
 
 for (const [lang, dict] of dictionaries) {
@@ -508,6 +614,8 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_ATTACH_RM_KEYS,
     ...NEW_UPDATE_BANNER_KEYS,
     ...NEW_POST_FLOW_KEYS,
+    ...NEW_POST_WIZARD_KEYS,
+    ...NEW_BID_KEYS,
     ...REUSED_KEYS,
   ]) {
     const value = dict[key];
@@ -538,6 +646,8 @@ const allNewKeys = [
   ...NEW_ATTACH_RM_KEYS,
   ...NEW_UPDATE_BANNER_KEYS,
   ...NEW_POST_FLOW_KEYS,
+  ...NEW_POST_WIZARD_KEYS,
+  ...NEW_BID_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

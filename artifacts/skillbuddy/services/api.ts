@@ -2,7 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { buildListJobsQuery } from '@/lib/jobList';
 import { isValidJobId } from '@/lib/jobPublish';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest } from '@/types';
 
 // Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
 // build time and is supplied by Infisical via `infisical run`, so the value never
@@ -555,6 +555,76 @@ export const authApi = {
       return Promise.reject(new Error(`createJobAddress: invalid job id ${String(jobId)}`));
     }
     return api.post<JobAddressResponse>(`/api/v1/jobs/${jobId}/address`, payload);
+  },
+
+  /* ── Bids (OpenAPI tag "Bids") — the PROVIDER submit path ONLY ────────────
+   *
+   * Exactly TWO operations of the Bids group are integrated, both for the
+   * provider submitting a bid:
+   *
+   *   POST /api/v1/jobs/{job_id}/bids        createBid  (BidCreate)
+   *   GET  /api/v1/jobs/{job_id}/bids/mine   getMyBid   ("Get My Bid For Job")
+   *
+   * The rest of the tag — List Job Bids, Update Bid, Withdraw Bid, Accept Bid,
+   * Reject Bid and GET /api/v1/bids/mine — serves the client dashboard, the
+   * modify/withdraw and accept/reject flows, and the my-bids list, none of which
+   * this task covers. Deliberately NOT wrapped here rather than left as dead
+   * callable code, so nothing can call an unbuilt flow by accident. All of them
+   * are enumerated in the task report so the reconnaissance is not lost.
+   *
+   * AUTH: both operations are PROTECTED (live OpenAPI security:
+   * [{OAuth2PasswordBearer: []}]). The shared axios instance attaches the Bearer
+   * token and its response interceptor already refreshes an expired one exactly
+   * once (rotating both tokens) before replaying the request, so no bespoke
+   * 401/retry handling belongs here — a 401 that survives that refresh is
+   * reported to the caller.
+   *
+   * IDS ARE RE-CHECKED at runtime for the same reason publishJob does it: a
+   * non-integer would silently build a malformed path (/api/v1/jobs/NaN/bids).
+   *
+   * DOCUMENTED RESPONSES: 201 (create) and 200 (mine), plus 422 for both. The
+   * docs say NOTHING about 400/401/403/404/409 — those are surfaced generically
+   * from the backend's own `detail`.
+   */
+
+  /**
+   * GET /api/v1/jobs/{job_id}/bids/mine — "Get My Bid For Job": THIS provider's
+   * own bid on ONE job, which is what decides the screen's opening state.
+   *
+   * UNVERIFIED (flagged, not guessed): the OpenAPI documents ONLY 200 with a
+   * BidResponse. What the backend returns when this provider has NO bid on the
+   * job is not in the schema — it could be a 404, a 400, or a 200 with an empty
+   * body. Callers must therefore treat BOTH a rejected request AND a body that is
+   * not a usable bid as "no bid yet", while a transport failure must NOT be read
+   * that way (see hooks/useBidSubmit.loadMyBid).
+   */
+  getMyBid: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`getMyBid: invalid job id ${String(jobId)}`));
+    }
+    return api.get<BidResponse>(`/api/v1/jobs/${jobId}/bids/mine`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/bids — submit a bid (BidCreate).
+   *
+   * BODY: offered_price and eta_minutes are REQUIRED (eta 0..1440); message is
+   * optional (nullable, and sent as null when the provider wrote nothing).
+   * offered_price accepts number|string on the wire; the app sends the NUMBER
+   * from lib/bid.validateBidPrice, which is derived from integer cents so it is
+   * already rounded to 2 decimals and is never a long binary fraction. The
+   * provider's comma decimal separator is normalised there, not here.
+   *
+   * One active bid per provider per job — the backend rejects a duplicate
+   * (handled generically from its `detail`).
+   *
+   * 201 → BidResponse (the source of truth for the new bid's id and status).
+   */
+  createBid: (jobId: number, payload: BidCreateRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`createBid: invalid job id ${String(jobId)}`));
+    }
+    return api.post<BidResponse>(`/api/v1/jobs/${jobId}/bids`, payload);
   },
 
   /**

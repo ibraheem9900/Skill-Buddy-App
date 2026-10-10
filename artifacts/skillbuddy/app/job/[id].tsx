@@ -10,6 +10,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
+import { canProviderSubmitBid } from '@/lib/bid';
 import BidCard from '@/components/BidCard';
 import EmptyState from '@/components/EmptyState';
 import BrandedLoader from '@/components/BrandedLoader';
@@ -1322,6 +1323,27 @@ export default function BiddingDashboardScreen() {
                 onExpire={handleBiddingExpired}
               />
             </View>
+          ) : null}
+
+          {/* Place a Bid — the PROVIDER's way into the Submit Bid screen, and the
+              only bid UI this app renders today (the client's offers list is a
+              separate, unconnected task). Gated by lib/bid.canProviderSubmitBid,
+              which needs the active PROVIDER role, a window the backend still
+              reports open, and no assigned provider yet. The button is deliberately
+              STATE-AGNOSTIC about whether this provider already bid: that answer
+              only exists at /bids/mine, which the bid screen itself reads, so
+              tapping it either shows the form or that provider's own bid summary. */}
+          {canProviderSubmitBid(serverJob, activeRole) ? (
+            <TouchableOpacity
+              style={[styles.publishBtn, { backgroundColor: c.primary, marginTop: 14 }]}
+              onPress={() => router.push(`/job/${serverJob.id}/bid` as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="send" size={15} color={c.primaryForeground} />
+              <Text style={[styles.publishText, { color: c.primaryForeground }]}>
+                {t('jobd_bid_action_place')}
+              </Text>
+            </TouchableOpacity>
           ) : null}
 
           {/* Assign Provider. There is NO backend flag for assignment (JobResponse

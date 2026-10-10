@@ -1113,3 +1113,110 @@ export interface ProviderWalletDetailResponse {
   wallet: ProviderWalletResponse;
   transactions: ProviderWalletTransactionResponse[];
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * BIDDING API — the live OpenAPI's bid contract (tag "Bids").
+ *
+ * VERIFIED against openapi.json, not inferred:
+ *   BidStatus            enum: PENDING | ACCEPTED | REJECTED | WITHDRAWN | EXPIRED
+ *   BidCreate            required: offered_price, eta_minutes (0..1440)
+ *   BidResponse          required: id, job_id, provider, offered_price,
+ *                        eta_minutes, status, and ALL SEVEN score fields
+ *
+ * ONLY the provider SUBMIT path is typed here (BidCreate in, BidResponse out).
+ * BidUpdate, BidRejectRequest, JobBidsResponse and ListMyBidsParams exist in the
+ * live schema but belong to the modify/withdraw, accept/reject and my-bids
+ * flows, which this task excludes — see the task report for their full shapes.
+ *
+ * MONEY IS A STRING. BidResponse.offered_price and distance_km are nullable
+ * NUMERIC STRINGS on the wire (BidResponse.offered_price is typed `string`,
+ * not number|string, unlike the request field) — parse them with
+ * lib/bid.parseBidPrice, never with Number(), and render through
+ * formatBidPrice so a value is either correct or absent, never NaN.
+ *
+ * The SCORES ARE THE BACKEND'S. distance_score … total_score are computed
+ * server-side (Admin A-05) and are DISPLAY-ONLY here: the app must never
+ * recompute them — see lib/bid.SCORE_CRITERIA for the documented maxima used
+ * in tooltips.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** BidStatus — exactly the five values the live OpenAPI enumerates. */
+export type BidStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED';
+
+/**
+ * The provider snapshot a bid carries (BidProviderSummary). Every field is
+ * required EXCEPT profile_photo_url; star_rating is a real number here (not a
+ * string), while the scores/rates are integers out of 100.
+ */
+export interface BidProviderSummary {
+  id: number;
+  name: string;
+  profile_photo_url?: string | null;
+  star_rating: number;
+  badge_count: number;
+  badge_tier: string;
+  credibility_score: number;
+  acceptance_rate: number;
+  response_time_avg: number;
+  total_jobs_completed: number;
+}
+
+/**
+ * One bid — the 201/200 body of every bid endpoint (BidResponse).
+ *
+ * `is_recommended` carries a server default (false) so it is optional on read;
+ * the authoritative split is still JobBidsResponse.recommended vs
+ * other_offers, so a screen should group by that, not by this flag.
+ */
+export interface BidResponse {
+  id: number;
+  job_id: number;
+  provider: BidProviderSummary;
+  /** Numeric STRING per the schema — parse, never render raw. */
+  offered_price: string;
+  eta_minutes: number;
+  message?: string | null;
+  status: BidStatus;
+  /** Nullable numeric STRING (km). Null means unknown, not zero. */
+  distance_km?: string | null;
+  distance_score: number;
+  star_rating_score: number;
+  badge_tier_score: number;
+  credibility_score: number;
+  acceptance_rate_score: number;
+  response_time_score: number;
+  total_score: number;
+  is_recommended?: boolean;
+  accepted_at?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+  withdrawn_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * POST /api/v1/jobs/{job_id}/bids (BidCreate) — the ONLY bid request body this
+ * app sends.
+ *
+ * The live schema types `offered_price` as `number` (exclusiveMinimum 0) OR a
+ * numeric string, and `eta_minutes` as an integer 0..1440. The app sends the
+ * NUMBER from lib/bid.validateBidPrice — taken from integer cents, so it is
+ * already rounded to 2 decimals and no long binary fraction reaches the wire.
+ *
+ * `message` is the ONLY optional field: `required` is [offered_price,
+ * eta_minutes], and the schema allows `string maxLength 1000 | null`. It is sent
+ * as null rather than omitted when the provider wrote nothing.
+ *
+ * The BidUpdate / BidReject request bodies and the client-dashboard
+ * JobBidsResponse / ListMyBidsParams shapes are NOT declared here: those belong
+ * to the modify, withdraw, accept/reject and my-bids flows, which this task
+ * explicitly excludes. Their schemas are recorded in the task report instead of
+ * being left as dead types the app could silently start using.
+ */
+export interface BidCreateRequest {
+  offered_price: number;
+  /** 0..1440 (24 h), integer. */
+  eta_minutes: number;
+  message?: string | null;
+}

@@ -32,6 +32,9 @@
     "./jobAttachment.test.ts",
     "./appUpdate.test.ts",
     "./jobSchedule.test.ts",
+    "./jobBooking.test.ts",
+    "./jobCreateError.test.ts",
+    "./bid.test.ts",
     "./translations.test.ts"
   ]
 }
