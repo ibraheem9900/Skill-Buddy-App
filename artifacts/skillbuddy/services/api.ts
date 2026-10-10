@@ -2,7 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { buildListJobsQuery } from '@/lib/jobList';
 import { isValidJobId } from '@/lib/jobPublish';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse } from '@/types';
 
 // Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
 // build time and is supplied by Infisical via `infisical run`, so the value never
@@ -580,20 +580,21 @@ export const authApi = {
     return api.post<JobAddressResponse>(`/api/v1/jobs/${jobId}/address`, payload);
   },
 
-  /* ── Bids (OpenAPI tag "Bids") — the PROVIDER submit path ONLY ────────────
+  /* ── Bids (OpenAPI tag "Bids") — the PROVIDER submit path + the CLIENT read ─
    *
-   * Exactly TWO operations of the Bids group are integrated, both for the
-   * provider submitting a bid:
+   * THREE operations of the Bids group are integrated:
    *
-   *   POST /api/v1/jobs/{job_id}/bids        createBid  (BidCreate)
-   *   GET  /api/v1/jobs/{job_id}/bids/mine   getMyBid   ("Get My Bid For Job")
+   *   POST /api/v1/jobs/{job_id}/bids        createBid   (BidCreate)  — provider
+   *   GET  /api/v1/jobs/{job_id}/bids/mine   getMyBid    — provider
+   *   GET  /api/v1/jobs/{job_id}/bids        listJobBids (JobBidsResponse)
+   *                                                       — the client's screen
    *
-   * The rest of the tag — List Job Bids, Update Bid, Withdraw Bid, Accept Bid,
-   * Reject Bid and GET /api/v1/bids/mine — serves the client dashboard, the
-   * modify/withdraw and accept/reject flows, and the my-bids list, none of which
-   * this task covers. Deliberately NOT wrapped here rather than left as dead
-   * callable code, so nothing can call an unbuilt flow by accident. All of them
-   * are enumerated in the task report so the reconnaissance is not lost.
+   * The rest of the tag — Update Bid, Withdraw Bid, Accept Bid, Reject Bid and
+   * GET /api/v1/bids/mine — belongs to the modify/withdraw, accept/reject and
+   * my-bids flows, which are separate tasks. Deliberately NOT wrapped here rather
+   * than left as dead callable code, so nothing can call an unbuilt flow by
+   * accident. All of them are enumerated in the task report so the reconnaissance
+   * is not lost.
    *
    * AUTH: both operations are PROTECTED (live OpenAPI security:
    * [{OAuth2PasswordBearer: []}]). The shared axios instance attaches the Bearer
@@ -609,6 +610,27 @@ export const authApi = {
    * docs say NOTHING about 400/401/403/404/409 — those are surfaced generically
    * from the backend's own `detail`.
    */
+
+  /**
+   * GET /api/v1/jobs/{job_id}/bids — "List Job Bids": ALL bids on ONE job, as
+   * the CLIENT's Bids screen reads them (recommended top 3 + other_offers).
+   *
+   * NO PARAMETERS beyond the integer path id (live schema: `parameters` is just
+   * job_id), so there is no paging, filtering or server-side sorting to pass —
+   * the screen's sort chips are applied locally to the returned arrays.
+   *
+   * 200 → JobBidsResponse; 422 → HTTPValidationError. 401/403/404 are NOT
+   * documented: a job that is not this user's, or does not exist, is surfaced
+   * from the backend's own `detail` text by the caller. A signed-in PROVIDER
+   * calling this is not rejected by the contract, but the response is the same
+   * one a client gets — the screen itself is client-facing.
+   */
+  listJobBids: (jobId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`listJobBids: invalid job id ${String(jobId)}`));
+    }
+    return api.get<JobBidsResponse>(`/api/v1/jobs/${jobId}/bids`);
+  },
 
   /**
    * GET /api/v1/jobs/{job_id}/bids/mine — "Get My Bid For Job": THIS provider's

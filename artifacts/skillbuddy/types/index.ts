@@ -1208,15 +1208,42 @@ export interface BidResponse {
  * eta_minutes], and the schema allows `string maxLength 1000 | null`. It is sent
  * as null rather than omitted when the provider wrote nothing.
  *
- * The BidUpdate / BidReject request bodies and the client-dashboard
- * JobBidsResponse / ListMyBidsParams shapes are NOT declared here: those belong
- * to the modify, withdraw, accept/reject and my-bids flows, which this task
- * explicitly excludes. Their schemas are recorded in the task report instead of
- * being left as dead types the app could silently start using.
+ * The BidUpdate / BidReject request bodies and ListMyBidsParams are NOT declared
+ * here: those belong to the modify/withdraw, accept/reject and my-bids flows,
+ * which are separate tasks. Their schemas are recorded in the task report instead
+ * of being left as dead types the app could silently start using.
  */
 export interface BidCreateRequest {
   offered_price: number;
   /** 0..1440 (24 h), integer. */
   eta_minutes: number;
   message?: string | null;
+}
+
+/**
+ * GET /api/v1/jobs/{job_id}/bids (schema JobBidsResponse) — one job's bids, as
+ * the CLIENT's Bids screen consumes them.
+ *
+ * ALL FOUR FIELDS ARE REQUIRED, and `other_offers` is the point: the schema
+ * describes the response as "the top 3 scores as 'Recommended SkillBuddies', the
+ * rest behind 'View All Offers'", so `recommended` is the (already ordered) top
+ * 3 and `other_offers` is the remainder — the backend, not the app, decides the
+ * split. Swagger's auto-generated EXAMPLE omits other_offers; the schema and the
+ * live response both carry it (see the task report).
+ *
+ * `total_bids` is the server's own count and is NOT the sum of the two arrays:
+ * it can exceed them (statuses the client is not shown). Never derive it locally.
+ *
+ * No query parameters exist on this operation (live schema: job_id path param
+ * only), so there is nothing to page or filter with — the sort chips are applied
+ * locally to these arrays.
+ */
+export interface JobBidsResponse {
+  job_id: number;
+  /** Highest-scoring bids, top 3, in the backend's order. */
+  recommended: BidResponse[];
+  /** The remaining offers, in the backend's order. */
+  other_offers: BidResponse[];
+  /** Server-side total (may exceed the visible arrays). */
+  total_bids: number;
 }

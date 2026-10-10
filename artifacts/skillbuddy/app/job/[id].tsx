@@ -1325,9 +1325,26 @@ export default function BiddingDashboardScreen() {
             </View>
           ) : null}
 
-          {/* Place a Bid — the PROVIDER's way into the Submit Bid screen, and the
-              only bid UI this app renders today (the client's offers list is a
-              separate, unconnected task). Gated by lib/bid.canProviderSubmitBid,
+          {/* View bids — the CLIENT's way into the Bids screen, which lists this
+              job's incoming offers (GET /api/v1/jobs/{job_id}/bids). Gated by
+              the CLIENT role and by the job having left DRAFT: a draft has no
+              bidding window and cannot receive bids. Nothing about the offers
+              is assumed here — that screen reads them itself. */}
+          {activeRole === 'CLIENT' && serverJob.status !== 'DRAFT' ? (
+            <TouchableOpacity
+              style={[styles.publishBtn, { backgroundColor: c.primary, marginTop: 14 }]}
+              onPress={() => router.push(`/job/${serverJob.id}/bids` as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="users" size={15} color={c.primaryForeground} />
+              <Text style={[styles.publishText, { color: c.primaryForeground }]}>
+                {t('cbids_view_bids')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* Place a Bid — the PROVIDER's way into the Submit Bid screen. Gated
+              by lib/bid.canProviderSubmitBid,
               which needs the active PROVIDER role, a window the backend still
               reports open, and no assigned provider yet. The button is deliberately
               STATE-AGNOSTIC about whether this provider already bid: that answer

@@ -12,10 +12,15 @@
  *                   buckets.
  *   5. status     — the five BidStatus values → translated labels.
  *
- * SCOPE: the PROVIDER SUBMIT path only. The client dashboard's sort/filter
- * helpers, the score-display helpers and the −5/−10/+5/+10 suggestion helper
- * are NOT here — they were removed as out of scope for this task, so the score
- * fields are never read at all, let alone shown to the provider.
+ *   6. client     — the CLIENT's side of the same data: the job's incoming
+ *                   offers (GET /jobs/{job_id}/bids), which of them a client
+ *                   may see, the display order, and locale-aware money/distance.
+ *
+ * SCOPE: the PROVIDER SUBMIT path plus the CLIENT READ path (module 4D's
+ * "Recommended SkillBuddies" / "View All Offers" list). The score-display
+ * helper and the −5/−10/+5/+10 suggestion helper are NOT here and the score
+ * fields are never read — they are admin data, so they are neither shown to
+ * the provider nor to the client.
  *
  * No React and no axios here, so every rule above is unit-testable.
  *
@@ -44,7 +49,9 @@ import {
 import { isProviderRole, type JobActorRole } from '@/lib/jobStart';
 import type {
   BidCreateRequest,
+  BidResponse,
   BidStatus,
+  JobBidsResponse,
   JobResponse,
   ValidationErrorDetail,
 } from '@/types';
@@ -412,4 +419,233 @@ export function bidEtaParts(minutes: number | null | undefined): BidEtaParts | n
   if (minutes === 0) return { kind: 'now' };
   if (minutes < 60) return { kind: 'minutes', minutes };
   return { kind: 'hours', hours: Math.floor(minutes / 60), minutes: minutes % 60 };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * CLIENT SIDE — one job's incoming offers
+ * (GET /api/v1/jobs/{job_id}/bids → JobBidsResponse)
+ *
+ * DISPLAY ONLY. Nothing here re-scores or re-ranks: the backend already splits
+ * and orders the list (schema JobBidsResponse — "the top 3 scores as Recommended
+ * SkillBuddies, the rest behind View All Offers"), and the seven score fields
+ * are never read, so no score can leak onto the client's screen.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The app's five languages (context/LanguageContext). Declared as a plain union
+ * rather than imported: pulling the React context in here would make this module
+ * unusable from the dependency-free test runner it is compiled by.
+ */
+export type BidLocale = 'en' | 'de' | 'et' | 'lv' | 'lt';
+
+/**
+ * Per-locale number layout, written out instead of delegated to Intl so the
+ * exact same characters are produced by Node in the unit tests and by Hermes on
+ * the device — a locale-aware Intl build is not guaranteed to agree, and money
+ * is not the place to find out at runtime.
+ *
+ *   en          "€12.50"        (symbol first, dot decimal)
+ *   de/et/lv/lt "12,50 €"       (symbol last, comma decimal)
+ */
+const LOCALE_NUMBER_FORMAT: Record<
+  BidLocale,
+  { decimal: string; group: string; symbolFirst: boolean; gap: string }
+> = {
+  en: { decimal: '.', group: ',', symbolFirst: true, gap: '' },
+  de: { decimal: ',', group: '.', symbolFirst: false, gap: ' ' },
+  et: { decimal: ',', group: ' ', symbolFirst: false, gap: ' ' },
+  lv: { decimal: ',', group: ' ', symbolFirst: false, gap: ' ' },
+  lt: { decimal: ',', group: ' ', symbolFirst: false, gap: ' ' },
+};
+
+/** Thousands separators, applied left of the decimal point. */
+function groupThousands(intPart: string, separator: string): string {
+  if (intPart.length <= 3) return intPart;
+  return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
+}
+
+/**
+ * A price as EUR in the app's own locale, or null when there is nothing usable
+ * (a card then omits the money rather than printing "€NaN"). Precision comes
+ * from parseBidPrice, so the docs' absurd generator values are rejected here
+ * exactly as they are everywhere else in this module.
+ */
+export function formatBidPriceLocale(
+  raw: string | number | null | undefined,
+  locale: BidLocale
+): string | null {
+  const n = parseBidPrice(raw);
+  if (n === null) return null;
+  const fmt = LOCALE_NUMBER_FORMAT[locale] ?? LOCALE_NUMBER_FORMAT.en;
+  const [whole, fraction] = Math.abs(n).toFixed(2).split('.');
+  const amount = `${groupThousands(whole, fmt.group)}${fmt.decimal}${fraction}`;
+  const sign = n < 0 ? '-' : '';
+  return fmt.symbolFirst ? `${sign}€${amount}` : `${sign}${amount}${fmt.gap}€`;
+}
+
+/**
+ * distance_km as a non-negative number, or null. It is a NULLABLE numeric
+ * STRING in the schema (same unconstrained pattern as offered_price, and null
+ * means "unknown", not zero), so it gets the same length/absurdity guards.
+ */
+export function parseBidDistance(raw: string | null | undefined): number | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_PRICE_INPUT_CHARS) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_PRICE_ABS) return null;
+  return n;
+}
+
+/**
+ * A distance in kilometres, one decimal at most, in the app's locale
+ * ("1,5" in de/et/lv/lt, "1.5" in en). Whole kilometres lose the .0 so a card
+ * reads "3 km" rather than "3,0 km". Null when the value is absent/unusable.
+ */
+export function formatBidDistanceLocale(
+  raw: string | null | undefined,
+  locale: BidLocale
+): string | null {
+  const n = parseBidDistance(raw);
+  if (n === null) return null;
+  const fmt = LOCALE_NUMBER_FORMAT[locale] ?? LOCALE_NUMBER_FORMAT.en;
+  const rounded = Math.round(n * 10) / 10;
+  const fixed = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const [whole, fraction] = fixed.split('.');
+  const amount = fraction
+    ? `${groupThousands(whole, fmt.group)}${fmt.decimal}${fraction}`
+    : groupThousands(whole, fmt.group);
+  return `${amount} km`;
+}
+
+/* ────────────────────────────────────────────────── what the client sees ── */
+
+/**
+ * The BidStatus values a client is shown on this screen: the live bids and the
+ * one that was accepted. REJECTED, WITHDRAWN and EXPIRED are hidden — the
+ * provider took the offer back, or it lapsed, and neither is an offer the client
+ * can still act on. The five values are the full BidStatus enum (live schema).
+ */
+export const CLIENT_VISIBLE_BID_STATUSES = ['PENDING', 'ACCEPTED'] as const;
+
+export function isClientVisibleBid(
+  bid: Pick<BidResponse, 'status'> | null | undefined
+): boolean {
+  if (!bid) return false;
+  return (CLIENT_VISIBLE_BID_STATUSES as readonly string[]).includes(bid.status);
+}
+
+/** Keep only the bids this screen may render, preserving the server's order. */
+export function filterClientVisibleBids(
+  bids: ReadonlyArray<BidResponse | null | undefined>
+): BidResponse[] {
+  return bids.filter((bid): bid is BidResponse => !!bid && isClientVisibleBid(bid));
+}
+
+/**
+ * Every bid in the response with the recommended block first — the order the
+ * backend established. A bid id appearing in both arrays is kept once; the split
+ * is made server-side, so de-duplicating here is defence rather than expectation.
+ */
+export function allBids(response: JobBidsResponse | null | undefined): BidResponse[] {
+  if (!response) return [];
+  const seen = new Set<number>();
+  const out: BidResponse[] = [];
+  const both = [...(response.recommended ?? []), ...(response.other_offers ?? [])];
+  for (const bid of both) {
+    if (!bid || typeof bid.id !== 'number' || seen.has(bid.id)) continue;
+    seen.add(bid.id);
+    out.push(bid);
+  }
+  return out;
+}
+
+/**
+ * The server's own count. It is authoritative — the arrays can legitimately be
+ * shorter than total_bids (hidden statuses, or a page the response did not
+ * include) — and only falls back to the visible length when the field is
+ * missing or malformed.
+ */
+export function totalBidCount(response: JobBidsResponse | null | undefined): number {
+  const total = response?.total_bids;
+  if (typeof total === 'number' && Number.isFinite(total) && total >= 0) {
+    return Math.trunc(total);
+  }
+  return allBids(response).length;
+}
+
+/* ─────────────────────────────────────────────────── sorting the full list ── */
+
+/**
+ * The full list's sort chips. `api` is the default and means "leave the
+ * backend's order alone" (highest total score first) — the app never exposes a
+ * score-sorted option the client could misread as a score UI.
+ */
+export const BID_SORT_IDS = [
+  'api',
+  'price_asc',
+  'rating_desc',
+  'distance_asc',
+  'badges_desc',
+] as const;
+
+export type BidSortId = (typeof BID_SORT_IDS)[number];
+
+export type BidSortLabelKey =
+  | 'cbids_sort_default'
+  | 'cbids_sort_price'
+  | 'cbids_sort_rating'
+  | 'cbids_sort_distance'
+  | 'cbids_sort_badges';
+
+export const BID_SORT_LABEL_KEY: Record<BidSortId, BidSortLabelKey> = {
+  api: 'cbids_sort_default',
+  price_asc: 'cbids_sort_price',
+  rating_desc: 'cbids_sort_rating',
+  distance_asc: 'cbids_sort_distance',
+  badges_desc: 'cbids_sort_badges',
+};
+
+/** A comparable number for a sort key, or null when the value is unusable. */
+function sortValue(bid: BidResponse, sort: BidSortId): number | null {
+  switch (sort) {
+    case 'price_asc':
+      return parseBidPrice(bid.offered_price);
+    case 'rating_desc': {
+      const rating = bid.provider?.star_rating;
+      return typeof rating === 'number' && Number.isFinite(rating) ? rating : null;
+    }
+    case 'distance_asc':
+      return parseBidDistance(bid.distance_km);
+    case 'badges_desc': {
+      const badges = bid.provider?.badge_count;
+      return typeof badges === 'number' && Number.isFinite(badges) ? badges : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Sort a copy of the list by one of the chips. Local sorting of what the API
+ * returned — no re-fetch, no re-scoring.
+ *
+ * A bid whose key value is unusable (an unparseable price, a null distance)
+ * always sorts LAST, and equal values keep the backend's order: Array.prototype
+ * sort is stable, so the server's ranking is never disturbed by a tie.
+ */
+export function sortBids(bids: ReadonlyArray<BidResponse>, sort: BidSortId): BidResponse[] {
+  const copy = [...bids];
+  if (sort === 'api') return copy;
+  const descending = sort === 'rating_desc' || sort === 'badges_desc';
+  return copy.sort((a, b) => {
+    const left = sortValue(a, sort);
+    const right = sortValue(b, sort);
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    if (left === right) return 0;
+    if (descending) return right - left;
+    return left - right;
+  });
 }

@@ -581,6 +581,57 @@ const NEW_BID_KEYS = [
   'bid_status_expired',
 ];
 
+/**
+ * Client Bids screen (GET /jobs/{job_id}/bids): the entry button, the header,
+ * the Recommended / All-offers sections with their sort chips, the empty and
+ * closed states, the provider sheet's rows and every error message. Each is
+ * reachable through t(), so each must exist in all five dictionaries and must
+ * be a real translation rather than an English copy.
+ */
+const NEW_CBIDS_KEYS = [
+  'cbids_view_bids',
+  'cbids_title',
+  'cbids_urgent',
+  'cbids_regular',
+  'cbids_total_one',
+  'cbids_total_other',
+  'cbids_recommended',
+  'cbids_recommended_section',
+  'cbids_view_all',
+  'cbids_show_recommended',
+  'cbids_all_section',
+  'cbids_sort_default',
+  'cbids_sort_price',
+  'cbids_sort_rating',
+  'cbids_sort_distance',
+  'cbids_sort_badges',
+  'cbids_closed',
+  'cbids_refresh_failed',
+  'cbids_empty_open_title',
+  'cbids_empty_open_msg',
+  'cbids_empty_closed_title',
+  'cbids_empty_closed_msg',
+  'cbids_provider_title',
+  'cbids_provider_price',
+  'cbids_provider_rating',
+  'cbids_provider_badges',
+  'cbids_provider_jobs',
+  'cbids_provider_acceptance',
+  'cbids_provider_response',
+  'cbids_provider_distance',
+  'cbids_provider_message',
+  'cbids_provider_no_message',
+  'cbids_close',
+  'cbids_err_title',
+  'cbids_err_network',
+  'cbids_err_notfound_title',
+  'cbids_err_notfound_msg',
+  'cbids_err_forbidden_title',
+  'cbids_err_forbidden_msg',
+  'cbids_retry',
+  'cbids_back_to_job',
+];
+
 const canonical = new Set(Object.keys(en as unknown as Record<string, string>));
 
 for (const [lang, dict] of dictionaries) {
@@ -648,6 +699,7 @@ const allNewKeys = [
   ...NEW_POST_FLOW_KEYS,
   ...NEW_POST_WIZARD_KEYS,
   ...NEW_BID_KEYS,
+  ...NEW_CBIDS_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

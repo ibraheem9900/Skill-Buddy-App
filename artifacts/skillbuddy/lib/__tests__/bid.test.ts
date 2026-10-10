@@ -33,7 +33,20 @@ import {
   canProviderSubmitBid,
   isBiddingOpen,
   shouldResyncAfterBidFailure,
+  BID_SORT_IDS,
+  BID_SORT_LABEL_KEY,
+  CLIENT_VISIBLE_BID_STATUSES,
+  allBids,
+  filterClientVisibleBids,
+  formatBidDistanceLocale,
+  formatBidPriceLocale,
+  isClientVisibleBid,
+  parseBidDistance,
+  sortBids,
+  totalBidCount,
+  type BidSortId,
 } from '../bid';
+import type { BidResponse, BidStatus, JobBidsResponse } from '@/types';
 
 declare const console: { log: (msg: string) => void };
 
@@ -248,6 +261,153 @@ eq('eta above the schema maximum is unusable', bidEtaParts(1441), null);
 eq('a negative eta is unusable', bidEtaParts(-1), null);
 eq('a fractional eta is unusable', bidEtaParts(12.5), null);
 eq('a missing eta is unusable', bidEtaParts(null), null);
+
+/* ══════════════════════════════════════════════════ CLIENT offers screen */
+
+/** A complete BidResponse so a test only states what it is actually about. */
+function offer(over: Partial<BidResponse> & { id: number }): BidResponse {
+  return {
+    job_id: 7,
+    provider: {
+      id: 100 + over.id,
+      name: `Provider ${over.id}`,
+      profile_photo_url: null,
+      star_rating: 4.5,
+      badge_count: 2,
+      badge_tier: 'GOLD',
+      credibility_score: 80,
+      acceptance_rate: 90,
+      response_time_avg: 15,
+      total_jobs_completed: 30,
+    },
+    offered_price: '20.00',
+    eta_minutes: 45,
+    message: null,
+    status: 'PENDING',
+    distance_km: '2.5',
+    distance_score: 10,
+    star_rating_score: 10,
+    badge_tier_score: 5,
+    credibility_score: 8,
+    acceptance_rate_score: 9,
+    response_time_score: 7,
+    total_score: 49,
+    is_recommended: false,
+    accepted_at: null,
+    rejected_at: null,
+    rejection_reason: null,
+    withdrawn_at: null,
+    created_at: '2026-10-10T10:00:00Z',
+    updated_at: '2026-10-10T10:00:00Z',
+    ...over,
+  };
+}
+
+function response(over: Partial<JobBidsResponse> = {}): JobBidsResponse {
+  return { job_id: 7, recommended: [], other_offers: [], total_bids: 0, ...over };
+}
+
+/* ─────────────────────────────────────────── money & distance per locale ── */
+
+eq('en renders the symbol first', formatBidPriceLocale('12.5', 'en'), '€12.50');
+eq('de renders the symbol last with a comma', formatBidPriceLocale('12.5', 'de'), '12,50 €');
+eq('et renders the symbol last with a comma', formatBidPriceLocale('12.5', 'et'), '12,50 €');
+eq('lv renders the symbol last with a comma', formatBidPriceLocale('12.5', 'lv'), '12,50 €');
+eq('lt renders the symbol last with a comma', formatBidPriceLocale('12.5', 'lt'), '12,50 €');
+eq('en groups thousands', formatBidPriceLocale('1234.5', 'en'), '€1,234.50');
+eq('de groups thousands with a dot', formatBidPriceLocale('1234.5', 'de'), '1.234,50 €');
+eq('a whole price keeps its cents', formatBidPriceLocale('7', 'de'), '7,00 €');
+eq('an unparseable price has no string at all', formatBidPriceLocale('abc', 'en'), null);
+eq('a missing price has no string at all', formatBidPriceLocale(null, 'de'), null);
+eq('the docs 300-digit price is still refused', formatBidPriceLocale(`${'0'.repeat(300)}`, 'en'), null);
+
+eq('distance uses the locale decimal', formatBidDistanceLocale('1.5', 'de'), '1,5 km');
+eq('distance uses a dot in en', formatBidDistanceLocale('1.5', 'en'), '1.5 km');
+eq('whole kilometres drop the decimal', formatBidDistanceLocale('3', 'de'), '3 km');
+eq('distance is rounded to one decimal', formatBidDistanceLocale('12.25', 'lv'), '12,3 km');
+eq('a zero distance is shown, not hidden', formatBidDistanceLocale('0', 'et'), '0 km');
+eq('a null distance shows nothing (unknown ≠ 0)', formatBidDistanceLocale(null, 'de'), null);
+eq('an unparseable distance shows nothing', formatBidDistanceLocale('nope', 'de'), null);
+eq('a negative distance is refused', parseBidDistance('-1.5'), null);
+eq('a null distance parses to nothing', parseBidDistance(null), null);
+eq('a 300-digit distance is refused', parseBidDistance('1'.repeat(300)), null);
+
+/* ─────────────────────────────────────────── what the client is shown ── */
+
+deepEq('the visible statuses are the live bid + the accepted one', [...CLIENT_VISIBLE_BID_STATUSES], ['PENDING', 'ACCEPTED']);
+eq('a pending bid is shown', isClientVisibleBid({ status: 'PENDING' }), true);
+eq('the accepted bid is shown', isClientVisibleBid({ status: 'ACCEPTED' }), true);
+eq('a rejected bid is hidden', isClientVisibleBid({ status: 'REJECTED' }), false);
+eq('a withdrawn bid is hidden', isClientVisibleBid({ status: 'WITHDRAWN' }), false);
+eq('an expired bid is hidden', isClientVisibleBid({ status: 'EXPIRED' }), false);
+eq('an unknown status is hidden rather than shown raw', isClientVisibleBid({ status: 'SOMETHING' as BidStatus }), false);
+eq('a missing bid is hidden', isClientVisibleBid(null), false);
+deepEq(
+  'filtering keeps the api order and drops the rest',
+  filterClientVisibleBids([
+    offer({ id: 1 }),
+    offer({ id: 2, status: 'WITHDRAWN' }),
+    offer({ id: 3, status: 'ACCEPTED' }),
+    offer({ id: 4, status: 'EXPIRED' }),
+  ]).map((b) => b.id),
+  [1, 3]
+);
+
+/* ───────────────────────────────────────────────── the two arrays, read ── */
+
+deepEq(
+  'allBids puts the recommended block first, as the server sent it',
+  allBids(
+    response({
+      recommended: [offer({ id: 9 }), offer({ id: 8 })],
+      other_offers: [offer({ id: 2 }), offer({ id: 1 })],
+    })
+  ).map((b) => b.id),
+  [9, 8, 2, 1]
+);
+deepEq(
+  'a bid id in both arrays is only returned once',
+  allBids(response({ recommended: [offer({ id: 5 })], other_offers: [offer({ id: 5 })] })).map((b) => b.id),
+  [5]
+);
+deepEq('a missing response has no bids at all', allBids(null).map((b) => b.id), []);
+deepEq('a missing response has no other offers either', allBids(undefined).map((b) => b.id), []);
+eq('the total is the server count, not the array length', totalBidCount(response({ recommended: [offer({ id: 1 })], total_bids: 7 })), 7);
+// The field is required in the schema, so this is the malformed-payload path:
+// with nothing usable to read, the visible length is the only honest answer.
+const totalOmitted = {
+  job_id: 7,
+  recommended: [offer({ id: 1 })],
+  other_offers: [offer({ id: 2 })],
+} as unknown as JobBidsResponse;
+eq('an omitted total falls back to what is visible', totalBidCount(totalOmitted), 2);
+eq('a malformed total falls back to what is visible', totalBidCount(response({ other_offers: [offer({ id: 2 })], total_bids: Number.NaN })), 1);
+eq('a zero total is respected as zero', totalBidCount(response({ recommended: [offer({ id: 1 })], total_bids: 0 })), 0);
+
+/* ─────────────────────────────────────────────────────── sorting chips ── */
+
+const cheap = offer({ id: 1, offered_price: '10.00', provider: { ...offer({ id: 1 }).provider, star_rating: 3.2, badge_count: 1 }, distance_km: '9.0' });
+const mid = offer({ id: 2, offered_price: '25.00', provider: { ...offer({ id: 2 }).provider, star_rating: 4.9, badge_count: 3 }, distance_km: null });
+const dear = offer({ id: 3, offered_price: '40.00', provider: { ...offer({ id: 3 }).provider, star_rating: 4.4, badge_count: 5 }, distance_km: '0.5' });
+const unparseable = offer({ id: 4, offered_price: 'not-a-price', distance_km: null });
+const three = [cheap, mid, dear];
+
+eq('the default order is the API order, untouched', sortBids(three, 'api').map((b) => b.id).join(','), '1,2,3');
+eq('sorting never mutates the input', three.map((b) => b.id).join(','), '1,2,3');
+eq('price sorts low to high', sortBids([dear, cheap, mid], 'price_asc').map((b) => b.id).join(','), '1,2,3');
+eq('rating sorts high to low', sortBids([cheap, mid, dear], 'rating_desc').map((b) => b.id).join(','), '2,3,1');
+eq('distance sorts near to far', sortBids([cheap, mid, dear], 'distance_asc').map((b) => b.id).join(','), '3,1,2');
+eq('a missing distance sorts last, never first', sortBids([cheap, mid, dear], 'distance_asc')[2].id, 2);
+eq('badges sort most first', sortBids([cheap, mid, dear], 'badges_desc').map((b) => b.id).join(','), '3,2,1');
+eq('an unparseable price sorts last', sortBids([unparseable, cheap, dear], 'price_asc').map((b) => b.id).join(','), '1,3,4');
+eq('equal keys keep the API order (stable)', sortBids([offer({ id: 7, offered_price: '10.00' }), offer({ id: 6, offered_price: '10.00' })], 'price_asc').map((b) => b.id).join(','), '7,6');
+deepEq('every sort chip has its own label key', [...BID_SORT_IDS].map((id: BidSortId) => BID_SORT_LABEL_KEY[id]), [
+  'cbids_sort_default',
+  'cbids_sort_price',
+  'cbids_sort_rating',
+  'cbids_sort_distance',
+  'cbids_sort_badges',
+]);
 
 /* ------------------------------------------------------------------ report */
 
