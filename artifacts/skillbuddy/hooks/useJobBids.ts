@@ -94,6 +94,42 @@ export function useJobBids(jobId: number | null, { pollMs = null }: Options = {}
     setStatus('ready');
   }, []);
 
+  /**
+   * Drop ONE bid from the current view, immediately.
+   *
+   * This is the local half of the client's Decline: the caller passes the id of
+   * the bid the SERVER returned from the reject (status REJECTED, rejected_at set)
+   * so the card leaves the list in the same frame instead of waiting for the next
+   * round-trip. Only the named id is touched — nothing is re-sorted, re-scored or
+   * re-split, and `is_recommended` is never recomputed here: the caller follows
+   * this with refresh(), and the backend's own recommended/other_offers split is
+   * what promotes the next-best bid into the Recommended block.
+   *
+   * `total_bids` is decremented by one when the rejected bid was still counted,
+   * because the server's number includes it until the re-read arrives; the refresh
+   * that follows replaces the response with the server's own number.
+   */
+  const dropBid = useCallback((bidId: number) => {
+    setResponse((prev) => {
+      if (!prev) return prev;
+      const recommended = (prev.recommended ?? []).filter((bid) => bid.id !== bidId);
+      const otherOffers = (prev.other_offers ?? []).filter((bid) => bid.id !== bidId);
+      const removed =
+        recommended.length !== (prev.recommended ?? []).length ||
+        otherOffers.length !== (prev.other_offers ?? []).length;
+      if (!removed) return prev;
+      return {
+        ...prev,
+        recommended,
+        otherOffers,
+        total_bids: Math.max(
+          0,
+          (typeof prev.total_bids === 'number' ? prev.total_bids : 0) - 1
+        ),
+      };
+    });
+  }, []);
+
   const load = useCallback(
     async (mode: 'open' | 'refresh') => {
       if (jobId === null || inFlight.current) return;
@@ -207,6 +243,11 @@ export function useJobBids(jobId: number | null, { pollMs = null }: Options = {}
     newBidIds,
     /** Pull-to-refresh / retry. Never blanks the screen. */
     refresh: useCallback(() => load('refresh'), [load]),
+    /**
+     * Remove one bid from the current view at once (the client just declined it).
+     * Always followed by refresh() so the server's ordering and split win.
+     */
+    dropBid,
     /** Retry from an error/notfound state — behaves like the opening load. */
     reload: useCallback(() => {
       hasData.current = false;

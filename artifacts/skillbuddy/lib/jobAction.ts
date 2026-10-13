@@ -23,7 +23,6 @@ import { firstErrorMessage } from '@/lib/jobList';
  * status → bucket switch. Action-specific wording and any extra bucket (e.g. the
  * restart limit) stay in that action's own module.
  */
-
 export type JobActionFailureKind =
   /** 422 — the only documented failure. */
   | 'invalid'
@@ -68,19 +67,17 @@ export function classifyJobActionFailure(err: unknown): JobActionFailure {
   if (status === 422) return { kind: 'invalid', message };
   if (status === 400) return { kind: 'badrequest', message };
   if (status === 401) return { kind: 'unauthorized', message };
-  if (status === 409) return { kind: 'conflict', message };
-  if (status === 403) return { kind: 'forbidden', message };
   if (status === 404) return { kind: 'notfound', message };
+  if (status === 403) return { kind: 'forbidden', message };
+  if (status === 409) return { kind: 'conflict', message };
   if (status >= 500) return { kind: 'server', message };
   return { kind: 'unknown', message };
 }
 
 /**
  * True for the buckets that mean "the server refused because of the job's current
- * state" rather than a transport problem. A screen that hits one of these should
- * re-read the job: the flags it was gating on (is_editable, can_convert_to_*,
- * can_restart_timer, is_bidding_open …) are stale, which is exactly why the
- * backend said no.
+ * state" rather than a transport problem. Only this module annotates which ones
+ * are state conflicts so callers can decide to re-read the job rather than retry.
  */
 export function isJobActionRefused(kind: JobActionFailureKind): boolean {
   return kind === 'conflict' || kind === 'forbidden' || kind === 'notfound';
@@ -90,3 +87,4 @@ export function isJobActionRefused(kind: JobActionFailureKind): boolean {
 export function isJobActionUnauthorized(kind: JobActionFailureKind): boolean {
   return kind === 'unauthorized';
 }
+

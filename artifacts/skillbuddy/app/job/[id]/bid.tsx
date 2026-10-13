@@ -3,49 +3,82 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
+import BidFormFields from '@/components/BidFormFields';
+import BottomSheet from '@/components/BottomSheet';
 import BrandedLoader from '@/components/BrandedLoader';
 import CountdownTimer from '@/components/CountdownTimer';
 import { useJobDetail } from '@/hooks/useJobDetail';
-import { useBidSubmit, type MyBidState } from '@/hooks/useBidSubmit';
+import { useBidSubmit } from '@/hooks/useBidSubmit';
+import { MY_BID_POLL_MS, useMyBid } from '@/hooks/useMyBid';
 import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
 import {
-  BID_MESSAGE_MAX_CHARS,
+  BID_ADJUST_STEPS,
+  adjustBidPrice,
+  bidDraftEtaMinutes,
+  bidDraftFromBid,
   bidEtaParts,
   bidFieldError,
-  formatBidPrice,
+  bidNextStepKey,
+  bidRejectionReason,
   bidStatusLabelKey,
+  bidStatusStamp,
   bidSubmitFailureMessage,
+  bidUpdateFailureMessage,
+  buildBidUpdateRequest,
+  canApplyBidAdjust,
+  canEditBid,
   canProviderSubmitBid,
+  formatAdjustChipLabel,
+  formatBidPrice,
+  hasBidDraftChanged,
+  isBidDraftValid,
   isBiddingOpen,
+  shouldOfferBidAdjust,
   shouldResyncAfterBidFailure,
   validateBidMessage,
   validateBidPrice,
   validateEtaMinutes,
+  type BidDraft,
   type BidFieldName,
 } from '@/lib/bid';
 import type { BidResponse } from '@/types';
 
 /**
- * Place Your Bid — POST /api/v1/jobs/{job_id}/bids (schema BidCreate).
+ * Place Your Bid / Your Bid — the provider's own bid on ONE job.
  *
- * REACHED from Job Details → its provider-only "Place a Bid" / "Your Bid" card
- * (see the entry point there), which is gated on the active PROVIDER role plus a
- * job whose bidding window is still open. The id is the JOB id.
+ *   POST /api/v1/jobs/{job_id}/bids       → submit (schema BidCreate)
+ *   GET  /api/v1/jobs/{job_id}/bids/mine  → this provider's own bid (useMyBid)
+ *
+ * REACHED from Job Details → its provider-only card, which offers "Place a Bid"
+ * while the backend still reports the window open and "View your bid" once it
+ * does not. The id is the JOB id.
+ *
+ * WHAT THE SCREEN OPENS AS (decided by /bids/mine, never by a guess):
+ *   - a bid exists  → the "Your bid" card, status-aware, with the countdown while
+ *                     the window is open and a "Bidding closed" chip after it
+ *   - no bid, open  → the form
+ *   - no bid, shut  → the closed state (no form, no buttons)
+ *   - unanswered    → an honest "could not be checked" state with a retry, so a
+ *                     provider can never submit a duplicate on a failed read
+ * A 404 from /bids/mine means "no bid" AND is also what an unknown job id
+ * returns; the job detail this screen already loaded is what tells them apart
+ * (see lib/bid.myBidLookupFromError and hooks/useMyBid).
  *
  * THE PRICE IS THE FINAL TOTAL THE CLIENT PAYS, VAT included — the client is
  * charged nothing on top. The label and hint say exactly that, translated. No
@@ -58,13 +91,24 @@ import type { BidResponse } from '@/types';
  * client's "estimated time of arrival"; the LIVE SCHEMA resolves it — BidCreate's
  * own description reads "Estimated time of arrival, in minutes", 0..1440. The
  * schema is authoritative, so the copy asks how long until the provider can
- * arrive. The spec conflict is recorded in the report for the backend owner.
+ * arrive, and the same label is used for the bid that was submitted. The spec
+ * conflict is recorded in the report for the backend owner.
+ *
+ * MODIFY BID IS THIS SCREEN'S SECOND ACTION (PUT /jobs/{job_id}/bids/{bid_id}).
+ * Offered on the "Your bid" card ONLY while the backend still reports the bid
+ * PENDING and the job's window open, it opens the SAME form component the submit
+ * flow renders, prefilled from the bid the server sent, and Save stays disabled
+ * until a value actually changed. The quick-adjust chips (−10 / −5 / +5 / +10,
+ * EURO amounts) appear only once the client has restarted the timer. While the
+ * sheet is open, polling is paused so a poll tick can never overwrite what the
+ * provider is typing.
  *
  * WHAT IS DELIBERATELY ABSENT:
  *   - the score fields, total_score and is_recommended. They are internal
  *     ranking data for the client's dashboard and admin, so nothing here reads
  *     them off a response;
- *   - Modify / Cancel Bid and the −5/−10/+5/+10 suggestions — later tasks;
+ *   - Withdraw Bid, Accept Bid, Reject Bid and Chat — separate tasks. No
+ *     disabled placeholder is rendered for any of them either;
  *   - any client snapshot, photos or budget. JobResponse has no such fields, so
  *     no placeholder is invented for them.
  *
@@ -78,16 +122,53 @@ export default function PlaceBidScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { activeRole } = useRole();
   const showAlert = useAppAlert();
 
   const numericId = /^\d+$/.test(id ?? '') ? Number(id) : null;
 
   const { status: jobStatus, job, serverMessage, retry, refetch } = useJobDetail(numericId);
-  const { createBidForJob, bidSubmitting, loadMyBid } = useBidSubmit();
+  const { createBidForJob, bidSubmitting } = useBidSubmit();
 
-  const [myBid, setMyBid] = useState<MyBidState | null>(null);
+  const biddingOpen = job ? isBiddingOpen(job) : false;
+
+  /**
+   * THIS provider's own bid. The hook owns the three-state answer (exists /
+   * none / unanswered), the per-account cache and the polling rules; the screen
+   * only renders what it says. Polling is requested ONLY while the window is
+   * open — the hook additionally requires a PENDING bid, focus and a foreground
+   * app, and tears the interval down the moment the status stops being PENDING.
+   */
+  /**
+   * The Edit bid sheet's own draft — null while the sheet is closed. It is a
+   * COPY of the bid in lib/bid.BidDraft form, so nothing the provider types can
+   * reach the card until the server has confirmed it.
+   */
+  const [editDraft, setEditDraft] = useState<BidDraft | null>(null);
+  const [editPriceError, setEditPriceError] = useState<string | null>(null);
+  const [editEtaError, setEditEtaError] = useState<string | null>(null);
+  const [editMessageError, setEditMessageError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const {
+    lookup: myBid,
+    refreshing: myBidRefreshing,
+    refreshFailed: myBidRefreshFailed,
+    changedStatus,
+    clearChangedStatus,
+    savingEdit,
+    saveEdit: saveEditBid,
+    refresh: refreshMyBid,
+    reload: reloadMyBid,
+    adopt: adoptCreatedBid,
+  } = useMyBid(numericId, {
+    pollMs: biddingOpen ? MY_BID_POLL_MS : null,
+    // A sheet the provider is typing in must never be overwritten by a poll
+    // tick. Focus/pull-to-refresh still work; the interval waits.
+    paused: editDraft !== null,
+  });
+
   const [price, setPrice] = useState('');
   const [etaHours, setEtaHours] = useState(0);
   const [etaMinutes, setEtaMinutes] = useState(0);
@@ -97,8 +178,6 @@ export default function PlaceBidScreen() {
   const [messageError, setMessageError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [retryable, setRetryable] = useState(false);
-  /** The bid we just created — adopted from the 201, never from a guess. */
-  const [createdBid, setCreatedBid] = useState<BidResponse | null>(null);
 
   /**
    * The countdown anchor is captured ONCE: the deadline must not be recomputed
@@ -110,18 +189,39 @@ export default function PlaceBidScreen() {
     [job]
   );
 
-  /* --------------------------------------------------------- /bids/mine load */
+  /* ------------------------------------------------------------- connectivity */
 
-  const refreshMyBid = useCallback(async () => {
-    if (numericId === null) return;
-    setMyBid(null);
-    const result = await loadMyBid(numericId);
-    setMyBid(result);
-  }, [numericId, loadMyBid]);
-
+  /**
+   * A genuine connectivity failure is the ONE failure that gets a dialog (the
+   * screen would otherwise silently sit on "could not be checked"), and it is
+   * raised once per failure rather than on every poll tick. Every other failure
+   * stays inline, with the backend's own text when it sent one.
+   */
+  const offlineDialogShown = useRef(false);
   useEffect(() => {
-    void refreshMyBid();
-  }, [refreshMyBid]);
+    if (myBid?.state !== 'error' || myBid.kind !== 'network') {
+      offlineDialogShown.current = false;
+      return;
+    }
+    if (offlineDialogShown.current) return;
+    offlineDialogShown.current = true;
+    showAlert({
+      title: t('jobd_bid_offline_title'),
+      message: t('jobd_bid_offline_msg'),
+      icon: 'wifi-off',
+    });
+  }, [myBid, showAlert, t]);
+
+  /**
+   * A 401 that survived the shared client's refresh + single replay means the
+   * session is gone — the same rule every other job screen follows. The tokens
+   * have already been cleared by the axios layer, so this only finishes the job.
+   */
+  useEffect(() => {
+    if (myBid?.state === 'error' && myBid.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+    }
+  }, [myBid, router]);
 
   /** Reaching zero is not a client-side verdict — re-read the job. */
   const handleBiddingExpired = useCallback(() => {
@@ -152,10 +252,10 @@ export default function PlaceBidScreen() {
     const outcome = await createBidForJob(numericId, price, String(etaTotalMinutes), message);
 
     if (outcome.ok) {
-      // The summary is built from the 201 — status included. "PENDING" is never
-      // hardcoded anywhere; an unrecognised status simply renders no chip.
-      setCreatedBid(outcome.bid);
-      setMyBid({ state: 'exists', bid: outcome.bid });
+      // The card comes from the 201 itself — status included — and the hook then
+      // re-reads /bids/mine to confirm it, so the provider never sees a
+      // form→card flash and never sees a status the server did not send.
+      adoptCreatedBid(outcome.bid);
       showAlert({
         title: t('jobd_bid_success_title'),
         message: t('jobd_bid_success_msg'),
@@ -202,12 +302,40 @@ export default function PlaceBidScreen() {
     price,
     etaTotalMinutes,
     message,
+    adoptCreatedBid,
     showAlert,
     t,
     router,
     refetch,
     refreshMyBid,
   ]);
+
+  /* --------------------------------------------------------------- edit bid */
+
+  /**
+   * Open the sheet on the bid the server sent. The prefill comes from the bid
+   * itself (lib/bid.bidDraftFromBid) — an unreadable price prefills empty, which
+   * leaves Save disabled until a real one is typed.
+   */
+  const openEdit = useCallback((bid: BidResponse) => {
+    setEditDraft(bidDraftFromBid(bid));
+    setEditPriceError(null);
+    setEditEtaError(null);
+    setEditMessageError(null);
+    setEditError(null);
+  }, []);
+
+  /**
+   * Close and DISCARD — the provider's way out without a request (lib/bid keeps
+   * the "did anything change" question, so nothing is lost silently).
+   */
+  const closeEdit = useCallback(() => {
+    setEditDraft(null);
+    setEditPriceError(null);
+    setEditEtaError(null);
+    setEditMessageError(null);
+    setEditError(null);
+  }, []);
 
   /* ------------------------------------------------------------------ states */
 
@@ -242,6 +370,20 @@ export default function PlaceBidScreen() {
     </View>
   );
 
+  /** Accent/icon for a status, used by the change banner. */
+  const statusAccent = (status: string | null | undefined) =>
+    status === 'ACCEPTED' ? c.success : status === 'REJECTED' ? c.destructive : c.mutedForeground;
+  const statusIcon = (
+    status: string | null | undefined
+  ): React.ComponentProps<typeof Feather>['name'] =>
+    status === 'ACCEPTED'
+      ? 'check-circle'
+      : status === 'REJECTED'
+        ? 'x-circle'
+        : status === 'WITHDRAWN'
+          ? 'corner-up-left'
+          : 'clock';
+
   /** A summary of ONE bid, rendered only from the fields it actually carries. */
   const bidSummary = (bid: BidResponse) => {
     // offered_price arrives as a NUMERIC STRING (Decimal) on the wire, so it is
@@ -250,9 +392,25 @@ export default function PlaceBidScreen() {
     const eta = bidEtaParts(bid.eta_minutes);
     const statusKey = bidStatusLabelKey(bid.status);
     const submitted = formatDateTime(bid.created_at);
+    // Only the stamp that belongs to THIS status — the docs' example fills all
+    // three on a PENDING bid, which is exactly what must not be rendered.
+    const stamp = bidStatusStamp(bid);
+    const stampText = stamp ? formatDateTime(stamp.value) : null;
+    const reason = bidRejectionReason(bid);
+    const nextStepKey = bidNextStepKey(bid.status);
     return (
       <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[styles.cardTitle, { color: c.text }]}>{t('jobd_bid_your_bid')}</Text>
+        <View style={styles.cardHead}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>{t('jobd_bid_your_bid')}</Text>
+          {statusKey ? (
+            <View style={[styles.statusChip, { backgroundColor: c.muted, borderColor: statusAccent(bid.status) }]}>
+              <Feather name={statusIcon(bid.status)} size={12} color={statusAccent(bid.status)} />
+              <Text style={[styles.statusChipText, { color: statusAccent(bid.status) }]}>
+                {t(statusKey)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
         {priceText ? (
           <View style={styles.row}>
@@ -287,15 +445,6 @@ export default function PlaceBidScreen() {
           </Text>
         </View>
 
-        {statusKey ? (
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
-              {t('jobd_bid_summary_status')}
-            </Text>
-            <Text style={[styles.rowValue, { color: c.text }]}>{t(statusKey)}</Text>
-          </View>
-        ) : null}
-
         {submitted ? (
           <View style={styles.row}>
             <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
@@ -303,6 +452,50 @@ export default function PlaceBidScreen() {
             </Text>
             <Text style={[styles.rowValue, { color: c.text }]}>{submitted}</Text>
           </View>
+        ) : null}
+
+        {stamp && stampText ? (
+          <View style={styles.row}>
+            <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
+              {t(stamp.labelKey)}
+            </Text>
+            <Text style={[styles.rowValue, { color: c.text }]}>{stampText}</Text>
+          </View>
+        ) : null}
+
+        {reason ? (
+          <View style={styles.row}>
+            <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
+              {t('jobd_bid_reject_reason')}
+            </Text>
+            <Text style={[styles.rowValue, { color: c.text }]}>{reason}</Text>
+          </View>
+        ) : null}
+
+        {nextStepKey ? (
+          <View style={[styles.nextStep, { borderTopColor: c.border }]}>
+            <Text style={[styles.nextStepText, { color: c.mutedForeground }]}>
+              {t(nextStepKey)}
+            </Text>
+          </View>
+        ) : null}
+
+        {/*
+         * Edit bid (PUT /jobs/{job_id}/bids/{bid_id}) — offered ONLY while the
+         * backend still reports this bid PENDING and the job's bidding window
+         * open (lib/bid.canEditBid). Every other state keeps its own status
+         * message and no form, so the provider is never invited to change a bid
+         * the server would refuse.
+         */}
+        {canEditBid(bid, job, activeRole) ? (
+          <TouchableOpacity
+            style={[styles.editBtn, { borderColor: c.primary }]}
+            onPress={() => openEdit(bid)}
+            activeOpacity={0.85}
+          >
+            <Feather name="edit-2" size={14} color={c.primary} />
+            <Text style={[styles.editBtnText, { color: c.primary }]}>{t('jobd_bid_edit')}</Text>
+          </TouchableOpacity>
         ) : null}
       </View>
     );
@@ -345,9 +538,35 @@ export default function PlaceBidScreen() {
     );
   }
 
+  // The lookup is still unanswered. The loader is shown BEFORE the gates below:
+  // otherwise a closed window would flash "bidding is closed" for a provider who
+  // in fact has a bid on the job, and only swap it for the card a moment later.
+  if (myBid === null) {
+    return (
+      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+        <BrandedLoader size={44} />
+      </View>
+    );
+  }
+
+  // The bid state could not be established — this is NOT "no bid yet", so no
+  // form is shown and a duplicate bid cannot be created by accident. The
+  // backend's own text wins when it sent one, except for a 403, where the app's
+  // copy states the situation rather than the rule (same rule as a 403 submit).
+  if (myBid.state === 'error') {
+    return shell(
+      t('jobd_bid_screen_title'),
+      centered(
+        'wifi-off',
+        t('jobd_bid_locked_title'),
+        myBid.kind === 'forbidden' ? t('jobd_bid_locked_msg') : myBid.message ?? t('jobd_bid_locked_msg'),
+        { label: t('jobs_retry'), onPress: () => void reloadMyBid() }
+      )
+    );
+  }
+
   const canBid = canProviderSubmitBid(job, activeRole);
-  const biddingOpen = isBiddingOpen(job);
-  const held = createdBid ?? (myBid?.state === 'exists' ? myBid.bid : null);
+  const held = myBid.state === 'exists' ? myBid.bid : null;
 
   // The window is shut, this provider has already been picked, or the account is
   // in client mode: no form, and the reason is named rather than guessed.
@@ -365,19 +584,302 @@ export default function PlaceBidScreen() {
     );
   }
 
-  /* ---------------------------------------------------------------- summary */
+  /* ---------------------------------------------------------------- my bid */
 
   if (held) {
+    const changedLabel = changedStatus ? bidStatusLabelKey(changedStatus) : null;
+
+    /**
+     * The Edit bid gates, all decided in lib/bid so the screen invents nothing:
+     * nothing changed / invalid / saving / the status left PENDING while the
+     * sheet was open — which LOCKS the form instead of dropping the work.
+     */
+    const editLocked = editDraft !== null && held.status !== 'PENDING';
+    const editChanged = editDraft !== null && hasBidDraftChanged(held, editDraft);
+    const editValid = editDraft !== null && isBidDraftValid(editDraft);
+    const canSaveEdit = !!editDraft && editChanged && editValid && !savingEdit && !editLocked;
+
+    const editFieldChange = (apply: (draft: BidDraft) => BidDraft, clear: () => void) => {
+      setEditDraft((draft) => (draft ? apply(draft) : draft));
+      clear();
+    };
+
+    /**
+     * Save. The values are re-validated here as well as through the disabled
+     * button, so a rejected price never reaches the network; every failure keeps
+     * the draft exactly as typed.
+     */
+    const saveEditNow = async () => {
+      if (!editDraft || savingEdit || editLocked) return;
+      setEditError(null);
+      const priceResult = validateBidPrice(editDraft.price);
+      const etaResult = validateEtaMinutes(String(bidDraftEtaMinutes(editDraft)));
+      const messageResult = validateBidMessage(editDraft.message);
+      setEditPriceError(priceResult.ok ? null : t(priceResult.errorKey));
+      setEditEtaError(etaResult.ok ? null : t(etaResult.errorKey));
+      setEditMessageError(messageResult.ok ? null : t(messageResult.errorKey));
+      if (!priceResult.ok || !etaResult.ok || !messageResult.ok) return;
+
+      const outcome = await saveEditBid(held.id, buildBidUpdateRequest(editDraft));
+
+      if (outcome.ok) {
+        // The card already follows the PUT response (hooks/useMyBid); the sheet
+        // closes on the same answer.
+        closeEdit();
+        showAlert({
+          title: t('jobd_bid_edit_success_title'),
+          message: t('jobd_bid_edit_success_msg'),
+          icon: 'check-circle',
+        });
+        return;
+      }
+
+      if (outcome.kind === 'busy') return;
+      if (outcome.kind === 'unauthorized') {
+        router.replace('/(auth)/login' as any);
+        return;
+      }
+
+      // 422 → the server's own message on the field it rejected (FastAPI
+      // reports a body field as loc ["body", "<field>"], verified live).
+      if (outcome.kind === 'invalid' && outcome.detail) {
+        const priceMsg = bidFieldError(outcome.detail, 'offered_price');
+        const etaMsg = bidFieldError(outcome.detail, 'eta_minutes');
+        const messageMsg = bidFieldError(outcome.detail, 'message');
+        setEditPriceError(priceMsg);
+        setEditEtaError(etaMsg);
+        setEditMessageError(messageMsg);
+        if (priceMsg || etaMsg || messageMsg) return;
+      }
+
+      if (outcome.kind === 'network') {
+        showAlert({
+          title: t('jobd_bid_offline_title'),
+          message: t('jobd_edit_err_network'),
+          icon: 'wifi-off',
+        });
+      }
+
+      // A refusal means this screen's own gates are stale (the window closed,
+      // the client picked someone, the bid is gone), so the job AND the bid are
+      // re-read before the provider decides what to do next.
+      if (shouldResyncAfterBidFailure(outcome.kind)) {
+        void refetch();
+        void refreshMyBid();
+      }
+
+      setEditError(bidUpdateFailureMessage(outcome, t));
+    };
+
+    /**
+     * The spec's quick adjust, shown ONLY once the client has restarted the
+     * bidding timer (JobResponse.timer_restart_count > 0, verified live). Unit
+     * confirmed by the product owner: EURO amounts. A chip edits the price field
+     * and never submits.
+     */
+    const editChips =
+      editDraft && shouldOfferBidAdjust(job) ? (
+        <View style={styles.chipWrap}>
+          <Text style={[styles.chipHint, { color: c.mutedForeground }]}>
+            {t('jobd_bid_adjust_hint')}
+          </Text>
+          <View style={styles.chipRow}>
+            {BID_ADJUST_STEPS.map((delta) => {
+              const chipDisabled =
+                savingEdit || editLocked || !canApplyBidAdjust(editDraft.price, delta);
+              return (
+                <TouchableOpacity
+                  key={delta}
+                  style={[styles.chip, { borderColor: c.border, opacity: chipDisabled ? 0.5 : 1 }]}
+                  disabled={chipDisabled}
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    editFieldChange(
+                      (draft) => ({ ...draft, price: adjustBidPrice(draft.price, delta) }),
+                      () => setEditPriceError(null)
+                    )
+                  }
+                >
+                  <Text style={[styles.chipText, { color: c.text }]}>
+                    {formatAdjustChipLabel(delta, language)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      ) : null;
+
+    const editSheet = (
+      <BottomSheet
+        visible={editDraft !== null}
+        onClose={closeEdit}
+        title={t('jobd_bid_edit_title')}
+        footer={
+          <View style={[styles.sheetFooter, { borderTopColor: c.border }]}>
+            {editError ? (
+              <Text style={[styles.sheetNote, { color: c.destructive }]}>{editError}</Text>
+            ) : !editChanged && editDraft ? (
+              <Text style={[styles.sheetNote, { color: c.mutedForeground }]}>
+                {t('jobd_bid_edit_unchanged')}
+              </Text>
+            ) : null}
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                style={[styles.retry, { borderColor: c.border, flex: 1 }]}
+                onPress={closeEdit}
+                disabled={savingEdit}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.retryText, { color: c.text }]}>{t('jobd_bid_edit_cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.submit,
+                  { backgroundColor: c.primary, flex: 1 },
+                  (savingEdit || !canSaveEdit) && styles.submitBusy,
+                ]}
+                onPress={() => void saveEditNow()}
+                disabled={savingEdit || !canSaveEdit}
+                activeOpacity={0.85}
+              >
+                {savingEdit ? (
+                  <ActivityIndicator size="small" color={c.primaryForeground} />
+                ) : (
+                  <Feather name="save" size={16} color={c.primaryForeground} />
+                )}
+                <Text style={[styles.submitText, { color: c.primaryForeground }]}>
+                  {savingEdit ? t('jobd_bid_edit_saving') : t('jobd_bid_edit_save')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
+      >
+        {editDraft ? (
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <ScrollView
+              contentContainerStyle={styles.sheetBody}
+              keyboardShouldPersistTaps="handled"
+            >
+              {editLocked ? (
+                <View
+                  style={[styles.lockNote, { borderColor: c.border, backgroundColor: c.muted }]}
+                >
+                  <Feather name="lock" size={14} color={c.mutedForeground} />
+                  <Text style={[styles.lockNoteText, { color: c.mutedForeground }]}>
+                    {t('jobd_bid_edit_locked')}
+                  </Text>
+                </View>
+              ) : null}
+              <BidFormFields
+                price={editDraft.price}
+                onPriceChange={(value) =>
+                  editFieldChange(
+                    (draft) => ({ ...draft, price: value }),
+                    () => setEditPriceError(null)
+                  )
+                }
+                priceError={editPriceError}
+                etaHours={editDraft.etaHours}
+                etaMinutes={editDraft.etaMinutes}
+                onEtaHoursChange={(hours) =>
+                  editFieldChange(
+                    (draft) => ({ ...draft, etaHours: hours }),
+                    () => setEditEtaError(null)
+                  )
+                }
+                onEtaMinutesChange={(minutes) =>
+                  editFieldChange(
+                    (draft) => ({ ...draft, etaMinutes: minutes }),
+                    () => setEditEtaError(null)
+                  )
+                }
+                etaError={editEtaError}
+                message={editDraft.message}
+                onMessageChange={(value) =>
+                  editFieldChange(
+                    (draft) => ({ ...draft, message: value }),
+                    () => setEditMessageError(null)
+                  )
+                }
+                messageError={editMessageError}
+                disabled={savingEdit || editLocked}
+                priceExtra={editChips}
+              />
+            </ScrollView>
+          </KeyboardAvoidingView>
+        ) : null}
+      </BottomSheet>
+    );
+
     return shell(
       t('jobd_bid_screen_title'),
-      <ScrollView contentContainerStyle={styles.form}>
+      <>
+      <ScrollView
+        contentContainerStyle={styles.form}
+        refreshControl={
+          <RefreshControl
+            refreshing={myBidRefreshing}
+            onRefresh={() => void refreshMyBid()}
+            tintColor={c.primary}
+            colors={[c.primary]}
+          />
+        }
+      >
         {deadline !== null ? (
           <CountdownTimer
             endsAt={deadline}
             urgency={job.is_urgent ? 'urgent' : 'regular'}
             onExpire={handleBiddingExpired}
           />
+        ) : (
+          // The window ended: the bid stays, the promise of "waiting for the
+          // client" does not. Only the closed notice is shown — no Restart /
+          // Convert buttons, which belong to other tasks.
+          <View style={[styles.closedBanner, { backgroundColor: c.muted, borderColor: c.border }]}>
+            <Feather name="lock" size={14} color={c.mutedForeground} />
+            <Text style={[styles.closedText, { color: c.mutedForeground }]}>
+              {t('jobd_bid_closed_title')}
+            </Text>
+          </View>
+        )}
+
+        {changedStatus && changedLabel ? (
+          <Animated.View
+            entering={FadeInDown.duration(260)}
+            style={[
+              styles.changeBanner,
+              { backgroundColor: c.muted, borderColor: statusAccent(changedStatus) },
+            ]}
+          >
+            <Feather name={statusIcon(changedStatus)} size={15} color={statusAccent(changedStatus)} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.changeTitle, { color: c.text }]}>
+                {t('jobd_bid_status_updated')}
+              </Text>
+              <Text style={[styles.changeSub, { color: c.mutedForeground }]}>
+                {t(changedLabel)}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={clearChangedStatus} hitSlop={8} activeOpacity={0.7}>
+              <Feather name="x" size={15} color={c.mutedForeground} />
+            </TouchableOpacity>
+          </Animated.View>
         ) : null}
+
+        {myBidRefreshFailed ? (
+          <View style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
+            <Feather name="alert-circle" size={12} color={c.mutedForeground} />
+            <Text style={[styles.refreshNoticeText, { color: c.mutedForeground }]}>
+              {t('jobd_bid_refresh_failed')}
+            </Text>
+          </View>
+        ) : null}
+
         {bidSummary(held)}
         <TouchableOpacity
           style={[styles.stateBtn, { backgroundColor: c.primary, marginTop: 4 }]}
@@ -388,66 +890,12 @@ export default function PlaceBidScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
-    );
-  }
-
-  // The bid state could not be established — this is NOT "no bid yet", so no
-  // form is shown and a duplicate bid cannot be created by accident.
-  if (myBid?.state === 'error') {
-    return shell(
-      t('jobd_bid_screen_title'),
-      centered('wifi-off', t('jobd_bid_locked_title'), t('jobd_bid_locked_msg'), {
-        label: t('jobs_retry'),
-        onPress: () => void refreshMyBid(),
-      })
-    );
-  }
-
-  if (myBid === null) {
-    return (
-      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <BrandedLoader size={44} />
-      </View>
+      {editSheet}
+      </>
     );
   }
 
   /* ------------------------------------------------------------------- form */
-
-  /**
-   * One stepper: a −/+ pair around the current value. `onStep` receives the
-   * DELTA, and the caller clamps — the buttons are also disabled at the ends so
-   * the value can never leave the schema's 0..1440 window at all.
-   */
-  const stepper = (
-    label: string,
-    value: number,
-    display: string,
-    step: number,
-    min: number,
-    max: number,
-    onStep: (delta: number) => void
-  ) => (
-    <View style={styles.stepper}>
-      <Text style={[styles.stepperLabel, { color: c.mutedForeground }]}>{label}</Text>
-      <View style={styles.stepperRow}>
-        <TouchableOpacity
-          style={[styles.stepBtn, { borderColor: c.border }]}
-          onPress={() => onStep(-step)}
-          disabled={value <= min || bidSubmitting}
-        >
-          <Feather name="minus" size={16} color={value <= min ? c.mutedForeground : c.text} />
-        </TouchableOpacity>
-        <Text style={[styles.stepValue, { color: c.text }]}>{display}</Text>
-        <TouchableOpacity
-          style={[styles.stepBtn, { borderColor: c.border }]}
-          onPress={() => onStep(step)}
-          disabled={value >= max || bidSubmitting}
-        >
-          <Feather name="plus" size={16} color={value >= max ? c.mutedForeground : c.text} />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -470,101 +918,47 @@ export default function PlaceBidScreen() {
             />
           ) : null}
 
-          {/* Offered price — the final total the client pays, VAT included. */}
-          <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_price_label')}</Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: c.card,
-                color: c.text,
-                borderColor: priceError ? c.destructive : c.border,
-              },
-            ]}
-            value={price}
-            onChangeText={(v) => {
-              setPrice(v);
+          {myBidRefreshFailed ? (
+            <View style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
+              <Feather name="alert-circle" size={12} color={c.mutedForeground} />
+              <Text style={[styles.refreshNoticeText, { color: c.mutedForeground }]}>
+                {t('jobd_bid_refresh_failed')}
+              </Text>
+            </View>
+          ) : null}
+
+          {/*
+           * THE bid form fields — literally the same component the Edit bid
+           * sheet renders, so a rule can never apply to one flow and not the
+           * other. It owns no validation of its own: every value is checked by
+           * the lib/bid validators above, before this screen sends anything.
+           */}
+          <BidFormFields
+            price={price}
+            onPriceChange={(value) => {
+              setPrice(value);
               if (priceError) setPriceError(null);
             }}
-            placeholder={t('jobd_bid_price_ph')}
-            placeholderTextColor={c.mutedForeground}
-            keyboardType="decimal-pad"
-            editable={!bidSubmitting}
-          />
-          <Text style={[styles.hint, { color: priceError ? c.destructive : c.mutedForeground }]}>
-            {priceError ?? t('jobd_bid_price_vat_note')}
-          </Text>
-
-          {/* Expected time → eta_minutes (the schema's "estimated time of arrival"). */}
-          <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_eta_label')}</Text>
-          <View style={styles.stepperRowWrap}>
-            {stepper(
-              t('jobd_bid_eta_hours_label'),
-              etaHours,
-              String(etaHours),
-              1,
-              0,
-              24,
-              (delta) => {
-                const next = Math.max(0, Math.min(24, etaHours + delta));
-                setEtaHours(next);
-                // 24 h is the schema's ceiling, so no minutes can join it.
-                if (next === 24) setEtaMinutes(0);
-                if (etaError) setEtaError(null);
-              }
-            )}
-            {stepper(
-              t('jobd_bid_eta_minutes_label'),
-              etaMinutes,
-              String(etaMinutes),
-              5,
-              0,
-              etaHours === 24 ? 0 : 55,
-              (delta) => {
-                const next = Math.max(0, Math.min(55, etaMinutes + delta));
-                setEtaMinutes(next);
-                if (etaError) setEtaError(null);
-              }
-            )}
-          </View>
-          <Text style={[styles.hint, { color: etaError ? c.destructive : c.mutedForeground }]}>
-            {etaError ?? t('jobd_bid_eta_hint')}
-          </Text>
-
-          {/* Optional message, with a counter against the real limit. */}
-          <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_message_label')}</Text>
-          <TextInput
-            style={[
-              styles.input,
-              styles.textarea,
-              {
-                backgroundColor: c.card,
-                color: c.text,
-                borderColor: messageError ? c.destructive : c.border,
-              },
-            ]}
-            value={message}
-            onChangeText={(v) => {
-              setMessage(v);
+            priceError={priceError}
+            etaHours={etaHours}
+            etaMinutes={etaMinutes}
+            onEtaHoursChange={(next) => {
+              setEtaHours(next);
+              if (etaError) setEtaError(null);
+            }}
+            onEtaMinutesChange={(next) => {
+              setEtaMinutes(next);
+              if (etaError) setEtaError(null);
+            }}
+            etaError={etaError}
+            message={message}
+            onMessageChange={(value) => {
+              setMessage(value);
               if (messageError) setMessageError(null);
             }}
-            placeholder={t('jobd_bid_message_ph')}
-            placeholderTextColor={c.mutedForeground}
-            multiline
-            textAlignVertical="top"
-            maxLength={BID_MESSAGE_MAX_CHARS}
-            editable={!bidSubmitting}
+            messageError={messageError}
+            disabled={bidSubmitting}
           />
-          <View style={styles.metaRow}>
-            <Text
-              style={[styles.hint, { color: messageError ? c.destructive : c.mutedForeground }]}
-            >
-              {messageError ?? t('jobd_bid_message_optional')}
-            </Text>
-            <Text style={[styles.counter, { color: c.mutedForeground }]}>
-              {message.length}/{BID_MESSAGE_MAX_CHARS}
-            </Text>
-          </View>
 
           {formError ? (
             <View style={[styles.errorBox, { borderColor: c.destructive }]}>
@@ -625,48 +1019,94 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 17, flex: 1, textAlign: 'center' },
   form: { padding: 16, paddingBottom: 24, gap: 4 },
   card: { borderRadius: 16, borderWidth: 1, padding: 16, gap: 10, marginTop: 12 },
-  cardTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, marginBottom: 2 },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 2,
+  },
+  cardTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  statusChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
   row: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   rowLabel: { fontFamily: 'Manrope_400Regular', fontSize: 13, flex: 1 },
   rowValue: { fontFamily: 'Manrope_500Medium', fontSize: 13, flex: 1.4, textAlign: 'right' },
   rowValueStrong: { fontFamily: 'Manrope_700Bold', fontSize: 16, flex: 1.4, textAlign: 'right' },
-  label: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 18, marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 14,
-  },
-  textarea: { minHeight: 96 },
-  hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: 6 },
-  stepperRowWrap: { flexDirection: 'row', gap: 12 },
-  stepper: { flex: 1 },
-  stepperLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginBottom: 6 },
-  stepperRow: {
+  nextStep: { borderTopWidth: 1, paddingTop: 10, marginTop: 2 },
+  nextStepText: { fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 18 },
+  closedBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  stepBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
-  stepValue: { fontFamily: 'Manrope_700Bold', fontSize: 18, minWidth: 40, textAlign: 'center' },
-  metaRow: {
+  closedText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  changeBanner: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+  changeTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  changeSub: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 1 },
+  refreshNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginTop: 10,
+  },
+  refreshNoticeText: { fontFamily: 'Manrope_400Regular', fontSize: 11, flex: 1 },
+  /* The bid form fields themselves live in components/BidFormFields, shared by
+     the submit screen and the Edit bid sheet — no field style is duplicated. */
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 11,
+    marginTop: 4,
+  },
+  editBtnText: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  chipWrap: { marginTop: 10 },
+  chipHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  chipText: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  sheetBody: { padding: 16, paddingBottom: 20 },
+  sheetFooter: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, gap: 8 },
+  sheetActions: { flexDirection: 'row', gap: 10 },
+  sheetNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16 },
+  lockNote: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
   },
-  counter: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
+  lockNoteText: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 17 },
   errorBox: {
     flexDirection: 'row',
     gap: 8,

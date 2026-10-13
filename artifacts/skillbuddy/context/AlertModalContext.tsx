@@ -20,9 +20,19 @@ export interface AppAlertConfig {
 
 interface AlertContextType {
   showAlert: (config: AppAlertConfig) => void;
+  /**
+   * Dismiss whatever is showing, WITHOUT a button press. A dialog is a promise
+   * to the user ("confirm X"), and if the state it was about changes — e.g. a
+   * bid is accepted while a withdraw confirmation is open — the promise is
+   * stale and must not be kept silently.
+   */
+  hideAlert: () => void;
 }
 
-const AlertModalContext = createContext<AlertContextType>({ showAlert: () => {} });
+const AlertModalContext = createContext<AlertContextType>({
+  showAlert: () => {},
+  hideAlert: () => {},
+});
 
 export function AlertModalProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<AppAlertConfig | null>(null);
@@ -33,8 +43,10 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
 
   const buttons: AppAlertButton[] = config?.buttons?.length ? config.buttons : [{ text: 'OK' }];
 
+  const value = React.useMemo(() => ({ showAlert, hideAlert: close }), [showAlert, close]);
+
   return (
-    <AlertModalContext.Provider value={{ showAlert }}>
+    <AlertModalContext.Provider value={value}>
       {children}
       <Modal visible={!!config} transparent animationType="none" onRequestClose={close}>
         <Animated.View entering={FadeIn.duration(180)} style={StyleSheet.absoluteFill}>
@@ -88,6 +100,10 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
 
 export function useAppAlert() {
   return useContext(AlertModalContext).showAlert;
+}
+
+export function useHideAlert() {
+  return useContext(AlertModalContext).hideAlert;
 }
 
 const styles = StyleSheet.create({

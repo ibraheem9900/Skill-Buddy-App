@@ -1120,13 +1120,14 @@ export interface ProviderWalletDetailResponse {
  * VERIFIED against openapi.json, not inferred:
  *   BidStatus            enum: PENDING | ACCEPTED | REJECTED | WITHDRAWN | EXPIRED
  *   BidCreate            required: offered_price, eta_minutes (0..1440)
+ *   BidUpdate            NO required array — every field optional/nullable
  *   BidResponse          required: id, job_id, provider, offered_price,
  *                        eta_minutes, status, and ALL SEVEN score fields
  *
- * ONLY the provider SUBMIT path is typed here (BidCreate in, BidResponse out).
- * BidUpdate, BidRejectRequest, JobBidsResponse and ListMyBidsParams exist in the
- * live schema but belong to the modify/withdraw, accept/reject and my-bids
- * flows, which this task excludes — see the task report for their full shapes.
+ * The provider's SUBMIT and MODIFY paths are typed here (BidCreate / BidUpdate
+ * in, BidResponse out). BidRejectRequest, ListMyBidsParams and the withdraw /
+ * accept / reject bodies exist in the live schema but belong to the flows this
+ * task excludes — see the task report for their full shapes.
  *
  * MONEY IS A STRING. BidResponse.offered_price and distance_km are nullable
  * NUMERIC STRINGS on the wire (BidResponse.offered_price is typed `string`,
@@ -1208,16 +1209,72 @@ export interface BidResponse {
  * eta_minutes], and the schema allows `string maxLength 1000 | null`. It is sent
  * as null rather than omitted when the provider wrote nothing.
  *
- * The BidUpdate / BidReject request bodies and ListMyBidsParams are NOT declared
- * here: those belong to the modify/withdraw, accept/reject and my-bids flows,
- * which are separate tasks. Their schemas are recorded in the task report instead
- * of being left as dead types the app could silently start using.
+ * ListMyBidsParams is NOT declared here: those belong to the my-bids flow,
+ * which is a separate task. Its schema is recorded in the task report instead
+ * of being left as a dead type the app could silently start using.
+ * (BidRejectRequest, the CLIENT's Decline Bid body, IS declared below — that
+ * action is connected.)
  */
 export interface BidCreateRequest {
   offered_price: number;
   /** 0..1440 (24 h), integer. */
   eta_minutes: number;
   message?: string | null;
+}
+
+/**
+ * PUT /api/v1/jobs/{job_id}/bids/{bid_id} request body (schema BidUpdate) — the
+ * provider's Modify Bid.
+ *
+ * THE WHOLE BODY IS OPTIONAL. The live schema declares NO `required` array and
+ * types all three fields as `... | null`, unlike BidCreate (required:
+ * [offered_price, eta_minutes]) — i.e. a partial update is explicitly allowed.
+ * The app nevertheless sends the FULL set with concrete values
+ * (lib/bid.buildBidUpdateRequest): unchanged fields then keep their current
+ * values whatever the backend's merge rule is, and a cleared message is sent as
+ * null exactly the way Create Bid sends it.
+ *
+ * Constraints are BidCreate's, re-read from the live schema: offered_price is a
+ * number (exclusiveMinimum 0) or a numeric string whose pattern caps it at 2
+ * decimals; eta_minutes is an integer 0..1440; message is a string of at most
+ * 1000 characters.
+ *
+ * The RESPONSE is a full BidResponse, not this object.
+ */
+export interface BidUpdateRequest {
+  offered_price?: number | null;
+  eta_minutes?: number | null;
+  message?: string | null;
+}
+
+/**
+ * POST /api/v1/jobs/{job_id}/bids/{bid_id}/reject (schema BidRejectRequest) —
+ * the CLIENT's Decline Bid body.
+ *
+ * THE REASON IS OPTIONAL AND MAY BE EMPTY — read from the live schema and then
+ * MEASURED against the deployed backend, because the Swagger UI's `"reason":
+ * "string"` and the operation's "Request body required" both suggest otherwise:
+ *
+ *   the schema declares NO `required` array, and types reason as
+ *   `anyOf: [string maxLength 255, null]` — no enum and no minLength;
+ *   measured on POST …/reject (against an unknown bid, so a body that passes
+ *   validation falls through to the row lookup):
+ *     NO body at all          → 422 {"type":"missing","loc":["body"]}
+ *                               (the BODY OBJECT is required — @Body() is not)
+ *     `{}` / {"reason":null}  → passes validation
+ *     {"reason":""}          → passes validation
+ *     {"reason":"x"*256}     → 422 string_too_long on ["body","reason"]
+ *     {"reason":5}           → 422 string_type on ["body","reason"]
+ *     unknown extra fields   → ignored
+ *
+ * So `reason` is declared optional-nullable here, and the screen collects it as
+ * free text the client may leave blank. No reason LIST is invented: the schema
+ * has no enum, and the Dev Modules doc defines no reason picker for a declined
+ * bid (it does for cancelling a job) — see the task report.
+ */
+export interface BidRejectRequest {
+  /** Free text, at most 255 characters. Omitted/blank/null are all accepted. */
+  reason?: string | null;
 }
 
 /**

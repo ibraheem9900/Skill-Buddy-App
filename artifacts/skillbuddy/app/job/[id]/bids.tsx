@@ -14,23 +14,41 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useRole } from '@/context/RoleContext';
+import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BottomSheet from '@/components/BottomSheet';
 import CountdownTimer from '@/components/CountdownTimer';
 import EmptyState from '@/components/EmptyState';
+import AcceptBidSheet from '@/components/AcceptBidSheet';
+import RejectBidSheet from '@/components/RejectBidSheet';
 import BidOfferCard from '@/components/BidOfferCard';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { BIDS_POLL_MS, useJobBids } from '@/hooks/useJobBids';
+import { useAcceptBid } from '@/hooks/useAcceptBid';
+import { useRejectBid } from '@/hooks/useRejectBid';
 import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
+import { isPaymentPending } from '@/lib/jobPayment';
 import {
+  acceptBidFailureMessage,
   BID_SORT_IDS,
   BID_SORT_LABEL_KEY,
   bidEtaParts,
+  bidRejectReasonFieldError,
+  bidSelectionMatches,
   bidStatusLabelKey,
+  bidStatusStamp,
+  canAcceptBid,
+  canRejectBid,
   formatBidDistanceLocale,
   formatBidPriceLocale,
+  isBidPending,
   isBiddingOpen,
+  rejectBidFailureMessage,
+  shouldResyncAfterAcceptFailure,
+  shouldResyncAfterRejectFailure,
   sortBids,
+  validateBidRejectReason,
   type BidLocale,
   type BidSortId,
 } from '@/lib/bid';
@@ -50,10 +68,25 @@ const RECOMMENDED_MAX = 3;
 function ProviderSheet({
   bid,
   locale,
+  onAccept,
+  onReject,
   onClose,
 }: {
   bid: BidResponse | null;
   locale: BidLocale;
+  /**
+   * The CLIENT's Accept action for THIS offer, or null when it may not be
+   * offered (not the client's job, an offer already decided, a job that has
+   * moved on). Decided by lib/bid.canAcceptBid at the call site — this sheet
+   * renders the button, it never decides whether the action is allowed.
+   */
+  onAccept: (() => void) | null;
+  /**
+   * The CLIENT's Decline action for THIS offer, or null when it may not be
+   * offered. Same rule, decided by lib/bid.canRejectBid at the call site and
+   * rendered here as the secondary action next to Accept.
+   */
+  onReject: (() => void) | null;
   onClose: () => void;
 }) {
   const { colors: c } = useTheme();
@@ -125,6 +158,37 @@ function ProviderSheet({
             </Text>
           </View>
 
+          {(onAccept || onReject) && (
+            <View style={styles.sheetActions}>
+              {onAccept ? (
+                <TouchableOpacity
+                  style={[styles.sheetAccept, { backgroundColor: c.primary }]}
+                  onPress={onAccept}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                >
+                  <Feather name="check" size={16} color={c.primaryForeground} />
+                  <Text style={[styles.sheetAcceptText, { color: c.primaryForeground }]}>
+                    {t('cbids_accept')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {onReject ? (
+                <TouchableOpacity
+                  style={[styles.sheetReject, { borderColor: c.destructive }]}
+                  onPress={onReject}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                >
+                  <Feather name="x" size={16} color={c.destructive} />
+                  <Text style={[styles.sheetRejectText, { color: c.destructive }]}>
+                    {t('cbids_reject')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
+
           <TouchableOpacity
             style={[styles.sheetClose, { borderColor: c.border }]}
             onPress={onClose}
@@ -151,9 +215,30 @@ function ProviderSheet({
  * (schema JobBidsResponse), and the sort chips only rearrange what the API
  * already returned. See lib/bid.ts for the pure helpers this screen renders.
  *
- * NOTHING HERE MUTATES ANYTHING EITHER: no accept, reject, chat, restart timer,
- * convert or cancel action exists on this screen — those are separate tasks, and
- * no placeholder button for them is rendered.
+ * THE TWO ACTIONS ON THIS SCREEN are the CLIENT's Accept Bid (POST
+ * /api/v1/jobs/{job_id}/bids/{bid_id}/accept) and the CLIENT's Decline (Reject)
+ * Bid (POST …/reject). Both are offered only to the job's own client, only for an
+ * offer that is still PENDING, and only while the job is still OPEN with nobody
+ * assigned — decided in lib/bid from the server's own fields (canAcceptBid,
+ * canRejectBid), so no button can appear anywhere else.
+ *
+ * ACCEPT goes through its own confirmation sheet, re-reads the offer (price /
+ * expected time / updated_at) before sending anything, and afterwards shows the
+ * picked provider's real status and accepted time.
+ *
+ * DECLINE is the SECONDARY action in the same row as Accept (card and provider
+ * sheet — the doc's quick-action list does not mention Decline, so no new card
+ * layout was invented; see the task report). It opens its own confirmation sheet
+ * that names the provider and the offered price and collects an OPTIONAL free-text
+ * reason (the live schema allows a blank one), then posts the decline. On success
+ * the returned bid is dropped from the list at once and the offers are re-read, so
+ * the backend's own ordering and its recommended/other_offers split — not the app
+ * — promote the next-best offer into the top 3. A REJECTED bid can never come
+ * back: hooks/useJobBids filters the three non-visible statuses out of every
+ * response it holds.
+ *
+ * Chat/call, restart timer, convert and cancel belong to other tasks and have NO
+ * button here — not even a disabled placeholder.
  */
 export default function JobBidsScreen() {
   const insets = useSafeAreaInsets();
@@ -166,12 +251,44 @@ export default function JobBidsScreen() {
   const locale = language as BidLocale;
 
   const { job, status: jobStatus, refetch: refetchJob } = useJobDetail(jobId);
+  const { activeRole } = useRole();
+  const showAlert = useAppAlert();
+
+  /**
+   * The offer the confirmation sheet is about — null while the sheet is closed.
+   * Held as one object rather than a flag so the sheet always renders the offer
+   * it was opened with, and so a reconciliation (below) can replace it with the
+   * fresh one the server just sent.
+   */
+  const [acceptTarget, setAcceptTarget] = useState<BidResponse | null>(null);
+  /** The offer was EDITED while the sheet was open: confirm again. */
+  const [acceptChanged, setAcceptChanged] = useState(false);
+  /** The server's own accepted bid, until a re-read of the offers confirms it. */
+  const [acceptedBid, setAcceptedBid] = useState<BidResponse | null>(null);
+  const { acceptBid, accepting } = useAcceptBid();
+
+  /** The offer the DECLINE confirmation is about — null while that sheet is closed. */
+  const [rejectTarget, setRejectTarget] = useState<BidResponse | null>(null);
+  /**
+   * The client's typed reason. Held by the SCREEN on purpose: a failed request
+   * must not lose it (the retry then sends exactly what was written), and the
+   * 422 for `reason` is rendered on the same input.
+   */
+  const [rejectReason, setRejectReason] = useState('');
+  /** The server's own message for `reason`, shown on the input. */
+  const [rejectReasonError, setRejectReasonError] = useState<string | null>(null);
+  const { rejectBid, rejecting } = useRejectBid();
 
   const biddingOpen = job ? isBiddingOpen(job) : false;
   // URGENT jobs are live: re-read the offers every 8 s while the screen is
   // focused and the app is foregrounded. A REGULAR job (or a closed window)
   // passes null, which stops the interval entirely — see hooks/useJobBids.
-  const pollMs = job && job.is_urgent && biddingOpen ? BIDS_POLL_MS : null;
+  // While the confirmation sheet is open the polling is suspended as well: the
+  // decision in front of the client must not be rewritten under their finger.
+  const pollMs =
+    acceptTarget === null && rejectTarget === null && job && job.is_urgent && biddingOpen
+      ? BIDS_POLL_MS
+      : null;
   const {
     status: bidsStatus,
     serverMessage,
@@ -183,6 +300,7 @@ export default function JobBidsScreen() {
     refreshFailed,
     newBidIds,
     refresh,
+    dropBid,
   } = useJobBids(jobId, { pollMs });
 
   const [showAll, setShowAll] = useState(false);
@@ -206,6 +324,307 @@ export default function JobBidsScreen() {
   const sortedAll = useMemo(() => sortBids(all, sort), [all, sort]);
   const recommendedTop = recommended.slice(0, RECOMMENDED_MAX);
   const hasMoreOffers = otherOffers.length > 0;
+
+  /* ───────────────────────────────────────────────────────── accept bid ── */
+
+  /**
+   * The provider the client has picked, read from the server's OWN answer: the
+   * offer whose status is ACCEPTED. Until the re-read list carries it, the bid
+   * the accept returned is used — and it is used only when its status is the
+   * accepted one, so a status the enum does not call "accepted" can never be
+   * rendered as a selection.
+   */
+  const selectedBid = useMemo(() => {
+    const accepted = all.find((bid) => bid.status === 'ACCEPTED');
+    if (accepted) return accepted;
+    return acceptedBid && acceptedBid.status === 'ACCEPTED' ? acceptedBid : null;
+  }, [all, acceptedBid]);
+
+  const openAcceptSheet = useCallback((bid: BidResponse) => {
+    setAcceptChanged(false);
+    setAcceptTarget(bid);
+  }, []);
+
+  /**
+   * Close the dialog because the offer it was about can no longer be accepted
+   * (withdrawn, edited away, or the job was decided elsewhere). Nothing is sent
+   * on this path — the client is told why and the screen re-reads the truth.
+   */
+  const closeAcceptSheet = useCallback(() => {
+    setAcceptTarget(null);
+    setAcceptChanged(false);
+  }, []);
+
+  const discardAcceptSheet = useCallback(() => {
+    closeAcceptSheet();
+    setSheetBid(null);
+    showAlert({
+      title: t('cbids_accept_gone_title'),
+      message: t('cbids_accept_err_notallowed'),
+      icon: 'alert-circle',
+    });
+  }, [closeAcceptSheet, showAlert, t]);
+
+  /**
+   * The confirmation itself. Every answer the endpoint can give is handled HERE,
+   * so the sheet stays a pure renderer:
+   *
+   *   ok          the server's own bid is adopted, then the job AND the offers are
+   *               re-read — nothing on screen is assumed
+   *   changed     the provider edited the offer while the sheet was open: the new
+   *               values are shown and a FRESH confirmation is required
+   *   stale       the offer is gone or already decided: the sheet closes
+   *   unauthorized the session ended — the shared client already refreshed once
+   *   network     the reply was lost: the hook re-read the JOB, and a pick that is
+   *               already standing is reported as done instead of retried
+   *   anything else  the backend's own text when it sent one, then a re-read
+   */
+  const runAccept = useCallback(async () => {
+    const target = acceptTarget;
+    if (!job || !target || accepting) return;
+
+    const outcome = await acceptBid(job.id, target.id, target);
+
+    if (outcome.ok) {
+      setAcceptedBid(outcome.bid);
+      closeAcceptSheet();
+      setSheetBid(null);
+      await Promise.all([refetchJob(), refresh()]);
+      return;
+    }
+
+    if (outcome.kind === 'busy') return;
+
+    if (outcome.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
+
+    if (outcome.kind === 'changed') {
+      // The offer under the client's finger is not the offer the server holds:
+      // show the new one and make them confirm it again. Nothing was accepted.
+      setAcceptTarget(outcome.bid);
+      setAcceptChanged(true);
+      void refresh();
+      return;
+    }
+
+    if (outcome.kind === 'stale') {
+      discardAcceptSheet();
+      void Promise.all([refresh(), refetchJob()]);
+      return;
+    }
+
+    if (outcome.kind === 'network') {
+      // A lost reply is NOT a failure: the hook re-read the job. When the pick is
+      // already standing there is nothing to retry — the screen follows it.
+      if (outcome.resolved === true) {
+        closeAcceptSheet();
+        setSheetBid(null);
+        await Promise.all([refetchJob(), refresh()]);
+        return;
+      }
+      // A genuine connectivity failure (or a lost reply whose job re-read also
+      // failed). The job is re-read either way before anything is offered again.
+      void Promise.all([refetchJob(), refresh()]);
+      showAlert({
+        title: t('cbids_accept_err_title'),
+        message: acceptBidFailureMessage(outcome, t),
+        icon: 'wifi-off',
+      });
+      return;
+    }
+
+    // 422 / 400 / 403 / 404 / 409 / 5xx / unknown: the server's own words when it
+    // sent any, otherwise the translated copy for the bucket — and the screen
+    // re-reads the job and the offers so it shows the real state afterwards.
+    const message = acceptBidFailureMessage(outcome, t);
+    if (shouldResyncAfterAcceptFailure(outcome.kind)) {
+      closeAcceptSheet();
+      setSheetBid(null);
+      void Promise.all([refresh(), refetchJob()]);
+    }
+    showAlert({ title: t('cbids_accept_err_title'), message, icon: 'alert-circle' });
+  }, [
+    acceptTarget,
+    accepting,
+    acceptBid,
+    job,
+    closeAcceptSheet,
+    discardAcceptSheet,
+    refetchJob,
+    refresh,
+    router,
+    showAlert,
+    t,
+  ]);
+
+  /**
+   * Live reconciliation while the sheet is open.
+   *
+   * The poll is suspended for the dialog, but a pull-to-refresh (or the return
+   * from the background) can still deliver a newer list. The dialog follows that
+   * data instead of the data following the dialog: a different offer being
+   * ACCEPTED, this offer disappearing or leaving PENDING, or this offer being
+   * edited all close or update it, with a translated explanation.
+   */
+  useEffect(() => {
+    if (!acceptTarget || accepting) return;
+    const fresh = all.find((bid) => bid.id === acceptTarget.id) ?? null;
+    const decidedElsewhere = all.some(
+      (bid) => bid.status === 'ACCEPTED' && bid.id !== acceptTarget.id
+    );
+    if (decidedElsewhere) {
+      discardAcceptSheet();
+      return;
+    }
+    if (!fresh) {
+      discardAcceptSheet();
+      return;
+    }
+    if (!isBidPending(fresh.status)) {
+      // ACCEPTED on THIS offer is our own accept landing: the handler closes the
+      // sheet in the same update, so it is not reported as a problem.
+      if (fresh.status !== 'ACCEPTED') discardAcceptSheet();
+      return;
+    }
+    if (!bidSelectionMatches(acceptTarget, fresh)) {
+      setAcceptTarget(fresh);
+      setAcceptChanged(true);
+    }
+  }, [all, acceptTarget, accepting, discardAcceptSheet]);
+
+  /* ─────────────────────────────────────────────────────── decline bid ── */
+
+  const openRejectSheet = useCallback((bid: BidResponse) => {
+    setRejectReason('');
+    setRejectReasonError(null);
+    setRejectTarget(bid);
+  }, []);
+
+  /** Close the Decline dialog WITHOUT sending anything. */
+  const closeRejectSheet = useCallback(() => {
+    setRejectTarget(null);
+    setRejectReasonError(null);
+  }, []);
+
+  /** The offer the dialog was about is gone or already decided. */
+  const discardRejectSheet = useCallback(() => {
+    closeRejectSheet();
+    setSheetBid(null);
+    void refresh();
+    showAlert({
+      title: t('cbids_reject_gone_title'),
+      message: t('cbids_reject_err_notallowed'),
+      icon: 'alert-circle',
+    });
+  }, [closeRejectSheet, refresh, showAlert, t]);
+
+  /**
+   * The DECLINE itself. Every answer the endpoint can give is handled HERE, so
+   * the sheet stays a pure renderer:
+   *
+   *   ok          the server's own bid names the id that leaves the list, the
+   *               bid is dropped at once and the offers are re-read
+   *   422         the server's message for `reason` lands on the input; the typed
+   *               text is never cleared
+   *   400 / 409   the offer is no longer declinable (withdrawn, already decided,
+   *               or the job moved on): the sheet closes and the list is re-read
+   *   403 / 404   not this job's client, or the job/bid is gone: same treatment
+   *   network/5xx the bid stays visible, the sheet stays open with a retry and
+   *               the typed reason preserved — a lost reply may still have gone
+   *               through, and the next refresh reports the truth either way
+   *   401         the shared client already refreshed once; the session is over
+   */
+  const runReject = useCallback(async () => {
+    const target = rejectTarget;
+    if (!job || !target || rejecting) return;
+
+    const validation = validateBidRejectReason(rejectReason);
+    if (!validation.ok) {
+      setRejectReasonError(t(validation.errorKey));
+      return;
+    }
+    setRejectReasonError(null);
+
+    const outcome = await rejectBid(job.id, target.id, validation.value);
+
+    if (outcome.ok) {
+      closeRejectSheet();
+      setSheetBid(null);
+      // The SERVER's returned bid decides what leaves the list — the id it names,
+      // nothing recomputed here. The refetch afterwards is what promotes the
+      // next-best offer into the Recommended block: the app never re-ranks.
+      dropBid(outcome.bid.id);
+      void refresh();
+      showAlert({
+        title: t('cbids_reject_done_title'),
+        message: t('cbids_reject_done_msg'),
+        icon: 'check-circle',
+      });
+      return;
+    }
+
+    if (outcome.kind === 'busy') return;
+
+    if (outcome.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
+
+    if (outcome.kind === 'invalid') {
+      // 422 for the reason field goes ON the input (the server's own words).
+      const fieldMessage = bidRejectReasonFieldError(outcome.detail);
+      if (fieldMessage) {
+        setRejectReasonError(fieldMessage);
+        return;
+      }
+      // Anything else 422 (a rejected path id) falls through to the alert.
+    }
+
+    // A state refusal means the card on screen is not the truth, so the sheet
+    // closes and the list is re-read. A transport/server failure keeps everything
+    // the client typed and offers a retry instead.
+    const message = rejectBidFailureMessage(outcome, t);
+    if (shouldResyncAfterRejectFailure(outcome.kind)) {
+      closeRejectSheet();
+      setSheetBid(null);
+      void refresh();
+    }
+    showAlert({
+      title: t('cbids_reject_err_title'),
+      message,
+      icon: outcome.kind === 'network' ? 'wifi-off' : 'alert-circle',
+    });
+  }, [
+    rejectTarget,
+    rejectReason,
+    rejecting,
+    rejectBid,
+    job,
+    closeRejectSheet,
+    dropBid,
+    refresh,
+    router,
+    showAlert,
+    t,
+  ]);
+
+  /**
+   * Live reconciliation while the Decline dialog is open.
+   *
+   * Polling is suspended for the dialog, but a pull-to-refresh (or the return
+   * from the background) can still deliver a newer list. When the offer the
+   * dialog is about has gone or is no longer PENDING — the provider withdrew it,
+   * another offer was accepted, or the window ended — the dialog closes with a
+   * translated explanation, so a decline is never sent for an offer that is no
+   * longer on the table.
+   */
+  useEffect(() => {
+    if (!rejectTarget || rejecting) return;
+    const fresh = all.find((bid) => bid.id === rejectTarget.id) ?? null;
+    if (!fresh || !isBidPending(fresh.status)) discardRejectSheet();
+  }, [all, rejectTarget, rejecting, discardRejectSheet]);
 
   /* ─────────────────────────────────────────────────────── shared chrome ── */
 
@@ -312,7 +731,53 @@ export default function JobBidsScreen() {
         </View>
       </View>
 
-      {biddingOpen && deadline !== null ? (
+      {selectedBid ? (
+        /* A provider has been picked: the countdown and the other offers are
+           gone, and the client sees WHO was selected with the server's own
+           status and accepted time — plus the real next step, which is payment
+           only when the JOB says it is payment-pending. No "Pay" button: the
+           payment flow is a separate task. */
+        <View style={{ marginTop: 12 }}>
+          <View
+            style={[
+              styles.selectedBanner,
+              { backgroundColor: c.successLight, borderColor: c.success },
+            ]}
+          >
+            <Feather name="check-circle" size={14} color={c.success} />
+            <Text style={[styles.selectedTitle, { color: c.text }]}>
+              {t('cbids_selected_title')}
+            </Text>
+          </View>
+          <BidOfferCard bid={selectedBid} locale={locale} onPress={() => setSheetBid(selectedBid)} />
+          {(() => {
+            const stamp = bidStatusStamp(selectedBid);
+            const stampText = stamp ? formatDateTime(stamp.value) : null;
+            const statusKey = bidStatusLabelKey(selectedBid.status);
+            return (
+              <View style={[styles.selectedMeta, { borderColor: c.border, backgroundColor: c.muted }]}>
+                <View style={styles.selectedMetaRow}>
+                  {statusKey ? (
+                    <Text style={[styles.selectedMetaText, { color: c.text }]}>
+                      {t(statusKey)}
+                    </Text>
+                  ) : null}
+                  {stamp && stampText ? (
+                    <Text style={[styles.selectedMetaText, { color: c.mutedForeground }]}>
+                      {t(stamp.labelKey)} · {stampText}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={[styles.selectedNote, { color: c.mutedForeground }]}>
+                  {job && isPaymentPending(job)
+                    ? t('cbids_payment_required')
+                    : t('cbids_selected_note')}
+                </Text>
+              </View>
+            );
+          })()}
+        </View>
+      ) : biddingOpen && deadline !== null ? (
         <View style={{ marginTop: 12 }}>
           <CountdownTimer
             endsAt={deadline}
@@ -345,6 +810,7 @@ export default function JobBidsScreen() {
           (max 3, API order); expanded it is every offer, sorted by the chips.
           The cards themselves are rendered by the FlatList below, never here,
           so a bid can never appear twice on screen. */}
+      {selectedBid ? null : (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: c.text }]}>
           {showAll && hasMoreOffers ? t('cbids_all_section') : t('cbids_recommended_section')}
@@ -375,6 +841,7 @@ export default function JobBidsScreen() {
           </View>
         ) : null}
       </View>
+      )}
     </View>
   );
 
@@ -414,8 +881,11 @@ export default function JobBidsScreen() {
     );
   };
 
-  // The full list (recommended + the rest) once "View all offers" is open.
-  const listData = showAll ? sortedAll : recommendedTop;
+  // The full list (recommended + the rest) once "View all offers" is open. With
+  // a provider selected the other offers are closed (module spec: they disappear
+  // after the accept), so the list is empty — the picked offer is rendered in the
+  // header above, with its real status and accepted time.
+  const listData = selectedBid ? [] : showAll ? sortedAll : recommendedTop;
 
   return shell(
     <>
@@ -429,16 +899,30 @@ export default function JobBidsScreen() {
           recommended={recommendedTop.some((r) => r.id === item.id)}
           isNew={newBidIds.includes(item.id)}
           onPress={() => setSheetBid(item)}
+          // The Accept action is decided by lib/bid.canAcceptBid: the CLIENT's
+          // role, an offer still PENDING, and a job still OPEN with nobody
+          // assigned. Every other case passes undefined, so no button exists.
+          onAccept={
+            canAcceptBid(item, job, activeRole) ? () => openAcceptSheet(item) : undefined
+          }
+          // The Decline action is decided the same way, by lib/bid.canRejectBid
+          // (CLIENT role, PENDING offer, job still open with nobody assigned) and
+          // is rendered as the SECONDARY button in the same row. Every other case
+          // passes undefined, so no button exists.
+          onReject={
+            canRejectBid(item, job, activeRole) ? () => openRejectSheet(item) : undefined
+          }
         />
       )}
       ListHeaderComponent={jobHeader}
       ListEmptyComponent={
-        <View style={{ paddingHorizontal: 16 }}>{emptyState()}</View>
+        selectedBid ? null : <View style={{ paddingHorizontal: 16 }}>{emptyState()}</View>
       }
       ListFooterComponent={
         // The remaining offers live behind this button, BELOW the cards; it only
-        // exists when the backend actually sent some (JobBidsResponse.other_offers).
-        hasMoreOffers ? (
+        // exists when the backend actually sent some (JobBidsResponse.other_offers),
+        // and it is gone once a provider has been picked.
+        hasMoreOffers && !selectedBid ? (
           <TouchableOpacity
             style={[styles.viewAllBtn, { borderColor: c.primary }]}
             onPress={() => setShowAll((prev) => !prev)}
@@ -466,7 +950,53 @@ export default function JobBidsScreen() {
       }
       removeClippedSubviews={false}
     />
-      <ProviderSheet bid={sheetBid} locale={locale} onClose={() => setSheetBid(null)} />
+      <ProviderSheet
+        bid={sheetBid}
+        locale={locale}
+        onAccept={
+          sheetBid && canAcceptBid(sheetBid, job, activeRole)
+            ? () => {
+                setSheetBid(null);
+                openAcceptSheet(sheetBid);
+              }
+            : null
+        }
+        onReject={
+          sheetBid && canRejectBid(sheetBid, job, activeRole)
+            ? () => {
+                setSheetBid(null);
+                openRejectSheet(sheetBid);
+              }
+            : null
+        }
+        onClose={() => setSheetBid(null)}
+      />
+      <AcceptBidSheet
+        visible={acceptTarget !== null}
+        bid={acceptTarget}
+        job={job}
+        locale={locale}
+        changed={acceptChanged}
+        confirming={accepting}
+        onBack={closeAcceptSheet}
+        onConfirm={() => void runAccept()}
+      />
+      <RejectBidSheet
+        visible={rejectTarget !== null}
+        bid={rejectTarget}
+        locale={locale}
+        reason={rejectReason}
+        onReasonChange={(value) => {
+          setRejectReason(value);
+          // A new keystroke clears a stale 422 — the server already said it about
+          // the previous text, and the typed reason must survive every failure.
+          if (rejectReasonError) setRejectReasonError(null);
+        }}
+        reasonError={rejectReasonError}
+        confirming={rejecting}
+        onBack={closeRejectSheet}
+        onConfirm={() => void runReject()}
+      />
     </>
   );
 }
@@ -520,4 +1050,15 @@ const styles = StyleSheet.create({
   sheetMessage: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 19 },
   sheetClose: { marginTop: 16, borderWidth: 1, borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
   sheetCloseText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  sheetActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  sheetAccept: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 24, paddingVertical: 12 },
+  sheetAcceptText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+  sheetReject: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 24, paddingVertical: 12 },
+  sheetRejectText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+  selectedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 16, paddingVertical: 10, marginBottom: 12 },
+  selectedTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  selectedMeta: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 6, marginTop: -4, marginBottom: 4 },
+  selectedMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  selectedMetaText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  selectedNote: { fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 18 },
 });

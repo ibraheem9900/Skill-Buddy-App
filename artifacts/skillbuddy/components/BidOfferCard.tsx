@@ -26,6 +26,22 @@ interface Props {
   /** Arrived with the latest refresh — plays the arrival animation once. */
   isNew?: boolean;
   onPress: () => void;
+  /**
+   * The CLIENT's Accept action for this offer, or undefined when it must not be
+   * offered at all (a provider looking at the list, an offer already decided, a
+   * job that moved on). lib/bid.canAcceptBid makes that decision at the call
+   * site — this card only renders the button it is handed, so there is no
+   * hardcoded second copy of the rule here.
+   */
+  onAccept?: () => void;
+  /**
+   * The CLIENT's Decline action for this offer, or undefined when it must not be
+   * offered (a provider looking at the list, an offer already decided, a job that
+   * moved on). Decided by lib/bid.canRejectBid at the call site — exactly like
+   * onAccept — and rendered as the SECONDARY action in the same row, so it never
+   * competes with Accept and no new card layout is invented.
+   */
+  onReject?: () => void;
 }
 
 /**
@@ -39,10 +55,23 @@ interface Props {
  * platform's ranking inputs (admin data), so the card is deliberately unable to
  * render them — it only reads the provider snapshot and the offer itself.
  *
- * The only action is opening the provider sheet. Accept / reject / chat belong to
- * later tasks and are not rendered here, disabled or otherwise.
+ * The two actions are opening the provider sheet and — only for the job's own
+ * client and only on a still-open job — accepting this offer. Decline is the
+ * SECONDARY button in the same row, offered on exactly the same conditions minus
+ * the accept decision (lib/bid.canRejectBid); chat/call, restart timer and cancel
+ * belong to other tasks and are not rendered here, disabled or otherwise. Each
+ * button exists only when the caller passes its handler, which it does only after
+ * the corresponding gate in lib/bid said yes.
  */
-export default function BidOfferCard({ bid, locale, recommended, isNew, onPress }: Props) {
+export default function BidOfferCard({
+  bid,
+  locale,
+  recommended,
+  isNew,
+  onPress,
+  onAccept,
+  onReject,
+}: Props) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const [photoFailed, setPhotoFailed] = useState(false);
@@ -162,6 +191,40 @@ export default function BidOfferCard({ bid, locale, recommended, isNew, onPress 
             ) : null}
           </View>
         </View>
+
+        {(onAccept || onReject) && (
+          <View style={styles.actions}>
+            {onAccept ? (
+              <TouchableOpacity
+                style={[
+                  styles.acceptBtn,
+                  { borderColor: c.primary, backgroundColor: c.primaryLight },
+                ]}
+                onPress={onAccept}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t('cbids_accept')}
+              >
+                <Feather name="check" size={15} color={c.primary} />
+                <Text style={[styles.acceptText, { color: c.primary }]}>{t('cbids_accept')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {onReject ? (
+              <TouchableOpacity
+                style={[styles.rejectBtn, { borderColor: c.destructive }]}
+                onPress={onReject}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t('cbids_reject')}
+              >
+                <Feather name="x" size={15} color={c.destructive} />
+                <Text style={[styles.rejectText, { color: c.destructive }]}>
+                  {t('cbids_reject')}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -191,4 +254,9 @@ const styles = StyleSheet.create({
   offerWrap: { alignItems: 'flex-end', maxWidth: '42%' },
   price: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
   eta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2, textAlign: 'right' },
+  actions: { flexDirection: 'row', gap: 8 },
+  acceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 22, paddingVertical: 10, marginTop: 2 },
+  acceptText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  rejectBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 22, paddingVertical: 10, marginTop: 2 },
+  rejectText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
 });

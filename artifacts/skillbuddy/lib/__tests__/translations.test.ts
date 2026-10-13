@@ -632,6 +632,76 @@ const NEW_CBIDS_KEYS = [
   'cbids_back_to_job',
 ];
 
+/**
+ * Keys added for the PROVIDER's own-bid status view (GET /jobs/{job_id}/bids/mine
+ * → the "Your bid" card): the per-status "what happens next" line, the
+ * status-specific timestamps, the rejection-reason label, the non-blocking
+ * refresh notice, the status-change banner and the offline dialog. All are
+ * reachable through t(), so each must exist in all five dictionaries.
+ */
+const NEW_MY_BID_KEYS = [
+  'jobd_bid_next_pending',
+  'jobd_bid_next_accepted',
+  'jobd_bid_next_rejected',
+  'jobd_bid_next_withdrawn',
+  'jobd_bid_next_expired',
+  'jobd_bid_ts_accepted',
+  'jobd_bid_ts_rejected',
+  'jobd_bid_ts_withdrawn',
+  'jobd_bid_reject_reason',
+  'jobd_bid_refresh_failed',
+  'jobd_bid_status_updated',
+  'jobd_bid_offline_title',
+  'jobd_bid_offline_msg',
+  // Withdraw Bid feature (provider bid action) — gate + action key shape wart.
+  'jobd_withdraw_bid',
+];
+
+/**
+ * Keys added for the CLIENT's Decline (Reject) Bid action (POST
+ * /jobs/{job_id}/bids/{bid_id}/reject): the card/sheet action label, the
+ * confirmation sheet (provider + offered price + the optional reason field), the
+ * success copy, and the failure copy per bucket. All are reachable through t(),
+ * so each must exist in all five dictionaries.
+ */
+const NEW_REJECT_KEYS = [
+  'cbids_reject',
+  'cbids_reject_title',
+  'cbids_reject_price',
+  'cbids_reject_note',
+  'cbids_reject_reason_label',
+  'cbids_reject_reason_ph',
+  'cbids_reject_reason_hint',
+  'cbids_reject_confirm',
+  'cbids_reject_back',
+  'cbids_reject_working',
+  'cbids_reject_done_title',
+  'cbids_reject_done_msg',
+  'cbids_reject_gone_title',
+  'cbids_reject_err_title',
+  'cbids_reject_err_invalid',
+  'cbids_reject_err_notallowed',
+  'cbids_reject_err_forbidden',
+  'cbids_reject_err_notfound',
+  'cbids_reject_err_server',
+  'cbids_reject_err_network',
+  'cbids_reject_err_reason_long',
+];
+
+/** Keys added for the Withdraw Bid feature (provider-only destructive bid action). */
+const NEW_WITHDRAW_KEYS = [
+  'jobd_withdraw_confirm_title',
+  'jobd_withdraw_confirm_msg',
+  'jobd_withdraw_ok',
+  'jobd_withdraw_cancel',
+  'jobd_withdraw_err_invalid',
+  'jobd_withdraw_err_notallowed',
+  'jobd_withdraw_err_forbidden',
+  'jobd_withdraw_err_notfound',
+  'jobd_withdraw_err_server',
+  'jobd_withdraw_err_network',
+];
+
 const canonical = new Set(Object.keys(en as unknown as Record<string, string>));
 
 for (const [lang, dict] of dictionaries) {
@@ -667,8 +737,11 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_POST_FLOW_KEYS,
     ...NEW_POST_WIZARD_KEYS,
     ...NEW_BID_KEYS,
-    ...REUSED_KEYS,
-  ]) {
+  ...NEW_MY_BID_KEYS,
+  ...NEW_WITHDRAW_KEYS,
+  ...NEW_REJECT_KEYS,
+  ...REUSED_KEYS,
+]) {
     const value = dict[key];
     check(
       `${lang}.${key} present and non-empty`,
@@ -700,6 +773,9 @@ const allNewKeys = [
   ...NEW_POST_WIZARD_KEYS,
   ...NEW_BID_KEYS,
   ...NEW_CBIDS_KEYS,
+  ...NEW_MY_BID_KEYS,
+  ...NEW_WITHDRAW_KEYS,
+  ...NEW_REJECT_KEYS,
 ];
 const translatedCount = dictionaries
   .slice(1)

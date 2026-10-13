@@ -1,8 +1,10 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { buildListJobsQuery } from '@/lib/jobList';
+import { isValidBidId } from '@/lib/bid';
 import { isValidJobId } from '@/lib/jobPublish';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse } from '@/types';
+import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest,
+} from '@/types';
 
 // Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
 // build time and is supplied by Infisical via `infisical run`, so the value never
@@ -580,21 +582,25 @@ export const authApi = {
     return api.post<JobAddressResponse>(`/api/v1/jobs/${jobId}/address`, payload);
   },
 
-  /* ── Bids (OpenAPI tag "Bids") — the PROVIDER submit path + the CLIENT read ─
+  /* ── Bids (OpenAPI tag "Bids") — the PROVIDER paths + the CLIENT read ─
    *
-   * THREE operations of the Bids group are integrated:
+   * SEVEN operations of the Bids group are integrated:
    *
    *   POST /api/v1/jobs/{job_id}/bids        createBid   (BidCreate)  — provider
+   *   PUT  /api/v1/jobs/{job_id}/bids/{bid_id} updateBid  (BidUpdate) — provider
    *   GET  /api/v1/jobs/{job_id}/bids/mine   getMyBid    — provider
    *   GET  /api/v1/jobs/{job_id}/bids        listJobBids (JobBidsResponse)
    *                                                       — the client's screen
+   *   POST /api/v1/jobs/{job_id}/bids/{bid_id}/accept  acceptBid (BidResponse)
+   *                                                       — the client's accept
+   *   POST /api/v1/jobs/{job_id}/bids/{bid_id}/reject  rejectBid (BidResponse)
+   *                                                       — the client's decline
    *
-   * The rest of the tag — Update Bid, Withdraw Bid, Accept Bid, Reject Bid and
-   * GET /api/v1/bids/mine — belongs to the modify/withdraw, accept/reject and
-   * my-bids flows, which are separate tasks. Deliberately NOT wrapped here rather
-   * than left as dead callable code, so nothing can call an unbuilt flow by
-   * accident. All of them are enumerated in the task report so the reconnaissance
-   * is not lost.
+   * The rest of the tag — Withdraw Bid and GET /api/v1/bids/mine — belongs to
+   * the withdraw and my-bids flows, which are separate tasks. Deliberately NOT
+   * wrapped here rather than left as dead callable code, so nothing can call an
+   * unbuilt flow by accident. Both are enumerated in the task reports so the
+   * reconnaissance is not lost.
    *
    * AUTH: both operations are PROTECTED (live OpenAPI security:
    * [{OAuth2PasswordBearer: []}]). The shared axios instance attaches the Bearer
@@ -633,21 +639,183 @@ export const authApi = {
   },
 
   /**
-   * GET /api/v1/jobs/{job_id}/bids/mine — "Get My Bid For Job": THIS provider's
-   * own bid on ONE job, which is what decides the screen's opening state.
+   * POST /api/v1/jobs/{job_id}/bids/{bid_id}/accept — "Accept Bid": the CLIENT
+   * picks ONE offer on their own job. Irreversible without the cancellation
+   * flow, which is a separate module and is NOT connected here.
    *
-   * UNVERIFIED (flagged, not guessed): the OpenAPI documents ONLY 200 with a
-   * BidResponse. What the backend returns when this provider has NO bid on the
-   * job is not in the schema — it could be a 404, a 400, or a 200 with an empty
-   * body. Callers must therefore treat BOTH a rejected request AND a body that is
-   * not a usable bid as "no bid yet", while a transport failure must NOT be read
-   * that way (see hooks/useBidSubmit.loadMyBid).
+   * CONTRACT (read from the LIVE /openapi.json, not inferred from the Swagger UI):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly TWO parameters, both required integers IN THE PATH: `job_id` and
+   *     `bid_id`
+   *   - **NO `requestBody` key at all** (the spec literally answers `null` for
+   *     it) — no body and no JSON payload is sent. axios adds nothing to a post()
+   *     called with one argument, which is exactly what this endpoint wants;
+   *     sending `{}` would be inventing a body the contract does not have.
+   *   - its ONLY documented responses are 200 (**the full BidResponse DIRECTLY** —
+   *     there is no `{ message, job }` envelope here, unlike the job actions) and
+   *     422 (HTTPValidationError)
+   *   - the LIVE BidStatus enum is PENDING | ACCEPTED | REJECTED | WITHDRAWN |
+   *     EXPIRED, so the accepted status is read from the response, never assumed
+   *     from the Swagger example (whose placeholder says "PENDING" while filling
+   *     every timestamp — that example is generated and is not behaviour)
+   *
+   * MEASURED LIVE (everything that does NOT need a bid by another provider):
+   *
+   *   unknown bid id / unknown job id
+   *       404 {"detail":"Bid not found."}   — the SAME body for both, so this
+   *                                            code cannot tell the app whether
+   *                                            the JOB or the BID was the
+   *                                            problem; the app therefore treats
+   *                                            it as "no such offer" and re-reads
+   *                                            the real state
+   *   non-integer job_id   422 detail[0] = int_parsing on ["path", "job_id"]
+   *   non-integer bid_id   422 detail[0] = int_parsing on ["path", "bid_id"]
+   *   no token             401 {"detail":"Not authenticated"}
+   *   GET on this path     405 {"detail":"Method Not Allowed"} — POST is the
+   *                        registered method
+   *   `{}` body            404, i.e. an empty body is not rejected anywhere
+   *                        before the row lookup — consistent with the spec
+   *                        declaring no requestBody at all
+   *
+   * THE HAPPY PATH IS NOT VERIFIED: accepting needs TWO accounts (one that owns
+   * the job and a DIFFERENT one that bid on it) and the backend refuses a bid on
+   * your own job — {"detail":"You cannot bid on your own job."} — so no bid by
+   * another provider ever existed in this environment. The 200 shape, the
+   * resulting job status and the fate of the other bids are therefore read from
+   * the schema and the module spec and reported as NOT VERIFIED. 400/401/403/409
+   * are undocumented for this operation; whatever `detail` text the backend sends
+   * is surfaced verbatim (lib/bid.acceptBidFailureMessage) instead of the app
+   * inventing a meaning for the code.
+   *
+   * The id that goes into the path always comes from the bid the server sent
+   * (the client's bids list), never from user input, and both ids are re-checked
+   * here so a malformed path can never be built.
+   */
+  acceptBid: (jobId: number, bidId: number) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`acceptBid: invalid job id ${String(jobId)}`));
+    }
+    if (!isValidBidId(bidId)) {
+      return Promise.reject(new Error(`acceptBid: invalid bid id ${String(bidId)}`));
+    }
+    return api.post<BidResponse>(`/api/v1/jobs/${jobId}/bids/${bidId}/accept`);
+  },
+
+  /**
+   * POST /api/v1/jobs/{job_id}/bids/{bid_id}/reject — "Reject Bid": the CLIENT
+   * declines ONE unsuitable offer on their own job (Module 4B's "ability to
+   * decline the bids which are unsuitable").
+   *
+   * CONTRACT (read from the LIVE /openapi.json):
+   *   - `security: [{OAuth2PasswordBearer: []}]` — the Bearer token is mandatory
+   *   - exactly TWO parameters, both required integers IN THE PATH
+   *   - a REQUIRED `application/json` body (BidRejectRequest). "Required" applies
+   *     to the BODY OBJECT, not to `reason`: the schema declares NO `required`
+   *     array and types reason as `string maxLength 255 | null`
+   *   - its ONLY documented responses are 200 (**the full BidResponse DIRECTLY** —
+   *     no envelope) and 422 (HTTPValidationError)
+   *
+   * MEASURED LIVE (everything that does not need a REAL bid by another provider
+   * — this environment has one account, and the backend refuses a bid on your own
+   * job, so no such row exists):
+   *
+   *   no token            401 {"detail":"Not authenticated"}
+   *   GET on the path     405 {"detail":"Method Not Allowed"}
+   *   non-integer job_id  422 int_parsing on ["path","job_id"]
+   *   non-integer bid_id  422 int_parsing on ["path","bid_id"]
+   *   job_id 0 / unknown job / ANOTHER USER's job
+   *                       404 {"detail":"Job not found."}  — this endpoint DOES
+   *                        distinguish the two rows (unlike accept, which answers
+   *                        "Bid not found." for both). A job that is not yours is
+   *                        therefore reported as NOT FOUND, not 403: it leaks no
+   *                        existence information, and no 403 was ever observed.
+   *   bid_id 0 / unknown bid on a real job
+   *                       404 {"detail":"Bid not found."}
+   *   NO body             422 {"type":"missing","loc":["body"]}
+   *   `{}`, {"reason":null}, {"reason":""}   accepted by validation
+   *   reason 256 chars    422 string_too_long on ["body","reason"]
+   *   reason as a number  422 string_type on ["body","reason"]
+   *   unknown fields      ignored
+   *   malformed JSON      422 json_invalid on ["body",1]
+   *
+   * NOT VERIFIED LIVE: the 200 itself (no bid by another provider could exist),
+   * the status a rejected bid comes back with (enum says REJECTED; the response
+   * is adopted, never assumed), and what the backend answers for a bid that is
+   * already WITHDRAWN/ACCEPTED or on a job whose window has closed — those need a
+   * real bid row and are covered by unit tests instead. Whatever `detail` text the
+   * backend sends is surfaced verbatim (lib/bid.rejectBidFailureMessage).
+   *
+   * Both ids come from the server's own data — the route's job id and the bid
+   * card's id — never from user input, and both are re-checked here so a
+   * malformed path can never be built.
+   */
+  rejectBid: (jobId: number, bidId: number, body: BidRejectRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`rejectBid: invalid job id ${String(jobId)}`));
+    }
+    if (!isValidBidId(bidId)) {
+      return Promise.reject(new Error(`rejectBid: invalid bid id ${String(bidId)}`));
+    }
+    return api.post<BidResponse>(`/api/v1/jobs/${jobId}/bids/${bidId}/reject`, body);
+  },
+
+  /**
+   * GET /api/v1/jobs/{job_id}/bids/mine — "Get My Bid For Job": THIS provider's
+   * own bid on ONE job, which is what decides the provider screen's opening
+   * state.
+   *
+   * The schema documents ONLY `200 → BidResponse` (plus 422), so the "no bid"
+   * answer had to be measured on the deployed backend instead of guessed:
+   *
+   *   no bid           404  {"detail":"You have not placed a bid on this job."}
+   *   unknown job id   404  the SAME body as "no bid" — indistinguishable from
+   *                         the status code alone, which is why the caller must
+   *                         disambiguate with the job detail it already loaded
+   *   non-integer id   422  detail[0].loc ["path","job_id"] (int_parsing)
+   *   no token         401  {"detail":"Not authenticated"}
+   *
+   * That mapping lives in lib/bid.myBidLookupFromError / myBidLookupFromData and
+   * is consumed by hooks/useMyBid — never re-classified at a call site.
    */
   getMyBid: (jobId: number) => {
     if (!isValidJobId(jobId)) {
       return Promise.reject(new Error(`getMyBid: invalid job id ${String(jobId)}`));
     }
     return api.get<BidResponse>(`/api/v1/jobs/${jobId}/bids/mine`);
+  },
+
+  /**
+   * PUT /api/v1/jobs/{job_id}/bids/{bid_id} — "Update Bid" (BidUpdate): the
+   * provider's Modify Bid on their OWN bid.
+   *
+   * BODY: the live schema declares NO required field and types all three as
+   * nullable, so a partial update is explicitly allowed. The app still sends the
+   * full set from lib/bid.buildBidUpdateRequest — offered_price as a NUMBER from
+   * integer cents, eta_minutes as an integer 0..1440, message as string | null —
+   * so unchanged fields keep their current values under any merge rule.
+   *
+   * MEASURED LIVE (no bid of this account existed to edit, so these are the
+   * responses that did not need one):
+   *
+   *   bid that is not yours / no such bid / no such job
+   *       404 {"detail":"Bid not found."}   — the row lookup happens AFTER body
+   *                                            validation, see the next row
+   *   body rejected        422 detail[].loc ["body","offered_price"] etc., e.g.
+   *                           greater_than "Input should be greater than 0"
+   *   non-integer ids      422 TWO entries: ["path","job_id"] and ["path","bid_id"]
+   *   no token             401 {"detail":"Not authenticated"}
+   *
+   * 200 → the FULL updated BidResponse. Nothing about 400/403/409 is documented;
+   * they are surfaced from the backend's own `detail` (lib/bid.bidUpdateFailureMessage).
+   */
+  updateBid: (jobId: number, bidId: number, body: BidUpdateRequest) => {
+    if (!isValidJobId(jobId)) {
+      return Promise.reject(new Error(`updateBid: invalid job id ${String(jobId)}`));
+    }
+    if (!isValidBidId(bidId)) {
+      return Promise.reject(new Error(`updateBid: invalid bid id ${String(bidId)}`));
+    }
+    return api.put<BidResponse>(`/api/v1/jobs/${jobId}/bids/${bidId}`, body);
   },
 
   /**

@@ -1363,6 +1363,33 @@ export default function BiddingDashboardScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* View your bid — the SAME screen in PROVIDER mode, once "Place a Bid"
+              no longer applies (the window closed, or someone was picked). This
+              is what keeps a submitted bid reachable for its whole life: the
+              status it ends in (accepted, rejected, withdrawn, expired) arrives
+              AFTER the window shuts, so without this route the provider could
+              never see it. Nothing about "do I have a bid" is assumed here —
+              that answer only exists at /bids/mine, which the screen itself
+              reads, so this opens either the submitted bid or the closed state.
+              CLIENT mode is untouched: the client's way in is "View bids" above. */}
+          {activeRole === 'PROVIDER' &&
+          !canProviderSubmitBid(serverJob, activeRole) &&
+          serverJob.status !== 'DRAFT' ? (
+            <TouchableOpacity
+              style={[
+                styles.publishBtn,
+                { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, marginTop: 14 },
+              ]}
+              onPress={() => router.push(`/job/${serverJob.id}/bid` as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="eye" size={15} color={c.text} />
+              <Text style={[styles.publishText, { color: c.text }]}>
+                {t('jobd_bid_action_view')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Assign Provider. There is NO backend flag for assignment (JobResponse
               has none), so the gate is derived conservatively: the job must still be
               open for assignment (bidding open, not cancelled/completed) and not
