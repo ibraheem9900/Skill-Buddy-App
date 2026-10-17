@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { authApi } from '@/services/api';
 import type {
   CreditTransactionResponse,
@@ -28,6 +28,31 @@ import type {
  */
 
 export type WalletStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/* ── Module-level invalidation ────────────────────────────────────────────── */
+
+type WalletInvalidateListener = () => void;
+const walletListeners = new Set<WalletInvalidateListener>();
+
+/**
+ * Tell every mounted wallet view to re-read now.
+ *
+ * The same shape as hooks/useJobList.invalidateJobList: wallet money changes
+ * from the SERVER's side too (`escrow.released` credits the provider wallet,
+ * `payment.refunded` / `wallet.credit_earned` move the client's), and the events
+ * carry no amounts to patch the screen with — only the refetch is truthful, and
+ * it is what context/MoneyEventsContext calls.
+ */
+export function refreshWallets(): void {
+  for (const listener of Array.from(walletListeners)) listener();
+}
+
+function subscribeWallets(listener: WalletInvalidateListener): () => void {
+  walletListeners.add(listener);
+  return () => {
+    walletListeners.delete(listener);
+  };
+}
 
 /* ── Credit wallet (client) ──────────────────────────────────────────────── */
 
@@ -65,6 +90,9 @@ export function useCreditWallet() {
       inFlight.current = false;
     }
   }, []);
+
+  // A money event on the socket re-reads this wallet while its screen is open.
+  useEffect(() => subscribeWallets(() => { void load(true); }), [load]);
 
   /** Whole-number point balance — 0 when the wallet has not loaded. */
   const balance = data?.wallet?.balance ?? 0;
@@ -109,6 +137,9 @@ export function useProviderWallet() {
       inFlight.current = false;
     }
   }, []);
+
+  // A money event on the socket re-reads this wallet while its screen is open.
+  useEffect(() => subscribeWallets(() => { void load(true); }), [load]);
 
   /** Decimal STRING per the live schema — callers format before display. */
   const balance = data?.wallet?.balance ?? '0';

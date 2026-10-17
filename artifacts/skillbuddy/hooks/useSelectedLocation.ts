@@ -31,14 +31,7 @@ function emit() {
 export function setSelectedLocation(next: SelectedLocation | null) {
   selected = next;
   emit();
-}
-
-/** Synchronous read — returns null when nothing has been picked yet. */
-export function getSelectedLocation(): SelectedLocation | null {
-  return selected;
-}
-
-function subscribe(listener: () => void) {
+}function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);

@@ -13,6 +13,7 @@ import {
   type MyBidLookup,
 } from '@/lib/bid';
 import { classifyJobActionFailure, type JobActionFailure } from '@/lib/jobAction';
+import { applyBidResultToMyBid, type ProviderBidResult } from '@/lib/bidResults';
 import type { BidResponse, BidStatus, BidUpdateRequest, ValidationErrorDetail } from '@/types';
 
 /**
@@ -96,6 +97,50 @@ function writeCache(jobId: number, ownerId: string | null, lookup: MyBidLookup):
     return;
   }
   cache.set(jobId, { ownerId, lookup });
+}
+
+/* ─────────────────────────────────── the global bid-result handler ────── */
+
+/**
+ * A message from context/BidResultsContext, the app's ONE handler for the
+ * provider's `bid.accepted` / `bid.rejected` events:
+ *
+ *   'result'  the event named THIS provider's bid — its status is known now;
+ *   'resync'  the socket re-opened or the app returned to the foreground, and
+ *             events are never stored, so the answer must be re-read.
+ */
+type MyBidBroadcast =
+  | { kind: 'result'; result: ProviderBidResult }
+  | { kind: 'resync' };
+
+const broadcastListeners = new Set<(message: MyBidBroadcast) => void>();
+
+function emit(message: MyBidBroadcast): void {
+  for (const listener of Array.from(broadcastListeners)) listener(message);
+}
+
+/**
+ * Record a result for the ONE-JOB answer before any screen sees it, so a screen
+ * that mounts afterwards already reads `ACCEPTED` / `REJECTED` instead of the
+ * pre-event status.
+ *
+ * The cached lookup is transformed through lib/bidResults.applyBidResultToMyBid,
+ * which only accepts a result naming the SAME bid and job — so an event about
+ * another job cannot rewrite this job's answer, and no owner check is needed
+ * here (the entry is transformed whatever account asked for it).
+ */
+export function broadcastProviderBidResult(result: ProviderBidResult): void {
+  const entry = cache.get(result.jobId);
+  if (entry) {
+    const next = applyBidResultToMyBid(entry.lookup, result);
+    if (next && next !== entry.lookup) cache.set(result.jobId, { ...entry, lookup: next });
+  }
+  emit({ kind: 'result', result });
+}
+
+/** Tell every mounted screen to re-read the one-job answer now. */
+export function broadcastProviderBidResync(): void {
+  emit({ kind: 'resync' });
 }
 
 interface Options {
@@ -270,6 +315,43 @@ export function useMyBid(jobId: number | null, { pollMs = null, paused = false }
     setRefreshFailed(false);
     void load('open');
   }, [ownerId, load]);
+
+  /**
+   * The global result handler's two messages (context/BidResultsContext):
+   *   result → the announced status is written into the answer THIS screen shows,
+   *            in place, and the screen's own change notice is raised with it so
+   *            a provider already looking at the bid sees the same news as the
+   *            banner (lib/bid.isBidFinal: only an outcome can arrive this way);
+   *   resync → the socket re-opened or the app came back to the foreground, so
+   *            the answer is re-read (events are never stored).
+   *
+   * A result about ANOTHER job is a no-op here: readCache() returns the same
+   * object for this job, which never reaches setLookup.
+   */
+  useEffect(() => {
+    const listener = (message: MyBidBroadcast) => {
+      if (message.kind === 'resync') {
+        if (jobId === null) return;
+        void load('refresh');
+        return;
+      }
+      if (jobId === null) return;
+      const { result } = message;
+      const cached = readCache(jobId, ownerId);
+      if (cached === null) return;
+      const shown = current.current;
+      if (shown?.state === 'exists' && shown.bid.id !== result.bidId) return;
+      current.current = cached;
+      setLookup(cached);
+      if (cached.state === 'exists' && shown?.state === 'exists' && shown.bid.status !== cached.bid.status) {
+        setChangedStatus(cached.bid.status);
+      }
+    };
+    broadcastListeners.add(listener);
+    return () => {
+      broadcastListeners.delete(listener);
+    };
+  }, [jobId, ownerId, load]);
 
   /**
    * Adopt the bid a 201 Create Bid just returned, then confirm it with a real

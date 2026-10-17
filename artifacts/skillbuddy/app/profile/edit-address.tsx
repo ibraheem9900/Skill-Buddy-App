@@ -23,6 +23,13 @@ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollV
 import useAddresses from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
 import { authApi } from '@/services/api';
+import { markNearbyStale } from '@/lib/nearbyStale';
+import {
+  addressFormFrom,
+  buildAddressWriteBody,
+  validateAddressForm,
+  type AddressFormValues,
+} from '@/lib/providerAddress';
 import type { AddressResponse, AddressCountryResponse, AddressRegionResponse } from '@/types';
 
 /**
@@ -35,12 +42,20 @@ import type { AddressResponse, AddressCountryResponse, AddressRegionResponse } f
  * exactly what the PUT body needs). Counties/cities lists are prefetched
  * for the pre-selected ids so the cascade pickers open ready.
  *
- * PUT SEMANTICS (full replace): the request sends the COMPLETE
- * AddressUpdate object — every field explicit, null where no usable value
- * exists (latitude/longitude are null: the app has no GPS/map source) —
- * never a partial diff, so unspecified fields cannot be reset server-side.
+ * PUT SEMANTICS: the request sends the COMPLETE AddressUpdate object — every
+ * field explicit, null where no usable value exists — never a partial diff, so
+ * unspecified fields cannot be reset server-side. VERIFIED LIVE 2026-10-16: the
+ * endpoint actually applies a PARTIAL update (fields left out are kept), but the
+ * full body is still what this screen sends, because "keep what I did not
+ * mention" is not what the screen promises the user.
  * If the user changes the country/county/city cascade they must re-pick
  * county/city (ids reset on country change, cities on county change).
+ *
+ * COORDINATES: typed in by hand (the app has no map picker or GPS source), sent
+ * as ONE PAIR via lib/providerAddress — both parsed numbers or both empty, never
+ * half a pair and never 0,0. They are what makes a PROVIDER visible for nearby
+ * jobs (GET /providers/me/nearby-jobs answers 400 without saved coordinates —
+ * verified live), and a client can leave them empty.
  *
  * IS_DEFAULT: the SERVER's 200 AddressResponse is the only truth — the
  * cached entry is replaced with it and no other address is patched
@@ -79,6 +94,10 @@ export default function EditAddressScreen() {
   const [landmark, setLandmark] = useState('');
   const [formattedAddress, setFormattedAddress] = useState('');
   const [isDefault, setIsDefault] = useState(false);
+  // Coordinates as typed text; pre-filled from the saved address's decimal
+  // strings through the shared parser, paired again on submit.
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -127,6 +146,11 @@ export default function EditAddressScreen() {
     setLandmark(a.landmark ?? '');
     setFormattedAddress(a.formatted_address ?? '');
     setIsDefault(!!a.is_default);
+    // Real coordinates only — the shared mapper parses the schema's decimal
+    // strings and yields '' when there is no usable pair (nothing is guessed).
+    const parsed = addressFormFrom(a);
+    setLatitude(parsed.latitude);
+    setLongitude(parsed.longitude);
     // Prefetch the cascade lists for the pre-selected ids so the pickers
     // open ready (failures just flip the retry flags — ids stay intact).
     (async () => {
@@ -246,11 +270,11 @@ export default function EditAddressScreen() {
     ) : null;
 
   const textField = (
-    keyName: 'house_number' | 'street_address' | 'postal_code' | 'landmark' | 'formatted_address',
+    keyName: 'house_number' | 'street_address' | 'postal_code' | 'landmark' | 'formatted_address' | 'latitude' | 'longitude',
     labelKey: Parameters<typeof t>[0],
     value: string,
     setter: (v: string) => void,
-    opts?: { multiline?: boolean; numeric?: boolean },
+    opts?: { multiline?: boolean; numeric?: boolean; decimal?: boolean },
   ) => (
     <View style={styles.fieldWrap}>
       <Text style={[styles.label, { color: c.text }]}>{t(labelKey)}</Text>
@@ -278,7 +302,7 @@ export default function EditAddressScreen() {
           onFocus={() => setFocusedField(keyName)}
           onBlur={() => setFocusedField(null)}
           multiline={opts?.multiline}
-          keyboardType={opts?.numeric ? 'numeric' : 'default'}
+          keyboardType={opts?.decimal ? 'decimal-pad' : opts?.numeric ? 'numeric' : 'default'}
           autoCapitalize="none"
           editable={!saving && prefillState === 'ready'}
         />
@@ -317,16 +341,28 @@ export default function EditAddressScreen() {
     </View>
   );
 
-  /** FULL AddressUpdate body (PUT full-replace): every field explicit —
-   * null where no usable value exists, so nothing is silently kept or
-   * guessed server-side. Cascade ids from the pre-filled/updated picks;
-   * lat/lng null (no GPS/map source in the app). */
+  /** The form's values in the shared module's shape (validation + body agree). */
+  const formValues = (): AddressFormValues => ({
+    countryId,
+    countyId,
+    cityId,
+    streetAddress,
+    houseNumber,
+    postalCode,
+    landmark,
+    formattedAddress,
+    latitude,
+    longitude,
+  });
+
+  /**
+   * FULL AddressUpdate body: every field explicit — null where no usable value
+   * exists, so nothing is silently kept or guessed server-side. Cascade ids from
+   * the pre-filled/updated picks; the coordinates are the shared module's parsed
+   * PAIR (both numbers, or both empty).
+   */
   const buildPayload = () => {
-    const trim = (s: string) => {
-      const v = s.trim();
-      return v.length ? v : null;
-    };
-    const composedStreet = [trim(houseNumber), trim(streetAddress)].filter(Boolean).join(' ');
+    const composedStreet = [houseNumber.trim(), streetAddress.trim()].filter(Boolean).join(' ');
     const composed = [
       composedStreet || null,
       city?.name ?? null,
@@ -335,19 +371,14 @@ export default function EditAddressScreen() {
     ]
       .filter(Boolean)
       .join(', ');
-    return {
-      latitude: null,
-      longitude: null,
-      country_id: countryId,
-      county_id: countyId,
-      city_id: cityId,
-      house_number: trim(houseNumber),
-      street_address: trim(streetAddress),
-      postal_code: trim(postalCode),
-      landmark: trim(landmark),
-      formatted_address: trim(formattedAddress) ?? (composed || null),
-      is_default: isDefault,
-    };
+    const body = buildAddressWriteBody({
+      ...formValues(),
+      countryId: countryId!,
+      countyId: countyId!,
+      cityId: cityId!,
+      formattedAddress: formattedAddress.trim() || composed,
+    });
+    return { ...body, is_default: isDefault };
   };
 
   const handleSubmit = async () => {
@@ -355,13 +386,15 @@ export default function EditAddressScreen() {
     setFormError(null);
 
     // ── Client-side validation ────────────────────────────────────────────
-    const errors: Record<string, string> = {};
-    if (countryId == null) errors.country_id = t('addr_c_err_required');
-    if (countyId == null) errors.county_id = t('addr_c_err_required');
-    if (cityId == null) errors.city_id = t('addr_c_err_required');
-    if (!streetAddress.trim()) errors.street_address = t('addr_c_err_required');
-    if (Object.keys(errors).length) {
-      setFieldErrors(errors);
+    // Cascade + street (the booking minimum) plus the shared coordinate rules
+    // (both or neither, inside the live bounds).
+    const validation = validateAddressForm(formValues());
+    if (!validation.ok) {
+      setFieldErrors(
+        Object.fromEntries(
+          Object.entries(validation.fieldErrors).map(([field, key]) => [field, t(key as any)])
+        ) as Record<string, string>
+      );
       return;
     }
 
@@ -370,7 +403,9 @@ export default function EditAddressScreen() {
     try {
       await update(addressId, buildPayload());
       // 200 — the SERVER response already replaced the shared cache; back
-      // to the detail screen which re-reads it on focus.
+      // to the detail screen which re-reads it on focus. The nearby feed ranks
+      // jobs by these coordinates, so it is marked stale for its next focus.
+      markNearbyStale();
       Alert.alert(t('addr_e_success_title'), t('addr_e_success_msg'));
       router.back();
     } catch (err: any) {
@@ -445,7 +480,7 @@ export default function EditAddressScreen() {
 
     return (
       <Modal visible transparent animationType="slide" onRequestClose={() => setPickerOpen(null)}>
-        <Pressable style={[styles.modalBackdrop, { backgroundColor: 'rgba(0,0,0,0.45)' }]} onPress={() => setPickerOpen(null)}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: c.overlay }]} onPress={() => setPickerOpen(null)}>
           <Pressable style={[styles.modalSheet, { backgroundColor: c.background, borderColor: c.border }]}>
             <View style={[styles.modalHead, { borderBottomColor: c.border }]}>
               <Text style={[styles.modalTitle, { color: c.text }]}>{t(titleKey)}</Text>
@@ -547,7 +582,7 @@ export default function EditAddressScreen() {
           <Feather name="search" size={22} color={c.mutedForeground} />
           <Text style={[styles.stateText, { color: c.mutedForeground }]}>{t('addr_d_not_found')}</Text>
           <TouchableOpacity onPress={() => router.back()} style={[styles.submitBtn, { backgroundColor: c.primary }]}>
-            <Text style={styles.submitText}>{t('addr_d_back')}</Text>
+            <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('addr_d_back')}</Text>
           </TouchableOpacity>
         </View>
       ) : prefillState === 'error' ? (
@@ -575,7 +610,7 @@ export default function EditAddressScreen() {
             }}
             style={[styles.submitBtn, { backgroundColor: c.primary }]}
           >
-            <Text style={styles.submitText}>{t('addr_retry')}</Text>
+            <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('addr_retry')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -603,6 +638,18 @@ export default function EditAddressScreen() {
             </TouchableOpacity>
           ) : null}
           {pickerRow('city_id', 'addr_c_city', city?.name ?? null, !countyId || citiesLoading, () => setPickerOpen('city'))}
+
+          {/* Coordinates — pre-filled from the saved address and typed by hand (the
+              app has no map picker). Providers need this pair to appear in
+              Available jobs; a client may leave both empty. */}
+          <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>
+            {t('provider_addr_coords_title')}
+          </Text>
+          {textField('latitude', 'addr_u_lat', latitude, setLatitude, { decimal: true })}
+          {textField('longitude', 'addr_u_lng', longitude, setLongitude, { decimal: true })}
+          <Text style={[styles.coordsHint, { color: c.mutedForeground }]}>
+            {t('provider_addr_coords_hint')}
+          </Text>
 
           {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
           {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
@@ -632,9 +679,9 @@ export default function EditAddressScreen() {
             accessibilityLabel={t('addr_e_save')}
           >
             {saving ? (
-              <ActivityIndicator size="small" color="#FFF" />
+              <ActivityIndicator size="small" color={c.primaryForeground} />
             ) : (
-              <Text style={styles.submitText}>{t('addr_e_save')}</Text>
+              <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('addr_e_save')}</Text>
             )}
           </TouchableOpacity>
         </KeyboardAwareScrollViewCompat>
@@ -666,6 +713,8 @@ const styles = StyleSheet.create({
   },
   stateText: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center' },
   fieldWrap: { marginBottom: 14 },
+  sectionLabel: { fontFamily: 'Manrope_700Bold', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 6, marginBottom: 10 },
+  coordsHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: -6, marginBottom: 14 },
   label: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginBottom: 6 },
   inputRow: {
     flexDirection: 'row',
@@ -714,7 +763,7 @@ const styles = StyleSheet.create({
   },
   formErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 12, flex: 1 },
   submitBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
-  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: {
     borderTopLeftRadius: 20,

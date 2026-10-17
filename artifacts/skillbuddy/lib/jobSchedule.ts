@@ -142,21 +142,7 @@ export function canPageMonth(
     // There is a later month if this month ends before the last usable day.
     next: monthEnd.getTime() < endOfDay(max).getTime(),
   };
-}
-
-/** 1..12 → 0-based index of the previous/next selectable month, or null. */
-export function firstSelectableMonth(now: Date = new Date()): { year: number; month: number } {
-  const { min } = bookingWindow(now);
-  return { year: min.getFullYear(), month: min.getMonth() };
-}
-
-/** The last month the window reaches. */
-export function lastSelectableMonth(now: Date = new Date()): { year: number; month: number } {
-  const { max } = bookingWindow(now);
-  return { year: max.getFullYear(), month: max.getMonth() };
-}
-
-/**
+}/**
  * Combine a calendar day with a 12-hour clock selection into a local Date.
  * Returns null when the day is missing or the clock parts are out of range.
  */

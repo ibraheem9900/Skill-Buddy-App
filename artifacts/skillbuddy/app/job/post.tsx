@@ -55,7 +55,9 @@ import {
   formatDayLabel,
   formatRangeLabel,
   formatTimeLabel,
+  isRequestTypeAllowed,
   oneTimeDay,
+  resolveRequestTypeForBooking,
   validateMultiDay,
   validateOneTime,
 } from '@/lib/jobBooking';
@@ -65,11 +67,13 @@ import {
   type ProfileAddressForm,
 } from '@/lib/profileAddressSync';
 import {
+  JOB_TITLE_MAX,
   buildCreateJobRequest,
   classifyCreateJobFailure,
   createJobErrorCopy,
   firstErrorStep,
   mapValidationErrors,
+  validateJobTitle,
   type JobFormField,
 } from '@/lib/jobCreate';
 import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/types';
@@ -106,9 +110,8 @@ import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/type
  * hourly-rate/budget fields.
  */
 
-const TITLE_MIN = 3;
-/** Server cap on JobCreate.title. */
-const TITLE_MAX = 150;
+// The title bounds (3..150 trimmed) live in lib/jobCreate with the schema that
+// declares them; this screen only renders what validateJobTitle reports.
 const DESC_WORD_MAX = 500;
 
 const STEP_KEYS: TranslationKey[] = [
@@ -140,6 +143,7 @@ function RequestTypeCard({
   titleColor,
   bodyColor,
   onPress,
+  disabled = false,
 }: {
   active: boolean;
   icon: 'zap' | 'clock';
@@ -154,6 +158,12 @@ function RequestTypeCard({
   titleColor: string;
   bodyColor: string;
   onPress: () => void;
+  /**
+   * Unavailable for this booking (Urgent on a multi-day booking): same card,
+   * same alignment, visibly inert — presses do nothing and the disabled state
+   * is announced to assistive tech.
+   */
+  disabled?: boolean;
 }) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -166,17 +176,20 @@ function RequestTypeCard({
           {
             backgroundColor: active ? accentSoft : idle,
             borderColor: active ? accent : border,
+            opacity: disabled ? 0.5 : 1,
           },
         ]}
         onPressIn={() => {
+          if (disabled) return;
           scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
         }}
         onPressOut={() => {
           scale.value = withSpring(1, { damping: 16, stiffness: 280 });
         }}
-        onPress={onPress}
+        onPress={disabled ? undefined : onPress}
+        disabled={disabled}
         accessibilityRole="button"
-        accessibilityState={{ selected: active }}
+        accessibilityState={{ selected: active, disabled }}
       >
         <View style={[styles.optionIcon, { backgroundColor: active ? accent : idle }]}>
           <Feather name={icon} size={17} color={active ? onAccent : bodyColor} />
@@ -352,6 +365,8 @@ export default function PostJobScreen() {
   const [description, setDescription] = useState('');
 
   const [bookingKind, setBookingKind] = useState<BookingKind>('one_time');
+  /** One-time notice: Urgent was auto-switched to Regular for a long-term stay. */
+  const [bookingSwitchNotice, setBookingSwitchNotice] = useState(false);
   const [oneTimeDayKind, setOneTimeDayKind] = useState<OneTimeDay>('today');
   const [oneTimeClock, setOneTimeClock] = useState<ClockTime | null>(null);
   const [rangeStart, setRangeStart] = useState<Date | null>(null);
@@ -424,6 +439,41 @@ export default function PostJobScreen() {
   }, []);
 
   const clearAllErrors = useCallback(() => setStepErrors({}), []);
+
+  // ── Booking kind → request-type lock ──────────────────────────────────
+  // The live backend refuses URGENT + MULTI_DAY at create time (HTTP 422
+  // "Multiple-day bookings only support Regular bidding, not Urgent", captured
+  // 2026-10-14), so choosing Long-term while Urgent is selected switches to
+  // Regular automatically and says so exactly once.
+  const selectBookingKind = useCallback(
+    (kind: BookingKind) => {
+      // The lock lives in lib/jobBooking (resolveRequestTypeForBooking) so the
+      // rule is unit-tested, not re-implemented here.
+      const locked = resolveRequestTypeForBooking(kind, urgency);
+      setBookingKind(locked.kind);
+      if (locked.switched) {
+        setUrgency(locked.requestType);
+        setBookingSwitchNotice(true);
+      }
+    },
+    [urgency]
+  );
+
+  // Safety net for any OTHER path into the locked combination: Regular is
+  // forced silently — the one-time notice belongs to the moment the user's own
+  // choice is changed, not to re-renders. (The payload builder forces REGULAR
+  // for MULTI_DAY as well, so this rule holds even if this effect is bypassed.)
+  useEffect(() => {
+    const locked = resolveRequestTypeForBooking(bookingKind, urgency);
+    if (locked.switched) setUrgency(locked.requestType);
+  }, [bookingKind, urgency]);
+
+  // The notice hides itself; it is informational, never a dialog.
+  useEffect(() => {
+    if (!bookingSwitchNotice) return;
+    const timer = setTimeout(() => setBookingSwitchNotice(false), 5000);
+    return () => clearTimeout(timer);
+  }, [bookingSwitchNotice]);
 
   // ── Geo handlers ───────────────────────────────────────────────────────────
   const loadCounties = useCallback(async (id: number) => {
@@ -541,7 +591,8 @@ export default function PostJobScreen() {
     const next: StepErrors = {};
     if (target === 0) {
       if (serviceId == null) next.service = t('post_err_service');
-      if (title.trim().length < TITLE_MIN) next.title = t('post_err_title_min');
+      const titleError = validateJobTitle(title);
+      if (titleError) next.title = t(titleError);
       if (!description.trim()) next.description = t('post_err_desc');
       else if (wordCount > DESC_WORD_MAX) next.description = t('post_err_desc_long');
     }
@@ -1025,7 +1076,13 @@ export default function PostJobScreen() {
           setTitle(v);
           clearError('title');
         }}
-        maxLength={TITLE_MAX}
+        onBlur={() => {
+          // Inline feedback while the field still has focus's attention: the
+          // schema's own 3..150 rule, reported under the input it belongs to.
+          const error = validateJobTitle(title);
+          if (error) setStepErrors((prev) => ({ ...prev, title: t(error) }));
+        }}
+        maxLength={JOB_TITLE_MAX}
       />
       {stepErrors.title ? (
         <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.title}</Text>
@@ -1077,19 +1134,27 @@ export default function PostJobScreen() {
           icon="calendar"
           title={t('post_booking_one_time')}
           description={t('post_booking_one_time_desc')}
-          onPress={() => setBookingKind('one_time')}
+          onPress={() => selectBookingKind('one_time')}
         />
         <BookingTypeCard
           active={bookingKind === 'multi_day'}
           icon="repeat"
           title={t('post_booking_long_term')}
           description={t('post_booking_long_term_desc')}
-          onPress={() => setBookingKind('multi_day')}
+          onPress={() => selectBookingKind('multi_day')}
         />
       </View>
       <Text style={[styles.hint, { color: c.mutedForeground }]}>
         {bookingKind === 'one_time' ? t('post_booking_one_time_note') : t('post_booking_long_term_note')}
       </Text>
+      {bookingSwitchNotice ? (
+        <View style={[styles.switchNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
+          <Feather name="info" size={14} color={c.mutedForeground} />
+          <Text style={[styles.switchNoticeText, { color: c.mutedForeground }]}>
+            {t('post_booking_switched_notice')}
+          </Text>
+        </View>
+      ) : null}
     </>
   );
 
@@ -1286,6 +1351,7 @@ export default function PostJobScreen() {
           titleColor={c.text}
           bodyColor={c.mutedForeground}
           onPress={() => setUrgency('urgent')}
+          disabled={!isRequestTypeAllowed(bookingKind, 'urgent')}
         />
         <RequestTypeCard
           active={urgency === 'regular'}
@@ -1302,6 +1368,9 @@ export default function PostJobScreen() {
           onPress={() => setUrgency('regular')}
         />
       </View>
+      {bookingKind === 'multi_day' ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_urgent_locked')}</Text>
+      ) : null}
     </>
   );
 
@@ -1603,6 +1672,16 @@ const styles = StyleSheet.create({
   fieldButtonText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
   error: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 4 },
   hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 8, lineHeight: 16 },
+  switchNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  switchNoticeText: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, flex: 1 },
   inlineError: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   fieldWrap: { marginBottom: 12 },
   chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

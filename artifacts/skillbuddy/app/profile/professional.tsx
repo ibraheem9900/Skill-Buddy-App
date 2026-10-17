@@ -13,6 +13,8 @@ import useProviderProfile, { formatHourlyRate } from '@/hooks/useProviderProfile
 import useProviderDashboard from '@/hooks/useProviderDashboard';
 import useProviderStatusHistory from '@/hooks/useProviderStatusHistory';
 import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
+import useProviderSkills from '@/hooks/useProviderSkills';
+import { countActiveSkills, sortSkills } from '@/lib/providerSkills';
 import type { TranslationKey } from '@/context/LanguageContext';
 
 /**
@@ -96,6 +98,19 @@ export default function ProfessionalInfoScreen() {
   const { status: dashStatus, summary: dashSummary, load: loadDashboard, refresh: refreshDashboard } = useProviderDashboard();
   // Status change log (GET /providers/status-history) — separate cache.
   const { state: histState, entries: histEntries, errorMessage: histError, load: loadHistory, refresh: refreshHistory } = useProviderStatusHistory();
+  // The provider's own skills (GET /providers/me/skills) — read-only here; the
+  // provider's own skills screen (/profile/skills) is where they are managed.
+  const {
+    status: skillsStatus,
+    skills: mySkills,
+    load: loadSkills,
+    refresh: refreshSkills,
+  } = useProviderSkills();
+  // Read once on entry (module cache after that) — the same list the provider's
+  // own skills screen manages, so the two can never disagree.
+  useEffect(() => {
+    if (isProvider) void loadSkills();
+  }, [isProvider, loadSkills]);
   const router = useRouter();
   // ── Availability editor state (PATCH /providers/profile) ──
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
@@ -240,7 +255,7 @@ export default function ProfessionalInfoScreen() {
             style={[styles.retryBtn, { backgroundColor: c.primary, borderColor: c.primary }]}
             onPress={() => router.push('/profile/create-provider')}
           >
-            <Text style={[styles.retryText, { color: '#FFF' }]}>{t('prov_none_cta')}</Text>
+            <Text style={[styles.retryText, { color: c.primaryForeground }]}>{t('prov_none_cta')}</Text>
           </TouchableOpacity>
         </View>
       ) : status === 'error' ? (
@@ -318,9 +333,9 @@ export default function ProfessionalInfoScreen() {
                     disabled={!statusValue || statusSaving}
                   >
                     {statusSaving ? (
-                      <ActivityIndicator size="small" color="#FFF" />
+                      <ActivityIndicator size="small" color={c.primaryForeground} />
                     ) : (
-                      <Text style={styles.statusSaveText}>{t('ps_save')}</Text>
+                      <Text style={[styles.statusSaveText, { color: c.primaryForeground }]}>{t('ps_save')}</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -423,6 +438,77 @@ export default function ProfessionalInfoScreen() {
                   ) : null}
                 </View>
               )}
+
+              {/* Skills — live GET /providers/me/skills. ACTIVE skills are what make
+                  jobs for those services rank first in Available jobs, so this card
+                  reports the real list and links to the screen that manages it. */}
+              <View style={[styles.skillsCard, { backgroundColor: c.card, borderColor: c.border, marginTop: 12 }]}>
+                <View style={styles.dashHeader}>
+                  <Text style={[styles.sectionTitle, { color: c.mutedForeground, marginTop: 0, marginBottom: 0 }]}>
+                    {t('prov_skills_title')}
+                  </Text>
+                  {skillsStatus === 'loading' ? (
+                    <ActivityIndicator size="small" color={c.primary} />
+                  ) : (
+                    <TouchableOpacity style={styles.dashRefresh} onPress={() => void refreshSkills()} accessibilityLabel={t('prov_refresh')}>
+                      <Feather name="refresh-cw" size={12} color={c.mutedForeground} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {skillsStatus === 'error' ? (
+                  <View style={styles.dashStateRow}>
+                    <Text style={[styles.dashError, { color: c.destructive }]}>{t('skills_err_load')}</Text>
+                    <TouchableOpacity onPress={() => void loadSkills(true)}>
+                      <Text style={[styles.dashRetry, { color: c.primary }]}>{t('skills_retry')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : mySkills && mySkills.length > 0 ? (
+                  <>
+                    <Text style={[styles.skillsCount, { color: c.success }]}>
+                      {t('prov_skills_active_count', { n: countActiveSkills(mySkills) })}
+                    </Text>
+                    {sortSkills(mySkills).map((skill) => (
+                      <View key={skill.id} style={[styles.skillsLine, { borderTopColor: c.border }]}>
+                        <Feather
+                          name="award"
+                          size={13}
+                          color={skill.is_active ? c.success : c.mutedForeground}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.skillsLineText, { color: c.text }]} numberOfLines={1}>
+                            {skill.service_title ?? t('skills_service_fallback', { id: skill.service_id })}
+                          </Text>
+                          {skill.category_name ? (
+                            <Text style={[styles.skillsLineSub, { color: c.mutedForeground }]} numberOfLines={1}>
+                              {skill.category_name}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Text
+                          style={[
+                            styles.skillsLineState,
+                            { color: skill.is_active ? c.success : c.mutedForeground },
+                          ]}
+                        >
+                          {skill.is_active ? t('skills_active') : t('skills_inactive')}
+                        </Text>
+                      </View>
+                    ))}
+                  </>
+                ) : skillsStatus === 'ready' ? (
+                  <Text style={[styles.shEmpty, { color: c.mutedForeground }]}>{t('prov_skills_empty')}</Text>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.skillsManage, { borderColor: c.primary }]}
+                  onPress={() => router.push('/profile/skills' as any)}
+                  accessibilityRole="button"
+                >
+                  <Feather name="settings" size={14} color={c.primary} />
+                  <Text style={[styles.skillsManageText, { color: c.primary }]}>{t('prov_skills_manage')}</Text>
+                </TouchableOpacity>
+              </View>
 
               <View style={[styles.skillsCard, { backgroundColor: c.card, borderColor: c.border }]}>
                 <View style={styles.skillRow}>
@@ -527,6 +613,22 @@ const styles = StyleSheet.create({
   statValue: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
   statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'center' },
   skillsCard: { borderWidth: 1, borderRadius: 14, padding: 16 },
+  skillsCount: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, marginTop: 12 },
+  skillsLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1 },
+  skillsLineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  skillsLineSub: { fontFamily: 'Manrope_400Regular', fontSize: 10, marginTop: 1 },
+  skillsLineState: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
+  skillsManage: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 11,
+  },
+  skillsManageText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   skillRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   skillLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   skillValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginTop: 2 },
@@ -556,7 +658,7 @@ const styles = StyleSheet.create({
   statusChipDot: { width: 8, height: 8, borderRadius: 4 },
   statusChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textTransform: 'capitalize' },
   statusSaveBtn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 2 },
-  statusSaveText: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#FFF' },
+  statusSaveText: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
   shEmpty: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 10 },
   shRow: { flexDirection: 'row', gap: 10, paddingVertical: 10 },
   shRowTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },

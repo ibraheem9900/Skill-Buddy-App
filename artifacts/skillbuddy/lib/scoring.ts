@@ -74,7 +74,3 @@ export function calculateProviderScore(provider: BidProvider, _job?: Job): Score
     total: distance + rating + badge + credibility + responseTime,
   };
 }
-
-export function scoreOnly(provider: BidProvider, job?: Job): number {
-  return calculateProviderScore(provider, job).total;
-}

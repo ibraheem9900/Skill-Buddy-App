@@ -242,7 +242,57 @@ export interface ProviderProfile {
   acceptance_rate: number;
   response_time_avg: number;
   service_radius: number;
+  /**
+   * The radius the backend actually applies (live, 2026-10-15: 10 for a saved
+   * service_radius of 10). Optional here so an older payload cannot break the
+   * parse; the radius control falls back to service_radius when it is absent.
+   */
+  effective_service_radius_km?: number | null;
   current_status?: { status: string; reason?: string | null; is_current?: boolean } | null;
+}
+
+/**
+ * One row of GET /api/v1/providers/me/skills (live schema). The feed only reads
+ * `is_active` (to count the provider's ACTIVE skills for its nudge) and the
+ * service/category labels; this chunk never writes a skill.
+ */
+export interface ProviderSkill {
+  id: number;
+  provider_id: number;
+  service_id: number;
+  service_title?: string | null;
+  category_id: number;
+  category_name?: string | null;
+  skill_type: string;
+  years_of_experience: number;
+  is_certified: boolean;
+  certification_url?: string | null;
+  is_active: boolean;
+  is_verified: boolean;
+  verified_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** POST /api/v1/providers/me/skills request body (live schema: ONLY
+ * `service_id` is required; the server defaults skill_type to PRIMARY,
+ * years_of_experience to 0 and is_active to true — verified live 2026-10-16).
+ * The screen sends `service_id` alone, so the default the backend applies is
+ * the default the provider gets.
+ */
+export interface ProviderSkillCreatePayload {
+  service_id: number;
+}
+
+/** PATCH /api/v1/providers/me/skills/{skill_id} request body. The live endpoint
+ * accepts exactly three fields — `skill_type` (PRIMARY|SECONDARY),
+ * `years_of_experience` (integer 0..80; 81 → 422) and `is_active` (boolean) —
+ * ignores unknown keys and answers 200 to an empty body. This app sends ONLY
+ * `is_active` (the on/off toggle); it never writes provider-profile `is_active`,
+ * which is the backend's activation flag.
+ */
+export interface ProviderSkillUpdatePayload {
+  is_active?: boolean;
 }
 
 export interface User {
@@ -280,15 +330,7 @@ export interface Address {
   postal_code?: string;
   country?: string;
   house_number?: string;
-}
-
-export interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-}
-
-export interface Category {
+}export interface Category {
   id: string;
   name: string;
   iconLib: 'MaterialCommunityIcons' | 'Ionicons' | 'Feather';
@@ -638,26 +680,7 @@ export interface CancellationInfo {
 export interface JobReview {
   rating: number;
   comment?: string;
-}
-
-export interface OrderBreakdown {
-  bidPrice: number;
-  beforeVat: number;
-  vat: number;
-  platformFee: number;
-  total: number;
-}
-
-export interface PayoutBreakdown {
-  bidPrice: number;
-  beforeVat: number;
-  vat: number;
-  platformFee: number;
-  commission: number;
-  payout: number;
-}
-
-export interface BidProvider extends Provider {
+}export interface BidProvider extends Provider {
   distanceKm: number;
   responseTimeMin: number;
 }
@@ -1003,14 +1026,7 @@ export interface ValidationErrorDetail {
   type: string;
   input?: unknown;
   ctx?: Record<string, unknown>;
-}
-
-/** FastAPI 422 response body shared by the jobs endpoints. */
-export interface ApiValidationError {
-  detail: ValidationErrorDetail[];
-}
-
-/**
+}/**
  * One entry of GET /api/v1/jobs (schema JobListResponse).
  *
  * DELIBERATELY LIGHTER than JobResponse: the list carries NO description, NO
@@ -1209,11 +1225,9 @@ export interface BidResponse {
  * eta_minutes], and the schema allows `string maxLength 1000 | null`. It is sent
  * as null rather than omitted when the provider wrote nothing.
  *
- * ListMyBidsParams is NOT declared here: those belong to the my-bids flow,
- * which is a separate task. Its schema is recorded in the task report instead
- * of being left as a dead type the app could silently start using.
- * (BidRejectRequest, the CLIENT's Decline Bid body, IS declared below — that
- * action is connected.)
+ * (BidRejectRequest, the CLIENT's Decline Bid body, and ListMyBidsParams, the
+ * provider's My Bids query, are both declared below — those actions are
+ * connected.)
  */
 export interface BidCreateRequest {
   offered_price: number;
@@ -1275,6 +1289,19 @@ export interface BidUpdateRequest {
 export interface BidRejectRequest {
   /** Free text, at most 255 characters. Omitted/blank/null are all accepted. */
   reason?: string | null;
+}
+
+/**
+ * GET /api/v1/bids/mine (schema List My Bids) — the PROVIDER's own bids, every
+ * job included.
+ */
+export interface ListMyBidsParams {
+  /** One of the five BidStatus values, UPPER CASE, or null for every status. */
+  status?: BidStatus | null;
+  /** 1..100, server default 20. */
+  limit?: number | null;
+  /** >= 0, server default 0. Past the end answers an empty page, not an error. */
+  offset?: number | null;
 }
 
 /**

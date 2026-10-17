@@ -40,10 +40,25 @@ const TEST_FILES = [
   'jobBooking.test.js',
   'jobCreateError.test.js',
   'bid.test.js',
+  'realtimeEvents.test.js',
+  'realtime.test.js',
+  'debounce.test.js',
+  'jobBidsLive.test.js',
+  'jobBiddingOptions.test.js',
+  'nearbyJobs.test.js',
+  'nearbyStale.test.js',
+  'providerSkills.test.js',
+  'providerAddress.test.js',
+  'myBids.test.js',
+  'bidResults.test.js',
+  'moneyEvents.test.js',
   'translations.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
+
+/** Windows can transiently refuse to start a child process; give it this many goes. */
+const SPAWN_ATTEMPTS = 3;
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
@@ -61,8 +76,45 @@ if (!fs.existsSync(path.join(testDir, 'tsconfig.json'))) {
 
 fs.rmSync(outDir, { recursive: true, force: true });
 
+/**
+ * Run the project's own TypeScript compiler.
+ *
+ * `pnpm exec tsc` fails on some Windows setups with `spawn EPERM` (the .cmd shim
+ * cannot be spawned from a non-shell parent), so the local compiler entry point is
+ * invoked through node and pnpm is only the fallback.
+ */
+function compileTests() {
+  const tsconfig = path.join('lib', '__tests__', 'tsconfig.json');
+  const localTsc = path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+  if (fs.existsSync(localTsc)) {
+    for (let attempt = 1; ; attempt += 1) {
+      const result = spawnSync(process.execPath, [localTsc, '-p', tsconfig], {
+        stdio: 'inherit',
+        cwd: projectRoot,
+        encoding: 'utf8',
+      });
+      if (result.error && result.error.code === 'ENOENT') {
+        console.warn('local tsc could not be executed, falling back to pnpm exec');
+        break;
+      }
+      // Windows intermittently refuses to start the child process itself
+      // (`spawn EPERM`); tsc never exits non-zero without printing a diagnostic,
+      // so a silent failure is a launch failure worth retrying.
+      if (!result.error && result.status === 0) return result;
+      if (result.error || result.status === null) {
+        if (attempt < SPAWN_ATTEMPTS) {
+          console.warn(`  … tsc could not be started (${result.error?.code ?? 'killed'}), retrying`);
+          continue;
+        }
+      }
+      return result;
+    }
+  }
+  return run('pnpm', ['exec', 'tsc', '-p', tsconfig]);
+}
+
 console.log('› compiling lib/__tests__ with tsc');
-const compile = run('pnpm', ['exec', 'tsc', '-p', path.join('lib', '__tests__', 'tsconfig.json')]);
+const compile = compileTests();
 if (compile.status !== 0) {
   console.error('TypeScript compilation of the tests failed.');
   process.exit(compile.status ?? 1);
@@ -94,11 +146,26 @@ for (const file of TEST_FILES) {
   }
 
   console.log(`\n› ${file}`);
-  const result = spawnSync(process.execPath, [emitted], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-  });
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd();
+  let result;
+  let output = '';
+  for (let attempt = 1; attempt <= SPAWN_ATTEMPTS; attempt += 1) {
+    result = spawnSync(process.execPath, [emitted], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    });
+    output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd();
+    // Every test file prints its assertion report, so a silent non-zero exit means
+    // the runner could not launch the test process (Windows `spawn EPERM`, which is
+    // intermittent) rather than a genuine failure. Retry only that shape.
+    const launched = output !== '';
+    const spawnFailed = !launched && (result.error != null || result.status !== 0);
+    if (!spawnFailed) break;
+    if (attempt < SPAWN_ATTEMPTS) {
+      console.warn(`  … could not launch the test process (${result.error?.code ?? 'no output'}), retrying`);
+      continue;
+    }
+  }
+  if (result.error) console.error(`  ${result.error.code ?? 'error'}: ${result.error.message}`);
   if (output) console.log(output.split('\n').map((line) => `  ${line}`).join('\n'));
   if (result.status !== 0) {
     failed += 1;

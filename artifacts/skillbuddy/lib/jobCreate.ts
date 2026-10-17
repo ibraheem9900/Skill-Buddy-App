@@ -120,6 +120,26 @@ function text(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/* ── Title rules (JobCreate.title: minLength 3, maxLength 150) ─────────── */
+
+/** The live schema's own bounds for JobCreate.title — verified 2026-10-14. */
+export const JOB_TITLE_MIN = 3;
+export const JOB_TITLE_MAX = 150;
+
+/**
+ * The title rule, in one testable place: TRIMMED length 3..150, exactly as the
+ * live schema declares (`{minLength: 3, maxLength: 150}`). Returns the
+ * translation key the wizard renders under the input, or null when the title is
+ * acceptable. The wizard blocks submit on it and the builder refuses to build
+ * around it, so an out-of-range title can never reach the API.
+ */
+export function validateJobTitle(title: string): 'post_err_title_min' | 'post_err_title_max' | null {
+  const length = typeof title === 'string' ? title.trim().length : 0;
+  if (length < JOB_TITLE_MIN) return 'post_err_title_min';
+  if (length > JOB_TITLE_MAX) return 'post_err_title_max';
+  return null;
+}
+
 /** A usable ISO instant, or null (rejects '' and Invalid Date). */
 function isoInstant(value: string | null | undefined): string | null {
   if (typeof value !== 'string' || value.trim().length === 0) return null;
@@ -144,23 +164,37 @@ export function composeFormattedAddress(
  *
  * ONE_TIME  → exactly one milestone from `scheduledAtIso` (the only schedule
  *             channel JobCreate offers; there is no top-level scheduled_at).
- * MULTI_DAY → one milestone per booked day, capped at the documented week.
- *
- * Unusable entries are dropped rather than shipped as `null` scheduled_at
- * (which would be a 422), and when nothing usable remains the ONE_TIME instant
- * is used as a last resort so the array is never empty.
+ * MULTI_DAY → one milestone per booked day, hardened against every invalid
+ *             shape the LIVE backend was seen to reject (422s captured
+ *             2026-10-14, see the report): duplicates are dropped, entries
+ *             more than one week after the first are dropped, and the list is
+ *             capped at 7 — "Multiple-day bookings cannot have more than 7
+ *             milestones". When nothing usable remains the ONE_TIME instant is
+ *             used as a last resort so the array is never empty.
  */
 export function resolveMilestones(values: JobFormValues): JobMilestoneCreate[] {
   const hours = clampExpectedHours(values.expectedHours);
   const single = isoInstant(values.scheduledAtIso);
 
   if (values.bookingType === 'multi_day') {
-    const days = (values.milestones ?? [])
-      .map((entry) => isoInstant(entry?.scheduledAtIso))
-      .filter((iso): iso is string => iso !== null)
-      .slice(0, MAX_MILESTONE_DAYS);
-    if (days.length > 0) {
-      return days.map((scheduledAt) => ({ scheduled_at: scheduledAt, expected_hours: hours }));
+    const seen = new Set<string>();
+    const withinWeek: string[] = [];
+    let first = Number.NaN;
+    for (const entry of values.milestones ?? []) {
+      const iso = isoInstant(entry?.scheduledAtIso);
+      if (iso === null || seen.has(iso)) continue;
+      const at = Date.parse(iso);
+      if (!Number.isFinite(first)) first = at;
+      // "Within one week of the first": the wizard books consecutive local
+      // days at ONE clock time, so the allowed offset is exactly the first six
+      // days (MAX_MILESTONE_DAYS entries on days 0..6).
+      if (at - first > (MAX_MILESTONE_DAYS - 1) * 86_400_000) continue;
+      seen.add(iso);
+      withinWeek.push(iso);
+      if (withinWeek.length === MAX_MILESTONE_DAYS) break;
+    }
+    if (withinWeek.length > 0) {
+      return withinWeek.map((scheduled_at) => ({ scheduled_at, expected_hours: hours }));
     }
   }
 
@@ -185,8 +219,28 @@ export function buildCreateJobRequest(
     cityId: number;
   }
 ): CreateJobRequest {
+  const title = values.title.trim();
+  // Defence in depth for the ONE rule the wizard cannot express in its types:
+  // the live schema rejects anything outside 3..150 characters (verified live:
+  // HTTP 422 `string_too_short` for a 2-character title), so the builder never
+  // PRODUCES such a body — the wizard has already blocked submit by then, and a
+  // caller that bypasses validation gets a thrown error, not a doomed request.
+  if (validateJobTitle(title) !== null) {
+    throw new Error(
+      `buildCreateJobRequest: title must be ${JOB_TITLE_MIN}-${JOB_TITLE_MAX} characters (trimmed)`
+    );
+  }
+
+  // MULTI_DAY is ALWAYS Regular. The live backend enforces this at create time
+  // (HTTP 422 "Multiple-day bookings only support Regular bidding, not Urgent",
+  // captured 2026-10-14), so the builder forces it regardless of what the form
+  // state claimed — an Urgent + long-term body can never leave this function.
   const requestType: JobRequestType =
-    values.requestType === 'urgent' ? 'URGENT' : 'REGULAR';
+    values.bookingType === 'multi_day'
+      ? 'REGULAR'
+      : values.requestType === 'urgent'
+        ? 'URGENT'
+        : 'REGULAR';
 
   const address: JobAddressCreate = {
     country_id: values.countryId,
@@ -208,7 +262,7 @@ export function buildCreateJobRequest(
   return {
     service_id: values.serviceId,
     category_id: values.serviceCategoryId,
-    title: values.title.trim(),
+    title,
     description: text(values.description),
     request_type: requestType,
     booking_type: bookingTypeFor(values.bookingType),

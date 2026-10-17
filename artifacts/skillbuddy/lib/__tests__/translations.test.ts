@@ -13,6 +13,42 @@ import lt from '../../context/translations/lt';
 
 declare const console: { log: (msg: string) => void };
 
+/** Keys added for the provider My Bids list + the live bid-result banner. */
+const NEW_MY_BIDS_KEYS = [
+  'mybids_tab',
+  'mybids_job_fallback',
+  'mybids_filter_all',
+  'mybids_empty_title',
+  'mybids_empty_sub',
+  'mybids_empty_pending_title',
+  'mybids_empty_pending_sub',
+  'mybids_empty_accepted_title',
+  'mybids_empty_accepted_sub',
+  'mybids_empty_rejected_title',
+  'mybids_empty_rejected_sub',
+  'mybids_empty_withdrawn_title',
+  'mybids_empty_withdrawn_sub',
+  'mybids_empty_expired_title',
+  'mybids_empty_expired_sub',
+  'mybids_load_error_title',
+  'mybids_load_error_sub',
+  'mybids_invalid_title',
+  'mybids_invalid_sub',
+  'mybids_forbidden_title',
+  'mybids_forbidden_sub',
+  'mybids_inline_error',
+  'mybids_time_now',
+  'mybids_time_minutes',
+  'mybids_time_hours',
+  'mybids_time_days',
+  'mybids_result_accepted_title',
+  'mybids_result_rejected_title',
+  'mybids_result_rejected_default_reason',
+  'mybids_result_view',
+  'mybids_result_dismiss',
+  'mybids_result_this_job',
+];
+
 const NEW_UPDATE_KEYS = [
   'jobaddr_update_title',
   'jobaddr_update_exists',
@@ -702,6 +738,20 @@ const NEW_WITHDRAW_KEYS = [
   'jobd_withdraw_err_network',
 ];
 
+/** The ten money-event banner lines (payment.* / invoice.* / escrow.* / wallet). */
+const NEW_MONEY_EVENT_KEYS = [
+  'money_evt_payment_pending',
+  'money_evt_payment_succeeded',
+  'money_evt_payment_failed',
+  'money_evt_payment_disputed',
+  'money_evt_payment_refunded',
+  'money_evt_invoice_created',
+  'money_evt_invoice_overdue',
+  'money_evt_escrow_scheduled',
+  'money_evt_escrow_released',
+  'money_evt_credit_earned',
+];
+
 const canonical = new Set(Object.keys(en as unknown as Record<string, string>));
 
 for (const [lang, dict] of dictionaries) {
@@ -738,8 +788,10 @@ for (const [lang, dict] of dictionaries) {
     ...NEW_POST_WIZARD_KEYS,
     ...NEW_BID_KEYS,
   ...NEW_MY_BID_KEYS,
+  ...NEW_MY_BIDS_KEYS,
   ...NEW_WITHDRAW_KEYS,
   ...NEW_REJECT_KEYS,
+  ...NEW_MONEY_EVENT_KEYS,
   ...REUSED_KEYS,
 ]) {
     const value = dict[key];
@@ -752,6 +804,7 @@ for (const [lang, dict] of dictionaries) {
 
 const enDict = dictionaries[0][1];
 const allNewKeys = [
+  ...NEW_MY_BIDS_KEYS,
   ...NEW_UPDATE_KEYS,
   ...NEW_RESTART_KEYS,
   ...NEW_CONVERT_KEYS,

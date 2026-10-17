@@ -1,9 +1,11 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { buildListJobsQuery } from '@/lib/jobList';
+import { buildMyBidsQuery } from '@/lib/myBids';
 import { isValidBidId } from '@/lib/bid';
 import { isValidJobId } from '@/lib/jobPublish';
-import type { ProviderProfile, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest,
+import type { NearbyJob } from '@/lib/nearbyJobs';
+import type { ProviderProfile, ProviderSkill, ProviderSkillCreatePayload, ProviderSkillUpdatePayload, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest, ListMyBidsParams,
 } from '@/types';
 
 // Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
@@ -44,6 +46,51 @@ const processQueue = (error: unknown, token: string | null) => {
   failedQueue = [];
 };
 
+// ---- Single-flight access-token refresh ----
+// The ONE refresh path in the app: the REST 401 interceptor below and the
+// realtime layer's WebSocket close-1008 recovery both call this. Concurrent
+// callers share the same in-flight request, so the rotating refresh token can
+// never be spent twice in parallel. On success both tokens are stored (rotation,
+// as above) and the new access token is returned; on failure the session is
+// definitively over — tokens are cleared and the session-expired handler fires
+// — and the returned promise rejects. The token is never logged.
+let refreshInFlight: Promise<string> | null = null;
+export function refreshAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+
+  const run = (async (): Promise<string> => {
+    try {
+      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      if (!refreshToken) throw new Error('No refresh token');
+
+      // POST /api/v1/auth/refresh — refresh_token in the JSON body is the
+      // credential (no Authorization header). Uses bare axios so this call
+      // bypasses the interceptors entirely (no refresh-loop risk).
+      // ROTATION: the response carries a NEW refresh_token; the old one is
+      // invalid immediately, so BOTH tokens must be stored.
+      const { data } = await axios.post(`${BASE_URL}/api/v1/auth/refresh`, {
+        refresh_token: refreshToken,
+      });
+
+      await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
+
+      if (data.user) onUserRefreshed?.(data.user);
+      return data.access_token as string;
+    } catch (refreshErr) {
+      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      onSessionExpired?.();
+      throw refreshErr;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  refreshInFlight = run;
+  return run;
+}
+
 // Response: handle 401 with silent token refresh
 api.interceptors.response.use(
   (res) => res,
@@ -64,32 +111,19 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-        if (!refreshToken) throw new Error('No refresh token');
+        // Shared single-flight refresh (see refreshAccessToken above). It stores
+        // the rotated tokens, fires the session-expired handler on failure and
+        // rejects in that case — so the failure branch below only fans the
+        // error out to the queued requests.
+        const accessToken = await refreshAccessToken();
 
-        // POST /api/v1/auth/refresh — refresh_token in the JSON body is the
-        // credential (no Authorization header). Uses bare axios so this call
-        // bypasses the interceptors entirely (no refresh-loop risk).
-        // ROTATION: the response carries a NEW refresh_token; the old one is
-        // invalid immediately, so BOTH tokens must be stored.
-        const { data } = await axios.post(`${BASE_URL}/api/v1/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
-
-        processQueue(null, data.access_token);
-        if (data.user) onUserRefreshed?.(data.user);
-        if (originalRequest.headers) originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+        processQueue(null, accessToken);
+        if (originalRequest.headers) originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch (refreshErr) {
         // Refresh failed (401 invalid/expired/revoked, 422, network) → the
         // session is definitively over: hard logout, no retry loop.
         processQueue(refreshErr, null);
-        await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-        onSessionExpired?.();
         return Promise.reject(refreshErr);
       } finally {
         isRefreshing = false;
@@ -246,14 +280,109 @@ export const authApi = {
     api.post<ProviderProfile>('/api/v1/providers/profile', data),
   /**
    * PATCH /api/v1/providers/profile — updates an EXISTING provider profile
-   * (creation is POST, above). Full body per spec: bio, hourly_rate,
-   * provider_type, is_available, is_active, service_radius — hourly_rate as
-   * a NUMBER on the wire, string back in the 200 response. 200 returns the
-   * complete ProviderProfile — the source of truth that replaces the cached
-   * object (never merge guessed values). JSON, Bearer auto-attached.
+   * (creation is POST, above): bio, hourly_rate, provider_type, is_available
+   * and service_radius — hourly_rate as a NUMBER on the wire, string back in
+   * the 200 response. 200 returns the complete ProviderProfile — the source of
+   * truth that replaces the cached object (never merge guessed values). JSON,
+   * Bearer auto-attached.
+   *
+   * `is_active` is deliberately NOT part of this body. It is the backend's
+   * activation flag and bidding is gated on it (live: a provider with
+   * is_active=false gets `403 Only approved, active providers can bid on
+   * jobs.`), so activation stays an admin decision and no screen may set it —
+   * the edit form no longer offers a control for it (see also
+   * updateProviderAvailability).
    */
-  updateProviderProfile: (data: { bio: string; hourly_rate: number; provider_type: string; is_available: boolean; is_active: boolean; service_radius: number }) =>
+  updateProviderProfile: (data: { bio: string; hourly_rate: number; provider_type: string; is_available: boolean; service_radius: number }) =>
     api.patch<ProviderProfile>('/api/v1/providers/profile', data),
+  /**
+   * PATCH /api/v1/providers/profile with ONLY `service_radius` — the "Service
+   * radius" control on the provider profile screen. ProviderProfileUpdateRequest
+   * has no required field (live-spec verified), so a single-field PATCH is legal
+   * and leaves bio/hourly_rate/provider_type/is_available untouched.
+   *
+   * The schema is an INTEGER in 1..30 (live 2026-10-15: 31 -> `less_than_equal
+   * 30`, 0 and -3 -> `greater_than_equal 1`, 7.5 -> `int_from_float`, while 5, 8
+   * and 30 all return 200) — callers validate with isValidServiceRadius() from
+   * lib/nearbyJobs. 200 returns the COMPLETE ProviderProfile, which the caller
+   * seeds into its cache. JSON, Bearer auto-attached.
+   */
+  updateProviderServiceRadius: (serviceRadius: number) =>
+    api.patch<ProviderProfile>('/api/v1/providers/profile', { service_radius: serviceRadius }),
+  /**
+   * GET /api/v1/providers/me/nearby-jobs — the provider's OPEN-JOB FEED: every
+   * open job inside the provider's own service radius, the ones matching the
+   * provider's active skills first and each group closest first (server order;
+   * lib/nearbyJobs.sortNearbyJobs re-applies it locally after every change).
+   *
+   * Query (`query` is built by lib/nearbyJobs.buildNearbyJobsQuery and is ''
+   * when nothing is set): radius_km (number > 0 — it can only NARROW the
+   * provider's own radius, the server caps it), repeatable service_id, limit
+   * (1..200, default 50). Returns a bare ARRAY of NearbyJobResponse.
+   *
+   * 400 is a REAL, EXPECTED state, not a bug: when the provider is not visible
+   * for nearby jobs the backend answers 400 with "You are not visible for
+   * nearby jobs. Save an address with coordinates, and make sure your provider
+   * profile is active and approved." — the feed turns that into an onboarding
+   * checklist (lib/nearbyJobs.classifyNearbyFailure) instead of an error.
+   * 401 is handled by the shared client's refresh + single replay; 403 means a
+   * non-provider account reached a provider endpoint. Bearer auto-attached.
+   */
+  getNearbyJobs: (query = '') =>
+    api.get<NearbyJob[]>(`/api/v1/providers/me/nearby-jobs${query}`),
+  /**
+   * GET /api/v1/providers/me/skills — the provider's own skills as a bare
+   * ARRAY of ProviderSkill. Each row carries the service/category it belongs to
+   * (service_id + service_title, category_id + category_name) and its own
+   * is_active flag, which is what the nearby-jobs feed counts for its
+   * non-blocking "add your skills" nudge. Protected endpoint, Bearer
+   * auto-attached.
+   */
+  getProviderSkills: () => api.get<ProviderSkill[]>('/api/v1/providers/me/skills'),
+  /**
+   * POST /api/v1/providers/me/skills — adds one skill. Body per the live
+   * schema is ONLY `service_id` (integer, required): the backend then applies
+   * its own defaults (skill_type PRIMARY, years_of_experience 0, is_active
+   * true) and 201-returns the COMPLETE ProviderSkillResponse, which is the
+   * server truth the caller adopts — never a locally-guessed row. Confirmed
+   * responses: 409 {"detail":"You already have this service as a skill."} for a
+   * service the provider already has, 404 {"detail":"Service not found."} for
+   * an id that does not exist, 422 detail[] (loc [body, service_id], "Field
+   * required") for a missing id. Protected endpoint, Bearer auto-attached by
+   * the shared instance (silent refresh on 401).
+   */
+  createProviderSkill: (payload: ProviderSkillCreatePayload) =>
+    api.post<ProviderSkill>('/api/v1/providers/me/skills', payload),
+  /**
+   * GET /api/v1/providers/me/skills/{skill_id} — one skill the provider owns.
+   * The live list endpoint returns the identical shape, so no screen in this
+   * app needs this read (the list is always loaded first and carries every
+   * field); it exists so the client mirrors the documented contract, and 404
+   * {"detail":"Skill not found."} is its only error case. Bearer auto-attached.
+   */
+  getProviderSkill: (skillId: number) =>
+    api.get<ProviderSkill>(`/api/v1/providers/me/skills/${skillId}`),
+  /**
+   * PATCH /api/v1/providers/me/skills/{skill_id} — edits ONE skill. The live
+   * endpoint accepts skill_type, years_of_experience (0..80) and is_active;
+   * unknown keys are ignored and an empty body is a 200 no-op, so callers must
+   * send exactly the field they mean to change. This app sends ONLY is_active
+   * (the ACTIVE/INACTIVE toggle); provider-profile `is_active` is never sent
+   * from anywhere in the app. 200 returns the full updated
+   * ProviderSkillResponse (server truth). 404 when the skill is gone. Bearer
+   * auto-attached.
+   */
+  updateProviderSkill: (skillId: number, payload: ProviderSkillUpdatePayload) =>
+    api.patch<ProviderSkill>(`/api/v1/providers/me/skills/${skillId}`, payload),
+  /**
+   * DELETE /api/v1/providers/me/skills/{skill_id} — removes one skill. 204 NO
+   * CONTENT (nothing to parse); deleting the same skill twice answers 404
+   * {"detail":"Skill not found."}. The caller drops the row only after this
+   * succeeds (no optimistic removal) and re-reads the list from the server.
+   * Protected endpoint, Bearer auto-attached (silent refresh on 401).
+   */
+  deleteProviderSkill: (skillId: number) =>
+    api.delete<void>(`/api/v1/providers/me/skills/${skillId}`),
   /**
    * PATCH /api/v1/providers/profile with ONLY `is_available` — the availability
    * control on /profile/professional uses this instead of updateProviderProfile
@@ -596,10 +725,12 @@ export const authApi = {
    *   POST /api/v1/jobs/{job_id}/bids/{bid_id}/reject  rejectBid (BidResponse)
    *                                                       — the client's decline
    *
-   * The rest of the tag — Withdraw Bid and GET /api/v1/bids/mine — belongs to
-   * the withdraw and my-bids flows, which are separate tasks. Deliberately NOT
-   * wrapped here rather than left as dead callable code, so nothing can call an
-   * unbuilt flow by accident. Both are enumerated in the task reports so the
+   *   GET  /api/v1/bids/mine                   listMyBids  — provider, ALL jobs
+   *
+   * Withdraw Bid (POST /api/v1/jobs/{job_id}/bids/{bid_id}/withdraw) is the one
+   * operation of the tag that is still NOT wrapped here: its flow is a separate
+   * task. Leaving it out entirely — rather than wrapping it for nobody to call —
+   * is deliberate, and it is enumerated in the task reports so the
    * reconnaissance is not lost.
    *
    * AUTH: both operations are PROTECTED (live OpenAPI security:
@@ -782,6 +913,52 @@ export const authApi = {
       return Promise.reject(new Error(`getMyBid: invalid job id ${String(jobId)}`));
     }
     return api.get<BidResponse>(`/api/v1/jobs/${jobId}/bids/mine`);
+  },
+
+  /**
+   * GET /api/v1/bids/mine — "List My Bids": EVERY bid this provider has placed,
+   * on any job. This is the provider's own list (the My Bids tab), not the
+   * client-side offers of one job (listJobBids) and not this provider's single
+   * bid on one job (getMyBid).
+   *
+   * CONTRACT (live OpenAPI + measured):
+   *   - query `status` (BidStatus | null), `limit` (1..100, default 20),
+   *     `offset` (>= 0, default 0)
+   *   - 200 → a BARE ARRAY of BidResponse. There is no envelope and no total, so
+   *     paging is "a page shorter than the limit ends the list" — nothing else
+   *     can tell the caller it reached the end.
+   *   - the ITEM CARRIES NO JOB INFO beyond `job_id`: the job's title is a
+   *     second request, which the caller makes lazily and caches (see
+   *     lib/myBids.createJobTitleCache / jobIdsNeedingTitle).
+   *
+   * MEASURED LIVE (2026-10-16; this account has no bid of its own, so these are
+   * the answers that do not need one):
+   *
+   *   no token             401 {"detail":"Not authenticated"}
+   *   status=<any of the five>  200 []   (PENDING, ACCEPTED, REJECTED, WITHDRAWN,
+   *                                       EXPIRED all accepted)
+   *   status=pending       422 enum on ["query","status"] — the value is
+   *                        CASE-SENSITIVE, so only the enum's own upper case is
+   *                        ever sent (lib/myBids.buildMyBidsQuery)
+   *   status=BOGUS         422 enum, listing the five expected values
+   *   limit=0              422 greater_than_equal 1
+   *   limit=101            422 less_than_equal 100
+   *   limit=abc            422 int_parsing
+   *   limit=1 / 100        200 []
+   *   offset=-1            422 greater_than_equal 0
+   *   offset=0 / 500       200 []   — past the end is an EMPTY PAGE, not an error
+   *
+   * The builder omits anything out of range rather than sending it, so the app
+   * cannot provoke those 422s; a 422 that reaches the caller is therefore a bug
+   * in the query, not a user error, and its `detail` is surfaced verbatim.
+   *
+   * NOT VERIFIED LIVE: a NON-EMPTY array (every query on this database answered
+   * `[]`, because the only job owned by another client has a closed bidding
+   * window and no bid row exists anywhere). The item shape is the same
+   * BidResponse the other bid endpoints return and is read from the live schema.
+   */
+  listMyBids: (params: ListMyBidsParams = {}) => {
+    return api.get<BidResponse[]>(`/api/v1/bids/mine${buildMyBidsQuery(params)}`);
   },
 
   /**

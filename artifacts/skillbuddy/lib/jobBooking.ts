@@ -294,6 +294,46 @@ export function bookingTypeFor(kind: BookingKind): JobBookingType {
   return kind === 'multi_day' ? 'MULTI_DAY' : 'ONE_TIME';
 }
 
+/* ── The request-type LOCK for long-term bookings ─────────────────────────── */
+
+/** The wizard's form-level request type (the API value is derived from it). */
+export type FormRequestType = 'urgent' | 'regular';
+
+export interface LockedBookingChoice {
+  kind: BookingKind;
+  requestType: FormRequestType;
+  /** true when the incoming choice was URGENT on a multi-day booking. */
+  switched: boolean;
+}
+
+/**
+ * Multi-day bookings are REGULAR only, and the LIVE backend enforces it at
+ * create time (HTTP 422 "Multiple-day bookings only support Regular bidding, not
+ * Urgent", captured 2026-10-14). This is that rule in one place: switching to
+ * Long-term while Urgent is selected answers `switched: true` and hands back
+ * 'regular', so the screen can correct the choice AND tell the user once. Every
+ * other combination is passed through untouched — URGENT + ONE_TIME stays
+ * urgent.
+ */
+export function resolveRequestTypeForBooking(
+  kind: BookingKind,
+  requestType: FormRequestType
+): LockedBookingChoice {
+  if (kind === 'multi_day' && requestType === 'urgent') {
+    return { kind, requestType: 'regular', switched: true };
+  }
+  return { kind, requestType, switched: false };
+}
+
+/**
+ * May this request type be OFFERED for this booking kind? Only multi-day +
+ * urgent is refused, so the Urgent card is disabled (and announced as disabled)
+ * exactly then, while the Regular card is always available.
+ */
+export function isRequestTypeAllowed(kind: BookingKind, requestType: FormRequestType): boolean {
+  return !(kind === 'multi_day' && requestType === 'urgent');
+}
+
 /** Keep the stepper inside the product bounds (and integers, as sent). */
 export function clampExpectedHours(hours: number): number {
   if (!Number.isFinite(hours)) return MIN_EXPECTED_HOURS;

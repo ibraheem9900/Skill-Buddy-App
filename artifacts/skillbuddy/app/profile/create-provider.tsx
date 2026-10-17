@@ -19,6 +19,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
+import { SERVICE_RADIUS_MAX, SERVICE_RADIUS_MIN } from '@/lib/nearbyJobs';
 
 /**
  * "Become a Provider" — one-time creation (POST /api/v1/providers/profile).
@@ -26,12 +27,15 @@ import BackButton from '@/components/BackButton';
  * editing an existing profile (that's PATCH — separate task).
  * Validation mirrors the live schema: bio ≤500, hourly_rate ≥0 (number on
  * the wire), provider_type ≤20 chars from the INDIVIDUAL/COMPANY/AGENCY set
- * (server has no enum — matches web app convention), service_radius 1–100.
+ * (server has no enum — matches web app convention), service_radius 1–30
+ * (ProviderProfileCreateRequest, live-verified 2026-10-15 — the same integer
+ * 1..30 the update schema takes, so the stepper cannot offer a value the
+ * backend refuses; the shared bounds live in lib/nearbyJobs).
  */
 const PROVIDER_TYPES = ['INDIVIDUAL', 'COMPANY', 'AGENCY'] as const;
 const BIO_MAX = 500;
-const RADIUS_MIN = 1;
-const RADIUS_MAX = 100;
+const RADIUS_MIN = SERVICE_RADIUS_MIN;
+const RADIUS_MAX = SERVICE_RADIUS_MAX;
 
 const FIELD_TO_STATE: Record<string, string> = {
   bio: 'bio',
@@ -209,9 +213,9 @@ export default function CreateProviderProfileScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator size="small" color="#FFF" />
+              <ActivityIndicator size="small" color={c.primaryForeground} />
             ) : (
-              <Text style={styles.submitText}>{t('cp_submit')}</Text>
+              <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('cp_submit')}</Text>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -239,5 +243,5 @@ const styles = StyleSheet.create({
   stepperBtn: { width: 40, height: 40, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   stepperValue: { fontFamily: 'Manrope_700Bold', fontSize: 16, minWidth: 70, textAlign: 'center' },
   submitBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8, marginBottom: 30 },
-  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
 });

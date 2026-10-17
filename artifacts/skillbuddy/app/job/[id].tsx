@@ -7,6 +7,7 @@ import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { planTouchesJob, subscribeMoneyRefresh } from '@/lib/moneyEvents';
 import BackButton from '@/components/BackButton';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
@@ -156,6 +157,20 @@ export default function BiddingDashboardScreen() {
       if (!isServer) return;
       void refetchServerJob();
     }, [isServer, refetchServerJob])
+  );
+
+  // A money event naming THIS job (payment.pending/succeeded/failed/disputed/
+  // refunded, invoice.created/overdue, escrow.*) re-reads it, so the status on
+  // screen is always the server's own — never one inferred from the event name.
+  // A resync (reconnect / app resume) has no id and makes every open job
+  // re-read its own.
+  useEffect(
+    () =>
+      subscribeMoneyRefresh('jobDetail', (plan) => {
+        if (!planTouchesJob(plan, numericId)) return;
+        void refetchServerJob();
+      }),
+    [numericId, refetchServerJob]
   );
 
   // ── Publish a DRAFT job (POST /api/v1/jobs/{job_id}/publish) ─────────────
@@ -2058,7 +2073,7 @@ const styles = StyleSheet.create({
   noBidsSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19 },
   noBidsActions: { flexDirection: 'row', gap: 10, marginTop: 10, width: '100%' },
   restartBtnFull: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10 },
-  restartFullText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+  restartFullText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 },
   sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
   viewAll: { fontFamily: 'Manrope_500Medium', fontSize: 12 },

@@ -58,6 +58,8 @@ import {
   type BidFieldName,
 } from '@/lib/bid';
 import type { BidResponse } from '@/types';
+import useNearbyJobGone from '@/hooks/useNearbyJobGone';
+import { markNearbyJobGone } from '@/lib/nearbyAvailability';
 
 /**
  * Place Your Bid / Your Bid — the provider's own bid on ONE job.
@@ -224,9 +226,22 @@ export default function PlaceBidScreen() {
   }, [myBid, router]);
 
   /** Reaching zero is not a client-side verdict — re-read the job. */
+  /**
+   * A job that left the provider's near-by feed (`job.nearby_closed`: taken,
+   * cancelled, or no longer OPEN) arriving on the feed while this screen is
+   * open. The feed remembers it in lib/nearbyAvailability, which is what this
+   * flag reads — the job's own GET can lag behind the event. The form is
+   * disabled rather than unmounted, so anything already typed stays on screen.
+   */
+  const nearbyGone = useNearbyJobGone(numericId);
+
   const handleBiddingExpired = useCallback(() => {
+    // The window ending here is the same fact the feed acts on: the job can no
+    // longer be bid on, so it is marked gone for this screen too. The re-read
+    // below still decides what the job itself says.
+    if (numericId !== null) markNearbyJobGone(numericId);
     void refetch();
-  }, [refetch]);
+  }, [numericId, refetch]);
 
   /* ------------------------------------------------------------------ submit */
 
@@ -918,6 +933,25 @@ export default function PlaceBidScreen() {
             />
           ) : null}
 
+          {nearbyGone ? (
+            <View
+              style={[
+                styles.closedBanner,
+                { backgroundColor: c.urgentLight, borderColor: c.urgent, alignItems: 'flex-start' },
+              ]}
+            >
+              <Feather name="alert-circle" size={14} color={c.urgent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.closedText, { color: c.urgent }]}>
+                  {t('nearby_unavailable_title')}
+                </Text>
+                <Text style={[styles.closedText, { color: c.urgent }]}>
+                  {t('nearby_unavailable_sub')}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           {myBidRefreshFailed ? (
             <View style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
               <Feather name="alert-circle" size={12} color={c.mutedForeground} />
@@ -986,9 +1020,13 @@ export default function PlaceBidScreen() {
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
-            style={[styles.submit, { backgroundColor: c.primary }, bidSubmitting && styles.submitBusy]}
+            style={[
+              styles.submit,
+              { backgroundColor: c.primary },
+              (bidSubmitting || nearbyGone) && styles.submitBusy,
+            ]}
             onPress={() => void submit()}
-            disabled={bidSubmitting}
+            disabled={bidSubmitting || nearbyGone}
             activeOpacity={0.85}
           >
             {bidSubmitting ? (

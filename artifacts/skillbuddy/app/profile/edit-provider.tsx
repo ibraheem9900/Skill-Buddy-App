@@ -21,25 +21,43 @@ import { useLanguage } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import { useProviderProfile } from '@/hooks/useProviderProfile';
 import BackButton from '@/components/BackButton';
+import {
+  SERVICE_RADIUS_MAX,
+  SERVICE_RADIUS_MIN,
+  normalizeServiceRadius,
+} from '@/lib/nearbyJobs';
 
 /**
  * Edit provider profile (PATCH /api/v1/providers/profile) — reached from the
  * provider dashboard's Edit button. Pre-filled from the cached provider
- * profile; sends the FULL body (all six fields, per the PATCH schema).
- * hourly_rate: number on the wire, string back in the 200 response (the
- * response replaces the cache as source of truth — see seedProfile).
+ * profile; sends the editable fields per the PATCH schema. hourly_rate: number
+ * on the wire, string back in the 200 response (the response replaces the cache
+ * as source of truth — see seedProfile).
+ *
+ * SERVICE RADIUS — the provider's "how far do I work" control. The bound comes
+ * from the LIVE schema (ProviderProfileUpdateRequest.service_radius: integer
+ * 1..30, verified 2026-10-15: 30 -> 200, 31 -> `less_than_equal 30`, 0 and -3 ->
+ * `greater_than_equal 1`, 7.5 -> `int_from_float`), so the stepper can never
+ * offer a value the backend would refuse, and the hint states what the radius
+ * means for the near-by job feed.
+ *
+ * `is_active` IS NOT EDITABLE AND NEVER SENT. It is the backend's activation
+ * flag (bidding is gated on it: a provider with is_active=false gets `403 Only
+ * approved, active providers can bid on jobs.`), so activation stays an admin
+ * decision. The toggle that used to PATCH it was removed; the row is now an
+ * informational line that shows the state without offering a control.
  */
 const PROVIDER_TYPES = ['INDIVIDUAL', 'COMPANY', 'AGENCY'] as const;
 const BIO_MAX = 500;
-const RADIUS_MIN = 1;
-const RADIUS_MAX = 100;
+const RADIUS_MIN = SERVICE_RADIUS_MIN;
+const RADIUS_MAX = SERVICE_RADIUS_MAX;
 
+/** Error keys the API's 422 detail[] maps onto (is_active is no longer sent). */
 const FIELD_TO_STATE: Record<string, string> = {
   bio: 'bio',
   hourly_rate: 'rate',
   provider_type: 'providerType',
   is_available: 'isAvailable',
-  is_active: 'isActive',
   service_radius: 'radius',
 };
 
@@ -58,8 +76,7 @@ export default function EditProviderProfileScreen() {
   );
   const [providerType, setProviderType] = useState<string>(profile?.provider_type ?? 'INDIVIDUAL');
   const [isAvailable, setIsAvailable] = useState(profile?.is_available ?? true);
-  const [isActive, setIsActive] = useState(profile?.is_active ?? true);
-  const [radius, setRadius] = useState(profile?.service_radius ?? 25);
+  const [radius, setRadius] = useState(() => normalizeServiceRadius(profile?.service_radius));
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -83,13 +100,13 @@ export default function EditProviderProfileScreen() {
     if (!validate()) return;
     setLoading(true);
     try {
-      // FULL body per the PATCH schema — including untouched fields.
+      // The editable fields, per the PATCH schema. `is_active` is deliberately
+      // absent: activation is the backend's decision (see the header note).
       const { data } = await authApi.updateProviderProfile({
         bio: bio.trim(),
         hourly_rate: Number(rate.replace(',', '.')),
         provider_type: providerType,
         is_available: isAvailable,
-        is_active: isActive,
         service_radius: radius,
       });
       seedProfile(data); // server response IS the new cached state
@@ -161,7 +178,7 @@ export default function EditProviderProfileScreen() {
         value={value}
         onValueChange={(v) => { set(v); if (fieldErrors[errorKey]) setFieldErrors((p) => { const n = { ...p }; delete n[errorKey]; return n; }); }}
         trackColor={{ false: c.border, true: c.primary }}
-        thumbColor="#FFF"
+        thumbColor={c.primaryForeground}
       />
     </View>
   );
@@ -201,10 +218,31 @@ export default function EditProviderProfileScreen() {
           </View>
 
           {renderToggle(t('ep_available'), isAvailable, setIsAvailable, 'isAvailable', t('ep_available_hint'))}
-          {renderToggle(t('ep_active'), isActive, setIsActive, 'isActive', t('ep_active_hint'))}
+
+          {/*
+            * Activation is shown, never edited: there is no control here because
+            * the app never PATCHes is_active (an admin activates the profile).
+            */}
+          <View style={[styles.toggleCard, { backgroundColor: c.card, borderColor: c.border }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.label, { color: c.text, marginBottom: 2 }]}>{t('ep_active')}</Text>
+              <Text style={[styles.toggleHint, { color: c.mutedForeground }]}>{t('ep_active_hint')}</Text>
+            </View>
+            <View style={styles.stateRow}>
+              <View
+                style={[
+                  styles.stateDot,
+                  { backgroundColor: profile?.is_active ? c.success : c.warning },
+                ]}
+              />
+              <Text style={[styles.stateText, { color: c.mutedForeground }]}>
+                {profile?.is_active ? t('prov_status_active') : t('prov_status_inactive')}
+              </Text>
+            </View>
+          </View>
 
           <View>
-            <Text style={[styles.label, { color: c.text }]}>{t('cp_radius', { n: radius })}</Text>
+            <Text style={[styles.label, { color: c.text }]}>{t('nearby_service_radius')}</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
                 style={[styles.stepperBtn, { borderColor: c.border }]} onPress={() => setRadius((r) => Math.max(RADIUS_MIN, r - 1))}
@@ -220,6 +258,12 @@ export default function EditProviderProfileScreen() {
                 <Feather name="plus" size={16} color={c.text} />
               </TouchableOpacity>
             </View>
+            <Text style={[styles.toggleHint, { color: c.mutedForeground, marginTop: 6 }]}>
+              {t('nearby_radius_helper', { n: radius })}
+            </Text>
+            <Text style={[styles.toggleHint, { color: c.mutedForeground, marginTop: 2 }]}>
+              {t('ep_radius_range', { min: RADIUS_MIN, max: RADIUS_MAX })}
+            </Text>
             {fieldErrors.radius ? <Text style={[styles.errText, { color: c.destructive }]}>{fieldErrors.radius}</Text> : null}
           </View>
 
@@ -236,9 +280,9 @@ export default function EditProviderProfileScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator size="small" color="#FFF" />
+              <ActivityIndicator size="small" color={c.primaryForeground} />
             ) : (
-              <Text style={styles.submitText}>{t('ep_submit')}</Text>
+              <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('ep_submit')}</Text>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -263,9 +307,12 @@ const styles = StyleSheet.create({
   stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   stepperBtn: { width: 40, height: 40, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   stepperValue: { fontFamily: 'Manrope_700Bold', fontSize: 16, minWidth: 70, textAlign: 'center' },
+  stateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  stateDot: { width: 8, height: 8, borderRadius: 4 },
+  stateText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   errText: { fontFamily: 'Manrope_500Medium', fontSize: 12, marginTop: 6 },
   errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 12 },
   errorBannerText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 13 },
   submitBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8, marginBottom: 30 },
-  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' },
+  submitText: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
 });

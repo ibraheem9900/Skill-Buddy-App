@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,9 +19,13 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import JobCard from '@/components/JobCard';
 import EmptyState from '@/components/EmptyState';
+import NearbyJobsFeed from '@/components/NearbyJobsFeed';
+import MyBidsFeed from '@/components/MyBidsFeed';
 import { JOB_STATUS_VALUES, jobStatusLabelKey } from '@/lib/jobList';
 import useJobList, { hasActiveFilters } from '@/hooks/useJobList';
+import { useRole } from '@/context/RoleContext';
 import type { JobApiStatus, JobListItem, JobRequestType } from '@/types';
+import type { TranslationKey } from '@/context/LanguageContext';
 
 /**
  * The client's job list, backed by GET /api/v1/jobs.
@@ -33,14 +37,29 @@ import type { JobApiStatus, JobListItem, JobRequestType } from '@/types';
  * Pagination is offset-based (limit 20), and a page shorter than the limit ends
  * the list — there is no total count to read (see hooks/useJobList).
  *
- * The provider-side view (Available / My Bids / Active) is intentionally gone:
- * GET /api/v1/jobs returns the authenticated user's own jobs, and there is no
- * endpoint that lists jobs open for bidding, so those controls had no real data
- * source. They will come back with the provider-jobs endpoint rather than
- * showing placeholders.
+ * The provider-side view has TWO tabs, each with a real source behind it:
+ *   Available  GET /api/v1/providers/me/nearby-jobs (components/NearbyJobsFeed)
+ *   My Bids    GET /api/v1/bids/mine                (components/MyBidsFeed)
+ * "Active" stays HIDDEN: no endpoint lists a provider's active jobs yet, and a
+ * chip that can only show an empty placeholder is worse than no chip.
+ *
+ * The client list below is untouched: with a CLIENT active role (or on the
+ * client tab) this screen is exactly what it was before.
  */
 
 const REQUEST_TYPES: JobRequestType[] = ['URGENT', 'REGULAR'];
+
+/** The provider's chips, in order. Only tabs with an endpoint behind them. */
+const PROVIDER_TABS: { key: ProviderTab; labelKey: TranslationKey }[] = [
+  { key: 'available', labelKey: 'nearby_tab_available' },
+  { key: 'myBids', labelKey: 'mybids_tab' },
+];
+
+/**
+ * The provider's own tabs: "Available" and "My Bids". Both have an endpoint they
+ * can fill. "Active" is deliberately NOT here — see the file header.
+ */
+type ProviderTab = 'available' | 'myBids';
 
 export default function JobsScreen() {
   const insets = useSafeAreaInsets();
@@ -48,6 +67,9 @@ export default function JobsScreen() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { activeRole } = useRole();
+  const [providerTab, setProviderTab] = useState<ProviderTab>('available');
+  const providerMode = activeRole === 'PROVIDER';
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
   const {
@@ -155,17 +177,59 @@ export default function JobsScreen() {
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, { color: c.text }]}>{t('jobs_title')}</Text>
-          <Text style={[styles.subtitle, { color: c.mutedForeground }]}>{t('jobs_my_jobs')}</Text>
+          <Text style={[styles.subtitle, { color: c.mutedForeground }]}>
+            {providerMode ? t('nearby_header_subtitle') : t('jobs_my_jobs')}
+          </Text>
         </View>
-        <TouchableOpacity
-          style={[styles.postBtn, { backgroundColor: c.primary }]}
-          onPress={() => router.push('/job/post' as any)}
-        >
-          <Feather name="plus" size={16} color={c.primaryForeground} />
-          <Text style={[styles.postBtnText, { color: c.primaryForeground }]}>{t('post_a_job')}</Text>
-        </TouchableOpacity>
+        {providerMode ? null : (
+          <TouchableOpacity
+            style={[styles.postBtn, { backgroundColor: c.primary }]}
+            onPress={() => router.push('/job/post' as any)}
+          >
+            <Feather name="plus" size={16} color={c.primaryForeground} />
+            <Text style={[styles.postBtnText, { color: c.primaryForeground }]}>{t('post_a_job')}</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
+      {providerMode ? (
+        <>
+          {/* The provider's tabs — see ProviderTab for why "Active" is absent. */}
+          <View style={[styles.filterBlock, { borderBottomColor: c.border }]}>
+            <View style={styles.filterRow}>
+              {PROVIDER_TABS.map(({ key, labelKey }) => {
+                const active = providerTab === key;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                    onPress={() => setProviderTab(key)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: active ? c.primaryForeground : c.mutedForeground },
+                      ]}
+                    >
+                      {t(labelKey)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Both feeds stay MOUNTED (the rules of hooks) and the `enabled` flag
+              decides which one performs requests — switching a chip therefore
+              keeps the other list's data for the way back. */}
+          {providerTab === 'available' ? (
+            <NearbyJobsFeed enabled bottomInset={TAB_HEIGHT + insets.bottom} />
+          ) : (
+            <MyBidsFeed enabled bottomInset={TAB_HEIGHT + insets.bottom} />
+          )}
+        </>
+      ) : (
+        <>
       {/* Status filter — every documented JobStatus value, nothing invented. */}
       <View style={[styles.filterBlock, { borderBottomColor: c.border }]}>
         <ScrollView
@@ -311,6 +375,8 @@ export default function JobsScreen() {
             </Animated.View>
           )}
         />
+      )}
+        </>
       )}
     </View>
   );

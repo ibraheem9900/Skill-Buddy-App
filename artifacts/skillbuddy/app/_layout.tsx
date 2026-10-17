@@ -14,11 +14,16 @@ import {
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { RealtimeProvider } from '@/context/RealtimeContext';
 import { BookmarkProvider } from '@/context/BookmarkContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { FilterProvider } from '@/context/FilterContext';
 import { AlertModalProvider } from '@/context/AlertModalContext';
+import { BidResultsProvider, useBidResults } from '@/context/BidResultsContext';
+import { MoneyEventsProvider } from '@/context/MoneyEventsContext';
+import BidResultBanner from '@/components/BidResultBanner';
+import MoneyEventBanner from '@/components/MoneyEventBanner';
 import NavigationLoaderOverlay from '@/components/NavigationLoaderOverlay';
 import { LanguageProvider, useLanguage } from '@/context/LanguageContext';
 
@@ -67,9 +72,14 @@ function RouteGate() {
   return null;
 }
 
+/** One bid-result banner is about 104 px tall; the money banner is stacked
+ *  under it rather than on top of it when both are on screen at once. */
+const BID_BANNER_STACK_OFFSET = 104;
+
 function RootLayoutNav() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  const { banner: bidBanner } = useBidResults();
   return (
     <>
       <RouteGate />
@@ -126,6 +136,12 @@ function RootLayoutNav() {
         />
       </Stack>
       <NavigationLoaderOverlay />
+      {/* The provider's live bid result, above every screen. Mounted here so it
+          survives navigation; it renders nothing unless a result is announced. */}
+      <BidResultBanner />
+      {/* Money events (payment/invoice/escrow/wallet), same corner: lifted below
+          the bid-result banner when that one is showing. */}
+      <MoneyEventBanner topOffset={bidBanner ? BID_BANNER_STACK_OFFSET : 0} />
     </>
   );
 }
@@ -150,10 +166,21 @@ export default function RootLayout() {
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
+              {/* Realtime lives inside AuthProvider: it starts on login and
+                  stops on logout / account switch. Renders nothing. */}
+              <RealtimeProvider>
               <RoleProvider>
               <FilterProvider>
               <AlertModalProvider>
               <LanguageProvider>
+              {/* One global handler for the provider's bid.accepted / bid.rejected.
+                  Inside LanguageProvider (the banner is translated) and inside
+                  RoleProvider (only provider mode acts). Renders nothing. */}
+              <BidResultsProvider>
+              {/* The money side of the realtime layer (payment.*, invoice.*,
+                  escrow.*, wallet.credit_earned): one handler for the app, so it
+                  sits beside the bid-result handler. Renders nothing itself. */}
+              <MoneyEventsProvider>
               <BookmarkProvider>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
@@ -161,10 +188,13 @@ export default function RootLayout() {
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </BookmarkProvider>
+              </MoneyEventsProvider>
+              </BidResultsProvider>
               </LanguageProvider>
               </AlertModalProvider>
               </FilterProvider>
               </RoleProvider>
+              </RealtimeProvider>
             </AuthProvider>
           </QueryClientProvider>
         </ThemeProvider>

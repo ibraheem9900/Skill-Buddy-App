@@ -107,35 +107,12 @@ export function minutesToLabel(minutes: number): string {
   const suffix = h24 >= 12 ? 'PM' : 'AM';
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
   return `${h12}:${pad2(m)} ${suffix}`;
-}
-
-/** '2:30 PM' -> minutes since local midnight. Null when unreadable. */
-export function labelToMinutes(label: string | null | undefined): number | null {
-  if (typeof label !== 'string') return null;
-  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(label.trim());
-  if (!match) return null;
-  const hour12 = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hour12 < 1 || hour12 > 12 || minutes > 59) return null;
-  let h = hour12 % 12;
-  if (/PM/i.test(match[3])) h += 12;
-  return h * 60 + minutes;
-}
-
-/** The selectable 30-minute slots (local minutes since midnight). */
+}/** The selectable 30-minute slots (local minutes since midnight). */
 export function slotMinutes(): number[] {
   const out: number[] = [];
   for (let m = SLOT_START_MINUTES; m <= SLOT_END_MINUTES; m += SLOT_STEP_MINUTES) out.push(m);
   return out;
-}
-
-/** Round a local time down to the nearest slot boundary. */
-export function roundToSlot(minutes: number): number {
-  const clamped = Math.min(Math.max(minutes, SLOT_START_MINUTES), SLOT_END_MINUTES);
-  return clamped - (clamped % SLOT_STEP_MINUTES);
-}
-
-/**
+}/**
  * LOCAL day + local minutes -> ISO 8601 UTC ('...Z').
  *
  * The picker works in device-local terms, so the value is assembled as a local

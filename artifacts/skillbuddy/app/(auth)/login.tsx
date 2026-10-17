@@ -30,17 +30,24 @@ function validateEmail(email: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Sign-IN validation is presence only.
+ *
+ * The strength policy (length + upper/lower/digit) belongs to the screens that
+ * SET a password (signup, reset, change). Enforcing it here locks out every
+ * existing account whose password predates the policy — including the live test
+ * account behind the whole probe suite — even though the backend accepts it, so
+ * the only authority on a sign-in password is the backend's own answer.
+ */
 function validatePassword(pw: string): string | undefined {
   if (!pw) return 'onb_err_password_required';
-  if (pw.length < 8) return 'onb_err_password_short';
-  if (!/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[0-9]/.test(pw)) return 'onb_err_password_weak';
   return undefined;
 }
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors: c } = useTheme();
+  const { colors: c, theme } = useTheme();
   const { t } = useLanguage();
   const { login } = useAuth();
 
@@ -132,7 +139,7 @@ export default function LoginScreen() {
 
         {/* Standalone logo — no background box */}
         <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.logoWrap}>
-          <LogoImage variant={c.background === '#0A0D0D' ? 'light' : 'green'} height={40} animateOnMount={false} />
+          <LogoImage variant={theme === 'dark' ? 'light' : 'green'} height={40} animateOnMount={false} />
         </Animated.View>
 
         {/* Title + subtitle — matching web copy */}
@@ -199,9 +206,9 @@ export default function LoginScreen() {
             activeOpacity={0.85}
           >
             {loading ? (
-              <ActivityIndicator color="#FFF" size="small" />
+              <ActivityIndicator color={c.primaryForeground} size="small" />
             ) : (
-              <Text style={styles.primaryBtnText}>{t('onb_login_signin')}</Text>
+              <Text style={[styles.primaryBtnText, { color: c.primaryForeground }]}>{t('onb_login_signin')}</Text>
             )}
           </TouchableOpacity>
         </Animated.View>
@@ -278,7 +285,7 @@ const styles = StyleSheet.create({
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
   errorText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   primaryBtn: { borderRadius: 28, paddingVertical: 16, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
-  primaryBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: '#FFF' },
+  primaryBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, marginBottom: 20 },
   divLine: { flex: 1, height: 1 },
   divText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },

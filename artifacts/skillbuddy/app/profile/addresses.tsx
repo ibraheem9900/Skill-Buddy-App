@@ -18,6 +18,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import useAddresses, { parseCoordinate } from '@/hooks/useAddresses';
+import { markNearbyStale } from '@/lib/nearbyStale';
+import { addressLocationStatus } from '@/lib/providerAddress';
 import type { AddressResponse } from '@/types';
 
 /** Formats an ISO date-time for display — never renders the raw string. */
@@ -47,6 +49,15 @@ const addressTitle = (a: AddressResponse) => {
  * here; is_default gets a star + badge. Create/Update/Delete Address (POST/
  * PUT/DELETE siblings, separate tasks) sync through the hook's setAddress()/
  * clear(), so this screen reflects them immediately.
+ *
+ * PROVIDER VISIBILITY: the card carries a "Location saved" / "Location missing"
+ * status derived from the REAL latitude/longitude (lib/providerAddress, the same
+ * parseCoordinate the rest of the app uses) — never from whether a text field
+ * was filled in. A provider without coordinates is invisible to the nearby feed
+ * (verified live: GET /providers/me/nearby-jobs → 400 "You are not visible for
+ * nearby jobs..."), which is why deleting the only address gets the stronger,
+ * provider-specific confirmation below, and why the nearby feed is marked stale
+ * after a confirmed delete.
  */
 export default function AddressesScreen() {
   const insets = useSafeAreaInsets();
@@ -55,6 +66,10 @@ export default function AddressesScreen() {
   const { user } = useAuth();
   const { status, address, errorMessage, load, refresh, remove } = useAddresses();
   const [removing, setRemoving] = useState(false);
+  /** Providers lose their nearby feed when the last address goes — say so. */
+  const isProvider = Array.isArray(user?.roles) && user.roles.includes('PROVIDER');
+  /** Derived from real coordinates, not from the saved text fields. */
+  const locationSaved = addressLocationStatus(address) === 'saved';
 
   /** Destructive removal from the list — confirm first (no undo); the row
    * drops ONLY after the confirmed 204 (no optimistic removal). 422 →
@@ -63,7 +78,12 @@ export default function AddressesScreen() {
    * per the hook's contract, never guessed client-side. */
   const confirmRemove = () => {
     if (!address) return;
-    Alert.alert(t('addr_del_title'), t('addr_del_msg'), [
+    // The provider-specific sentence is the VERIFIED live consequence of having
+    // no address with coordinates; everyone else gets the plain confirmation.
+    const message = isProvider
+      ? `${t('provider_addr_delete_warning')}\n\n${t('addr_del_msg')}`
+      : t('addr_del_msg');
+    Alert.alert(t('addr_del_title'), message, [
       { text: t('action_cancel'), style: 'cancel' },
       {
         text: t('addr_del_confirm'),
@@ -74,6 +94,9 @@ export default function AddressesScreen() {
             const wasDefault = !!address.is_default;
             try {
               await remove(address.id);
+              // The provider's visibility inputs changed: the nearby feed must
+              // re-read (it will show its onboarding card once it does).
+              markNearbyStale();
               if (wasDefault) {
                 Alert.alert(t('addr_title'), t('addr_del_default_note'));
               }
@@ -124,7 +147,7 @@ export default function AddressesScreen() {
             onPress={() => router.push('/profile/add-address')}
             accessibilityLabel={t('addr_c_title')}
           >
-            <Feather name="plus" size={17} color="#FFF" />
+            <Feather name="plus" size={17} color={c.primaryForeground} />
           </TouchableOpacity>
         ) : (
           <View style={{ width: 40 }} />
@@ -174,7 +197,7 @@ export default function AddressesScreen() {
               style={[styles.emptyAddBtn, { backgroundColor: c.primary }]}
               onPress={() => router.push('/profile/add-address')}
             >
-              <Text style={styles.emptyAddText}>{t('addr_c_title')}</Text>
+              <Text style={[styles.emptyAddText, { color: c.primaryForeground }]}>{t('addr_c_title')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -185,8 +208,17 @@ export default function AddressesScreen() {
           >
           <View style={[styles.card, { backgroundColor: c.card, borderColor: address.is_default ? c.primary : c.border }]}>
             <View style={styles.cardHead}>
-              <View style={[styles.rowIcon, { backgroundColor: c.accent }]}>
-                <Feather name="map-pin" size={18} color={c.primary} />
+              <View
+                style={[
+                  styles.rowIcon,
+                  { backgroundColor: locationSaved ? c.successLight : c.accent },
+                ]}
+              >
+                <Feather
+                  name="map-pin"
+                  size={18}
+                  color={locationSaved ? c.success : c.mutedForeground}
+                />
               </View>
               <View style={styles.body}>
                 <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={2}>
@@ -237,6 +269,40 @@ export default function AddressesScreen() {
               ) : null;
             })()}
 
+            {/* Real-coordinate status: "saved" only when BOTH parsed values exist. */}
+            <View
+              style={[
+                styles.locRow,
+                {
+                  backgroundColor: locationSaved ? c.successLight : c.accent,
+                  borderColor: locationSaved ? c.success : c.border,
+                },
+              ]}
+            >
+              <Feather
+                name={locationSaved ? 'check-circle' : 'alert-circle'}
+                size={14}
+                color={locationSaved ? c.success : c.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.locTitle,
+                    { color: locationSaved ? c.success : c.mutedForeground },
+                  ]}
+                >
+                  {locationSaved
+                    ? t('provider_addr_location_saved')
+                    : t('provider_addr_location_missing')}
+                </Text>
+                <Text style={[styles.locSub, { color: c.mutedForeground }]}>
+                  {locationSaved
+                    ? t('provider_addr_location_saved_sub')
+                    : t('provider_addr_location_missing_sub')}
+                </Text>
+              </View>
+            </View>
+
             <View style={[styles.metaRow, { borderTopColor: c.border }]}>
               {address.created_at ? (
                 <Text style={[styles.metaText, { color: c.mutedForeground }]}>
@@ -270,7 +336,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
   addBtn: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   emptyAddBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, marginTop: 4 },
-  emptyAddText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+  emptyAddText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   card: {
     borderWidth: 1,
     borderRadius: 16,
@@ -292,6 +358,17 @@ const styles = StyleSheet.create({
   },
   defaultChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
   detailLine: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  locRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 12,
+  },
+  locTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  locSub: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2, lineHeight: 15 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, borderTopWidth: 1, paddingTop: 10 },
   metaText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   stateWrap: { alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 16, paddingVertical: 28, paddingHorizontal: 16 },

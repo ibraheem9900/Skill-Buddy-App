@@ -106,11 +106,4 @@ export function formatHourlyRate(raw: string | null | undefined, t: (k: Translat
   if (!Number.isFinite(n)) return t('prov_rate_unavailable');
   // Round to 2dp; cap absurd doc-example values by just formatting them.
   return `€${n.toFixed(2)}`;
-}
-
-export function formatAcceptanceRate(raw: number | null | undefined): string {
-  if (raw == null) return '—';
-  return `${raw}%`;
-}
-
-export default useProviderProfile;
+}export default useProviderProfile;

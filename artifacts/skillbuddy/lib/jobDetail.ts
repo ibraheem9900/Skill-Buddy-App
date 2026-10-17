@@ -15,21 +15,6 @@ import type { JobResponse, MilestoneStatus } from '@/types';
  * Milestone status — schema MilestoneStatus (12 values, spec order)
  * ------------------------------------------------------------------ */
 
-export const MILESTONE_STATUS_VALUES = [
-  'PENDING',
-  'IN_PROGRESS',
-  'ON_HOLD',
-  'BLOCKED',
-  'COMPLETED',
-  'CANCELLED',
-  'CANCELLED_BY_CLIENT',
-  'CANCELLED_BY_PROVIDER',
-  'DISPUTED_BY_CLIENT',
-  'DISPUTED_BY_PROVIDER',
-  'PROVIDER_NO_SHOW',
-  'CLIENT_NO_SHOW',
-] as const satisfies readonly MilestoneStatus[];
-
 export type MilestoneStatusLabelKey =
   | 'mst_pending'
   | 'mst_in_progress'
@@ -78,6 +63,28 @@ export function milestoneStatusLabelKey(
 export function parseIsoDate(value: string | null | undefined): Date | null {
   if (typeof value !== 'string' || value.trim().length === 0) return null;
   const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Parse a timestamp from the jobs API as the UTC instant the server means.
+ *
+ * VERIFIED LIVE (2026-10-14, jobs 2/3/4): POST action responses carry a proper
+ * UTC stamp ("2026-10-14T21:24:44.723087Z") while GET /api/v1/jobs/{job_id}
+ * returns the SAME clock digits with the timezone marker stripped — created_at,
+ * updated_at, bidding_ends_at and status_history all arrive as naive strings
+ * (e.g. "2026-10-14T21:24:49"; bidding_ends_at is exactly 180 minutes after
+ * created_at, so the digits are UTC). `new Date()` reads a marker-less stamp as
+ * DEVICE-LOCAL time, which would shift every deadline read from a GET by the
+ * device's whole UTC offset. Marker-less stamps are therefore parsed as UTC
+ * here — matching what the server demonstrably sends — while stamps that carry
+ * a zone marker are left to the platform, exactly as before.
+ */
+export function parseApiIsoUtc(value: string | null | undefined): Date | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  const raw = value.trim();
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const date = new Date(hasZone ? raw : `${raw}Z`);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -231,7 +238,10 @@ export function biddingDeadline(
   nowMs: number
 ): number | null {
   if (job.is_bidding_open !== true) return null;
-  const deadline = parseIsoDate(job.bidding_ends_at);
+  // parseApiIsoUtc, not parseIsoDate: GET returns bidding_ends_at WITHOUT the
+  // timezone marker (live-verified), and a device-local reading of those digits
+  // would move the countdown by the whole UTC offset. See the function's header.
+  const deadline = parseApiIsoUtc(job.bidding_ends_at);
   if (deadline) return deadline.getTime();
   const seconds = job.remaining_bidding_seconds;
   if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {

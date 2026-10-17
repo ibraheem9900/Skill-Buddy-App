@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -24,11 +24,31 @@ import AcceptBidSheet from '@/components/AcceptBidSheet';
 import RejectBidSheet from '@/components/RejectBidSheet';
 import BidOfferCard from '@/components/BidOfferCard';
 import { useJobDetail } from '@/hooks/useJobDetail';
-import { BIDS_POLL_MS, useJobBids } from '@/hooks/useJobBids';
+import { useJobBids } from '@/hooks/useJobBids';
+import { useJobBiddingRealtime } from '@/hooks/useJobBiddingRealtime';
+import { useOnRealtimeReconnect } from '@/context/RealtimeContext';
 import { useAcceptBid } from '@/hooks/useAcceptBid';
 import { useRejectBid } from '@/hooks/useRejectBid';
+import { useRestartJobTimer } from '@/hooks/useRestartJobTimer';
+import { useConvertJobToRegular } from '@/hooks/useConvertJobToRegular';
+import { useConvertJobToUrgent } from '@/hooks/useConvertJobToUrgent';
 import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
 import { isPaymentPending } from '@/lib/jobPayment';
+import { bidCreatedNoticeText } from '@/lib/jobBidsLive';
+import {
+  canRestartJobTimer,
+  isRestartNotAllowed,
+  restartTimerFailureMessage,
+} from '@/lib/jobRestartTimer';
+import {
+  canConvertJobToRegular,
+  canConvertJobToUrgent,
+  convertToRegularFailureMessage,
+  convertToUrgentFailureMessage,
+  isConvertNotAllowed,
+} from '@/lib/jobConvert';
+import { isJobActionRefused, type JobActionFailureKind } from '@/lib/jobAction';
+import { biddingOptionsModel, BIDDING_WINDOW_MINUTES, type BiddingOptionAction } from '@/lib/jobBiddingOptions';
 import {
   acceptBidFailureMessage,
   BID_SORT_IDS,
@@ -52,7 +72,7 @@ import {
   type BidLocale,
   type BidSortId,
 } from '@/lib/bid';
-import type { BidResponse } from '@/types';
+import type { BidResponse, JobResponse } from '@/types';
 
 /** The server's `recommended` block is already the top 3; this is a hard cap. */
 const RECOMMENDED_MAX = 3;
@@ -240,6 +260,57 @@ function ProviderSheet({
  * Chat/call, restart timer, convert and cancel belong to other tasks and have NO
  * button here — not even a disabled placeholder.
  */
+/**
+ * One action on the Bidding options card. While the window is still running the
+ * buttons are compact secondary actions; once it has ended they become the
+ * primary actions (filled with the theme's accent). A running request disables
+ * its siblings, and its own button swaps the icon for a spinner, so nothing can
+ * be double-submitted.
+ */
+function OptionActionButton({
+  label,
+  icon,
+  primary,
+  busy,
+  disabled,
+  onPress,
+  colors,
+}: {
+  label: string;
+  icon: keyof typeof Feather.glyphMap;
+  primary: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  colors: { accent: string; onAccent: string; border: string };
+}) {
+  const locked = disabled || busy;
+  return (
+    <TouchableOpacity
+      style={[
+        styles.optionAction,
+        primary
+          ? { backgroundColor: colors.accent, borderColor: colors.accent }
+          : { backgroundColor: 'transparent', borderColor: colors.border },
+        locked && !busy ? { opacity: 0.55 } : null,
+      ]}
+      onPress={onPress}
+      disabled={locked}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: locked, busy }}
+    >
+      {busy ? (
+        <ActivityIndicator size="small" color={primary ? colors.onAccent : colors.accent} />
+      ) : (
+        <Feather name={icon} size={14} color={primary ? colors.onAccent : colors.accent} />
+      )}
+      <Text style={[styles.optionActionText, { color: primary ? colors.onAccent : colors.accent }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function JobBidsScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
@@ -250,7 +321,7 @@ export default function JobBidsScreen() {
   const jobId = rawId && /^\d+$/.test(rawId) ? Number(rawId) : null;
   const locale = language as BidLocale;
 
-  const { job, status: jobStatus, refetch: refetchJob } = useJobDetail(jobId);
+  const { job, status: jobStatus, refetch: refetchJob, applyJob } = useJobDetail(jobId);
   const { activeRole } = useRole();
   const showAlert = useAppAlert();
 
@@ -270,6 +341,12 @@ export default function JobBidsScreen() {
   /** The offer the DECLINE confirmation is about — null while that sheet is closed. */
   const [rejectTarget, setRejectTarget] = useState<BidResponse | null>(null);
   /**
+   * Which bidding-options confirmation dialog is open (null = none). It pauses
+   * live updates exactly like the Accept/Decline sheets: the decision in front
+   * of the client must never be rewritten underneath it.
+   */
+  const [optionsAction, setOptionsAction] = useState<BiddingOptionAction | null>(null);
+  /**
    * The client's typed reason. Held by the SCREEN on purpose: a failed request
    * must not lose it (the retry then sends exactly what was written), and the
    * 422 for `reason` is rendered on the same input.
@@ -277,18 +354,40 @@ export default function JobBidsScreen() {
   const [rejectReason, setRejectReason] = useState('');
   /** The server's own message for `reason`, shown on the input. */
   const [rejectReasonError, setRejectReasonError] = useState<string | null>(null);
+  /**
+   * A transport failure sent the offers back to the server; the dialog stays
+   * locked until that answer lands, so a retry can never be issued before the
+   * screen knows whether the first request went through.
+   */
+  const [rejectRecheck, setRejectRecheck] = useState(false);
   const { rejectBid, rejecting } = useRejectBid();
 
   const biddingOpen = job ? isBiddingOpen(job) : false;
-  // URGENT jobs are live: re-read the offers every 8 s while the screen is
-  // focused and the app is foregrounded. A REGULAR job (or a closed window)
-  // passes null, which stops the interval entirely — see hooks/useJobBids.
-  // While the confirmation sheet is open the polling is suspended as well: the
-  // decision in front of the client must not be rewritten under their finger.
-  const pollMs =
-    acceptTarget === null && rejectTarget === null && job && job.is_urgent && biddingOpen
-      ? BIDS_POLL_MS
-      : null;
+
+  /**
+   * Is realtime live on this screen?
+   *
+   * True while the job can still change — still OPEN with nobody assigned. URGENT
+   * and REGULAR behave identically now: the old 8 s URGENT poll is gone, and the
+   * socket (plus its 30 s safety net while it is down) is what keeps the list
+   * current for both. Accepting a provider turns it off for good: the watch is
+   * released, the safety net stops and the live notices disappear, because from
+   * that moment the screen shows a decision rather than a race.
+   */
+  const live =
+    acceptedBid === null && job != null && job.assigned_provider_id == null && job.status === 'OPEN';
+
+  /**
+   * The confirmation dialogs PAUSE the list, exactly as the old poll was paused:
+   * while Accept or Decline is open, neither a bid event nor the safety net may
+   * rewrite the offers under the client's finger. The decision in front of them
+   * has to be the decision they were shown — the dialogs' own reconciliation
+   * (which follows a list that changed by other means, e.g. a pull-to-refresh)
+   * stays in place.
+   */
+  const dialogsClosed =
+    acceptTarget === null && rejectTarget === null && optionsAction === null;
+
   const {
     status: bidsStatus,
     serverMessage,
@@ -299,9 +398,22 @@ export default function JobBidsScreen() {
     refreshing,
     refreshFailed,
     newBidIds,
+    createdEvent,
     refresh,
     dropBid,
-  } = useJobBids(jobId, { pollMs });
+  } = useJobBids(jobId, { live: live && dialogsClosed });
+
+  /**
+   * The job-level half of the live screen: the watch, the bidding window events
+   * and the socket status the notices below are driven by.
+   */
+  const { stale, endsAtOverride, extendedNotice } = useJobBiddingRealtime({
+    jobId,
+    enabled: live,
+    biddingEndsAt: job?.bidding_ends_at ?? null,
+    biddingOpen,
+    refetchJob,
+  });
 
   const [showAll, setShowAll] = useState(false);
   const [sort, setSort] = useState<BidSortId>('api');
@@ -313,13 +425,317 @@ export default function JobBidsScreen() {
     if (bidsStatus === 'unauthorized') router.replace('/(auth)/login' as any);
   }, [bidsStatus, router]);
 
-  const deadline = useMemo(() => (job ? biddingDeadline(job, Date.now()) : null), [job]);
+  /**
+   * The countdown's deadline — an ABSOLUTE timestamp, so the remaining time is
+   * recomputed on every tick and can never drift (remaining_bidding_seconds is a
+   * convenience the screen does not need while this field is present).
+   *
+   * Normally it is the job's own bidding_ends_at (UTC). For the moment between a
+   * job.bidding_extended event and the re-read job that carries the new value,
+   * the deadline announced by the event itself is used instead — the countdown
+   * must never briefly show the OLD window after the backend moved it.
+   */
+  const deadline = useMemo(
+    () => endsAtOverride ?? (job ? biddingDeadline(job, Date.now()) : null),
+    [endsAtOverride, job]
+  );
+
+  /** The window is live if the API says so, or if an extension just moved it. */
+  const windowOpen = biddingOpen || endsAtOverride !== null;
+
+  /** A window can be extended: the same deadline must expire exactly once. */
+  const lastExpiredDeadline = useRef<number | null>(null);
 
   /** The countdown reached zero: re-read the JOB so the closed state is the
-   *  backend's, not a guess — the bids themselves follow from `pollMs`. */
+   *  backend's, not a guess — the bids themselves follow from the socket/safety
+   *  net. Guarded per deadline so a re-render cannot refetch in a loop. */
   const handleBiddingExpired = useCallback(() => {
+    if (deadline === null || lastExpiredDeadline.current === deadline) return;
+    lastExpiredDeadline.current = deadline;
     void refetchJob();
-  }, [refetchJob]);
+  }, [deadline, refetchJob]);
+
+  /**
+   * Realtime (re)connected — including the first connect.
+   *
+   * Events are NOT stored by the server, so anything that happened while the
+   * socket was down is gone: the offers AND the job are re-read at once. This is
+   * also what repairs the list after the app returns from the background.
+   */
+  useOnRealtimeReconnect(
+    useCallback(() => {
+      if (!live) return;
+      void refresh();
+      void refetchJob();
+    }, [live, refresh, refetchJob])
+  );
+
+  /** The "new offer" toast, built from the event's own data in the app locale. */
+  const createdNotice = useMemo(
+    () => (createdEvent ? bidCreatedNoticeText(createdEvent.data, locale) : null),
+    [createdEvent, locale]
+  );
+
+  /* ─────────────────────────── Bidding options (restart / convert) ── */
+
+  const { restartTimer, restarting } = useRestartJobTimer();
+  const { convertToRegular, converting: convertingToRegular } = useConvertJobToRegular();
+  const { convertToUrgent, converting: convertingToUrgent } = useConvertJobToUrgent();
+  const optionsBusy = restarting || convertingToRegular || convertingToUrgent;
+
+  /**
+   * What the card offers for THIS job right now. Every flag comes from the
+   * backend (can_restart_timer / can_convert_to_*); the only client-side facts
+   * are the verified window lengths (Regular 180 min, Urgent 30 min — measured
+   * live from remaining_bidding_seconds) and the restart counter display.
+   */
+  const options = biddingOptionsModel(job, {
+    isClient: activeRole === 'CLIENT',
+    nowMs: Date.now(),
+  });
+
+  /**
+   * A restart/convert succeeded: the SERVER's job replaces ours whole (new
+   * bidding_ends_at, request_type, timer_restart_count and every re-evaluated
+   * flag), which re-anchors the countdown, flips the badge and rewrites the
+   * card; the offers are re-read through the same sequenced loader (stale
+   * responses stay ignored); the hooks already invalidated the job list and
+   * job-detail caches so every other screen refreshes too.
+   */
+  const adoptOptionJob = useCallback(
+    (next: JobResponse) => {
+      applyJob(next);
+      void refresh();
+    },
+    [applyJob, refresh]
+  );
+
+  /**
+   * Re-read the job after a failure only where the backend's own rules say the
+   * cached flags are stale (a refusal, or a request that timed out or dropped
+   * and may therefore have LANDED) — the shared library's rule for converts,
+   * applied to restarts as well.
+   */
+  const shouldResyncOptionsJob = useCallback(
+    (kind: JobActionFailureKind | 'limit'): boolean => {
+      // The restart cap being reached IS the backend's flags having moved.
+      if (kind === 'limit') return true;
+      // No response came back, so the action may have landed after all.
+      if (kind === 'network') return true;
+      return isJobActionRefused(kind);
+    },
+    []
+  );
+
+  const doRestart = useCallback(async () => {
+    if (jobId === null || optionsBusy) return;
+    const outcome = await restartTimer(jobId);
+    if (outcome.ok) {
+      adoptOptionJob(outcome.job);
+      showAlert({
+        title: t('jobd_restart_success_title'),
+        message: outcome.message ?? t('jobd_restart_success_msg'),
+        icon: 'refresh-cw',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'busy') return;
+    // A 401 that survived the shared refresh + replay ends the session — the
+    // same rule the job detail screen follows.
+    if (outcome.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
+    if (shouldResyncOptionsJob(outcome.kind)) void refetchJob();
+    if (isRestartNotAllowed(outcome.kind)) {
+      showAlert({
+        title: t('jobd_restart_limit_title'),
+        // The backend's own text wins — live: "The bidding timer can only be
+        // restarted for open jobs, up to 3 times."
+        message: outcome.message ?? t('jobd_restart_limit_msg'),
+        icon: 'slash',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'network') {
+      // No response came back: the job was re-read above (the action may have
+      // landed), and only a genuine connectivity failure may claim it.
+      showAlert({
+        title: t('jobd_restart_err_title'),
+        message: t('jobd_restart_err_network'),
+        icon: 'wifi-off',
+        buttons: [
+          { text: t('jobs_retry'), onPress: () => void doRestart() },
+          { text: t('action_cancel'), style: 'cancel' },
+        ],
+      });
+      return;
+    }
+    showAlert({
+      title: t('jobd_restart_err_title'),
+      message: restartTimerFailureMessage(outcome, t),
+      icon: 'alert-triangle',
+      buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+    });
+  }, [jobId, optionsBusy, restartTimer, adoptOptionJob, shouldResyncOptionsJob, refetchJob, showAlert, t, router]);
+
+  const doConvertToRegular = useCallback(async () => {
+    if (jobId === null || optionsBusy) return;
+    const outcome = await convertToRegular(jobId);
+    if (outcome.ok) {
+      adoptOptionJob(outcome.job);
+      showAlert({
+        title: t('jobd_convert_success_title'),
+        message: outcome.message ?? t('jobd_convert_success_msg'),
+        icon: 'check-circle',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'busy') return;
+    if (outcome.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
+    if (shouldResyncOptionsJob(outcome.kind)) void refetchJob();
+    if (isConvertNotAllowed(outcome.kind)) {
+      showAlert({
+        title: t('jobd_convert_notallowed_title'),
+        message: outcome.message ?? t('jobd_convert_notallowed_msg'),
+        icon: 'slash',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'network') {
+      showAlert({
+        title: t('jobd_convert_err_title'),
+        message: t('jobd_convert_err_network'),
+        icon: 'wifi-off',
+        buttons: [
+          { text: t('jobs_retry'), onPress: () => void doConvertToRegular() },
+          { text: t('action_cancel'), style: 'cancel' },
+        ],
+      });
+      return;
+    }
+    showAlert({
+      title: t('jobd_convert_err_title'),
+      message: convertToRegularFailureMessage(outcome, t),
+      icon: 'alert-triangle',
+      buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+    });
+  }, [jobId, optionsBusy, convertToRegular, adoptOptionJob, shouldResyncOptionsJob, refetchJob, showAlert, t, router]);
+
+  const doConvertToUrgent = useCallback(async () => {
+    if (jobId === null || optionsBusy) return;
+    const outcome = await convertToUrgent(jobId);
+    if (outcome.ok) {
+      adoptOptionJob(outcome.job);
+      showAlert({
+        title: t('jobd_urgent_success_title'),
+        message: outcome.message ?? t('jobd_urgent_success_msg'),
+        icon: 'check-circle',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'busy') return;
+    if (outcome.kind === 'unauthorized') {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
+    if (shouldResyncOptionsJob(outcome.kind)) void refetchJob();
+    if (isConvertNotAllowed(outcome.kind)) {
+      showAlert({
+        title: t('jobd_urgent_notallowed_title'),
+        message: outcome.message ?? t('jobd_urgent_notallowed_msg'),
+        icon: 'slash',
+        buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+      });
+      return;
+    }
+    if (outcome.kind === 'network') {
+      showAlert({
+        title: t('jobd_urgent_err_title'),
+        message: t('jobd_urgent_err_network'),
+        icon: 'wifi-off',
+        buttons: [
+          { text: t('jobs_retry'), onPress: () => void doConvertToUrgent() },
+          { text: t('action_cancel'), style: 'cancel' },
+        ],
+      });
+      return;
+    }
+    showAlert({
+      title: t('jobd_urgent_err_title'),
+      message: convertToUrgentFailureMessage(outcome, t),
+      icon: 'alert-triangle',
+      buttons: [{ text: t('cbids_opts_ok'), style: 'cancel' }],
+    });
+  }, [jobId, optionsBusy, convertToUrgent, adoptOptionJob, shouldResyncOptionsJob, refetchJob, showAlert, t, router]);
+
+  /**
+   * Every option is confirmed first, and each dialog states ONLY what was
+   * verified live: a fresh window of the current/new type's verified length
+   * (Regular 180 min, Urgent 30 min) and the restart counter. "Back" sends
+   * nothing; any dismissal (button, backdrop, system back) unpauses the screen
+   * through the alert's onDismissed.
+   */
+  const confirmOptionsAction = useCallback(
+    (action: BiddingOptionAction) => {
+      if (optionsBusy || job === null) return;
+      setOptionsAction(action);
+      const onDismissed = () => setOptionsAction(null);
+      if (action === 'restart') {
+        showAlert({
+          title: t('cbids_opts_restart_confirm_title'),
+          message: t('cbids_opts_restart_confirm_msg', {
+            minutes: options.windowMinutes,
+            n: options.restartsUsed,
+            max: options.restartsMax,
+          }),
+          icon: 'refresh-cw',
+          onDismissed,
+          buttons: [
+            { text: t('jobd_restart_confirm_cta'), onPress: () => void doRestart() },
+            { text: t('cbids_opts_back'), style: 'cancel' },
+          ],
+        });
+        return;
+      }
+      if (action === 'to_regular') {
+        showAlert({
+          title: t('cbids_opts_reg_confirm_title'),
+          message: t('cbids_opts_reg_confirm_msg', {
+            minutes: BIDDING_WINDOW_MINUTES.regular,
+          }),
+          icon: 'repeat',
+          onDismissed,
+          buttons: [
+            { text: t('jobd_convert_confirm_cta'), onPress: () => void doConvertToRegular() },
+            { text: t('cbids_opts_back'), style: 'cancel' },
+          ],
+        });
+        return;
+      }
+      showAlert({
+        title: t('cbids_opts_urg_confirm_title'),
+        message: t('cbids_opts_urg_confirm_msg', {
+          minutes: BIDDING_WINDOW_MINUTES.urgent,
+        }),
+        icon: 'zap',
+        onDismissed,
+        buttons: [
+          { text: t('jobd_urgent_confirm_cta'), onPress: () => void doConvertToUrgent() },
+          { text: t('cbids_opts_back'), style: 'cancel' },
+        ],
+      });
+    },
+    [optionsBusy, job, options, showAlert, t, doRestart, doConvertToRegular, doConvertToUrgent]
+  );
 
   const sortedAll = useMemo(() => sortBids(all, sort), [all, sort]);
   const recommendedTop = recommended.slice(0, RECOMMENDED_MAX);
@@ -499,6 +915,7 @@ export default function JobBidsScreen() {
   const openRejectSheet = useCallback((bid: BidResponse) => {
     setRejectReason('');
     setRejectReasonError(null);
+    setRejectRecheck(false);
     setRejectTarget(bid);
   }, []);
 
@@ -506,6 +923,7 @@ export default function JobBidsScreen() {
   const closeRejectSheet = useCallback(() => {
     setRejectTarget(null);
     setRejectReasonError(null);
+    setRejectRecheck(false);
   }, []);
 
   /** The offer the dialog was about is gone or already decided. */
@@ -538,7 +956,7 @@ export default function JobBidsScreen() {
    */
   const runReject = useCallback(async () => {
     const target = rejectTarget;
-    if (!job || !target || rejecting) return;
+    if (!job || !target || rejecting || rejectRecheck) return;
 
     const validation = validateBidRejectReason(rejectReason);
     if (!validation.ok) {
@@ -582,29 +1000,47 @@ export default function JobBidsScreen() {
       // Anything else 422 (a rejected path id) falls through to the alert.
     }
 
-    // A state refusal means the card on screen is not the truth, so the sheet
-    // closes and the list is re-read. A transport/server failure keeps everything
-    // the client typed and offers a retry instead.
+    // A transport failure (timeout, dropped connection): a lost reply may still
+    // have gone through, so the offers and the job are RE-READ while the dialog
+    // stays locked (`confirming`), and only when that lands is the retry offered.
+    // The typed reason survives; if the read shows the bid already decided, the
+    // reconciliation above closes the dialog with its own explanation instead.
     const message = rejectBidFailureMessage(outcome, t);
+    if (outcome.kind === 'network') {
+      setRejectRecheck(true);
+      void Promise.all([refresh(), refetchJob()]).finally(() => setRejectRecheck(false));
+      showAlert({
+        title: t('cbids_reject_err_title'),
+        message,
+        icon: 'wifi-off',
+      });
+      return;
+    }
+
+    // A state refusal means the card on screen is not the truth, so the sheet
+    // closes and the list (and the job) are re-read. Any other failure keeps
+    // everything the client typed and offers a retry instead.
     if (shouldResyncAfterRejectFailure(outcome.kind)) {
       closeRejectSheet();
       setSheetBid(null);
-      void refresh();
+      void Promise.all([refresh(), refetchJob()]);
     }
     showAlert({
       title: t('cbids_reject_err_title'),
       message,
-      icon: outcome.kind === 'network' ? 'wifi-off' : 'alert-circle',
+      icon: 'alert-circle',
     });
   }, [
     rejectTarget,
     rejectReason,
     rejecting,
+    rejectRecheck,
     rejectBid,
     job,
     closeRejectSheet,
     dropBid,
     refresh,
+    refetchJob,
     router,
     showAlert,
     t,
@@ -777,7 +1213,7 @@ export default function JobBidsScreen() {
             );
           })()}
         </View>
-      ) : biddingOpen && deadline !== null ? (
+      ) : windowOpen && deadline !== null ? (
         <View style={{ marginTop: 12 }}>
           <CountdownTimer
             endsAt={deadline}
@@ -797,11 +1233,126 @@ export default function JobBidsScreen() {
         </View>
       )}
 
+      {/* Bidding options — the job owner's own actions on THIS job's window,
+          client mode only and only while the backend's flags allow at least one
+          of them. The dialogs state only live-verified facts (fresh Regular
+          180-minute / Urgent 30-minute window, restarts used of the limit). */}
+      {options.visible ? (
+        <View style={[styles.optionsCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          <View style={styles.optionsHeaderRow}>
+            <Feather name="sliders" size={15} color={c.text} />
+            <Text style={[styles.optionsTitle, { color: c.text }]}>{t('cbids_opts_title')}</Text>
+          </View>
+          <Text style={[styles.optionsCounter, { color: c.mutedForeground }]}>
+            {t('cbids_opts_restarts', { n: options.restartsUsed, max: options.restartsMax })}
+          </Text>
+          {options.windowEnded ? (
+            <View
+              style={[styles.optionsEnded, { backgroundColor: c.muted, borderColor: c.border }]}
+            >
+              <Feather name="clock" size={13} color={c.mutedForeground} />
+              <Text style={[styles.optionsEndedText, { color: c.mutedForeground }]}>
+                {t('cbids_opts_ended')}
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.optionsButtons}>
+            {options.restart ? (
+              <OptionActionButton
+                label={t('cbids_opts_restart')}
+                icon="refresh-cw"
+                primary={options.windowEnded}
+                busy={restarting}
+                disabled={optionsBusy}
+                onPress={() => confirmOptionsAction('restart')}
+                colors={{ accent: c.primary, onAccent: c.primaryForeground, border: c.border }}
+              />
+            ) : null}
+            {options.toRegular ? (
+              <OptionActionButton
+                label={t('cbids_opts_to_regular')}
+                icon="repeat"
+                primary={options.windowEnded}
+                busy={convertingToRegular}
+                disabled={optionsBusy}
+                onPress={() => confirmOptionsAction('to_regular')}
+                colors={{ accent: c.primary, onAccent: c.primaryForeground, border: c.border }}
+              />
+            ) : null}
+            {options.toUrgent ? (
+              <OptionActionButton
+                label={t('cbids_opts_to_urgent')}
+                icon="zap"
+                primary={options.windowEnded}
+                busy={convertingToUrgent}
+                disabled={optionsBusy}
+                onPress={() => confirmOptionsAction('to_urgent')}
+                colors={{ accent: c.primary, onAccent: c.primaryForeground, border: c.border }}
+              />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
       {refreshFailed ? (
         <View style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
           <Feather name="alert-circle" size={12} color={c.mutedForeground} />
           <Text style={[styles.refreshNoticeText, { color: c.mutedForeground }]}>
             {t('cbids_refresh_failed')}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Live notices: three small, non-blocking rows under the job card. They
+          never cover the list and never open a dialog — an offer arriving, the
+          timer moving or the socket being down must not interrupt the client's
+          reading of the offers. Same row shape as the refresh notice above, so
+          the screen keeps one visual language (existing theme tokens only). */}
+      {createdNotice ? (
+        <View
+          style={[styles.refreshNotice, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
+          accessibilityLiveRegion="polite"
+        >
+          <Feather name="bell" size={12} color={c.primary} />
+          <Text style={[styles.refreshNoticeText, { color: c.primary }]} numberOfLines={2}>
+            {createdNotice.eta
+              ? t('cbids_live_new_bid', {
+                  price: createdNotice.price,
+                  eta:
+                    createdNotice.eta.kind === 'now'
+                      ? t('jobd_bid_eta_now')
+                      : createdNotice.eta.kind === 'minutes'
+                        ? t('jobd_bid_eta_min', { n: createdNotice.eta.minutes })
+                        : t('jobd_bid_eta_hm', {
+                            h: createdNotice.eta.hours,
+                            m: createdNotice.eta.minutes,
+                          }),
+                })
+              : t('cbids_live_new_bid_no_eta', { price: createdNotice.price })}
+          </Text>
+        </View>
+      ) : null}
+
+      {extendedNotice ? (
+        <View
+          style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}
+          accessibilityLiveRegion="polite"
+        >
+          <Feather name="clock" size={12} color={c.warning} />
+          <Text style={[styles.refreshNoticeText, { color: c.text }]}>
+            {t('cbids_live_timer_extended')}
+          </Text>
+        </View>
+      ) : null}
+
+      {stale ? (
+        <View
+          style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}
+          accessibilityLiveRegion="polite"
+        >
+          <Feather name="wifi-off" size={12} color={c.mutedForeground} />
+          <Text style={[styles.refreshNoticeText, { color: c.mutedForeground }]}>
+            {t('cbids_live_reconnecting')}
           </Text>
         </View>
       ) : null}
@@ -872,11 +1423,11 @@ export default function JobBidsScreen() {
     }
     return (
       <EmptyState
-        icon={biddingOpen ? 'inbox' : 'clock'}
+        icon={windowOpen ? 'inbox' : 'clock'}
         title={
-          biddingOpen ? t('cbids_empty_open_title') : t('cbids_empty_closed_title')
+          windowOpen ? t('cbids_empty_open_title') : t('cbids_empty_closed_title')
         }
-        subtitle={biddingOpen ? t('cbids_empty_open_msg') : t('cbids_empty_closed_msg')}
+        subtitle={windowOpen ? t('cbids_empty_open_msg') : t('cbids_empty_closed_msg')}
       />
     );
   };
@@ -993,7 +1544,7 @@ export default function JobBidsScreen() {
           if (rejectReasonError) setRejectReasonError(null);
         }}
         reasonError={rejectReasonError}
-        confirming={rejecting}
+        confirming={rejecting || rejectRecheck}
         onBack={closeRejectSheet}
         onConfirm={() => void runReject()}
       />
@@ -1033,6 +1584,34 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, marginBottom: 10 },
   viewAllBtn: { marginHorizontal: 16, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 12, paddingVertical: 11 },
   viewAllText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  optionsCard: { marginTop: 12, borderWidth: 1, borderRadius: 16, padding: 14, gap: 10 },
+  optionsHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  optionsTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
+  optionsCounter: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  optionsEnded: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  optionsEndedText: { fontFamily: 'Manrope_500Medium', fontSize: 12, flex: 1 },
+  optionsButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexGrow: 1,
+    flexBasis: '46%',
+  },
+  optionActionText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   chipRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },

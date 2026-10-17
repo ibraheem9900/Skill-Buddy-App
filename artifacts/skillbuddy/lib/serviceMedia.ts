@@ -72,14 +72,7 @@ export function classifyMediaType(mediaType: string | null | undefined): MediaKi
     );
   }
   return 'image';
-}
-
-/** True when an entry should be rendered with a video player, not an image. */
-export function isVideoMedia(item: ServiceMediaItem | null | undefined): boolean {
-  return classifyMediaType(item?.media_type) === 'video';
-}
-
-/** A URL is usable only if it is a non-empty, non-whitespace string. */
+}/** A URL is usable only if it is a non-empty, non-whitespace string. */
 export function hasUsableUrl(url: string | null | undefined): url is string {
   return typeof url === 'string' && url.trim().length > 0;
 }
@@ -109,19 +102,7 @@ export function prepareMedia(
     }))
     .sort((a, b) => a.position - b.position || a._index - b._index)
     .map(({ _index, ...rest }) => rest);
-}
-
-/** Images only, in gallery order. */
-export function imageMedia(items: PreparedMedia[]): PreparedMedia[] {
-  return items.filter((item) => item.kind === 'image');
-}
-
-/** Videos only, in gallery order. */
-export function videoMedia(items: PreparedMedia[]): PreparedMedia[] {
-  return items.filter((item) => item.kind === 'video');
-}
-
-/**
+}/**
  * The cover/thumbnail: the flagged entry with the LOWEST position, else the
  * first entry by position. Returns null for an empty list.
  *
@@ -135,22 +116,4 @@ export function pickThumbnail(items: PreparedMedia[]): PreparedMedia | null {
   const pool = flagged.length > 0 ? flagged : items;
 
   return pool.reduce((best, item) => (item.position < best.position ? item : best));
-}
-
-/**
- * Cover URL used by compact list rows / hero images. A video can never be
- * handed to an image component, so when the cover is a video we fall back to
- * the first IMAGE; if the service has only videos this returns null and the
- * caller renders the video player instead.
- */
-export function pickCoverImageUrl(items: PreparedMedia[]): string | null {
-  const cover = pickThumbnail(items);
-  if (cover && cover.kind === 'image') return cover.url;
-  return imageMedia(items)[0]?.url ?? null;
-}
-
-/** The video to use as the hero when a service has NO images at all. */
-export function pickCoverVideo(items: PreparedMedia[]): PreparedMedia | null {
-  if (imageMedia(items).length > 0) return null;
-  return pickThumbnail(items) ?? videoMedia(items)[0] ?? null;
 }
