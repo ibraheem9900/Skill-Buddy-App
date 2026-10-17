@@ -16,6 +16,13 @@ export interface AppAlertConfig {
   message?: string;
   icon?: keyof typeof Feather.glyphMap;
   buttons?: AppAlertButton[];
+  /**
+   * Called ONCE whenever this dialog stops showing — button press, backdrop
+   * tap, Android back or an external hideAlert. Every dismissal path funnels
+   * through `close`, so a screen that paused live updates while the dialog was
+   * open can resume from here without having to own the dialog's visibility.
+   */
+  onDismissed?: () => void;
 }
 
 interface AlertContextType {
@@ -36,10 +43,20 @@ const AlertModalContext = createContext<AlertContextType>({
 
 export function AlertModalProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<AppAlertConfig | null>(null);
+  // Mirrored so `close` stays referentially stable while still being able to
+  // notify the config that opened the dialog (see AppAlertConfig.onDismissed).
+  const configRef = React.useRef<AppAlertConfig | null>(null);
+  React.useEffect(() => {
+    configRef.current = config;
+  }, [config]);
   const { colors: c } = useTheme();
 
   const showAlert = useCallback((cfg: AppAlertConfig) => setConfig(cfg), []);
-  const close = useCallback(() => setConfig(null), []);
+  const close = useCallback(() => {
+    const dismissed = configRef.current;
+    setConfig(null);
+    dismissed?.onDismissed?.();
+  }, []);
 
   const buttons: AppAlertButton[] = config?.buttons?.length ? config.buttons : [{ text: 'OK' }];
 
@@ -85,7 +102,7 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
                       }}
                       activeOpacity={0.85}
                     >
-                      <Text style={[styles.btnText, { color: isCancel ? c.text : '#FFF' }]}>{btn.text}</Text>
+                      <Text style={[styles.btnText, { color: isCancel ? c.text : isDestructive ? c.destructiveForeground : c.primaryForeground }]}>{btn.text}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -100,13 +117,7 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
 
 export function useAppAlert() {
   return useContext(AlertModalContext).showAlert;
-}
-
-export function useHideAlert() {
-  return useContext(AlertModalContext).hideAlert;
-}
-
-const styles = StyleSheet.create({
+}const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFill },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   card: { width: '100%', borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },

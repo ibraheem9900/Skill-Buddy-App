@@ -35,6 +35,18 @@
     "./jobBooking.test.ts",
     "./jobCreateError.test.ts",
     "./bid.test.ts",
+    "./realtimeEvents.test.ts",
+    "./realtime.test.ts",
+    "./debounce.test.ts",
+    "./jobBidsLive.test.ts",
+    "./jobBiddingOptions.test.ts",
+    "./nearbyJobs.test.ts",
+    "./nearbyStale.test.ts",
+    "./providerSkills.test.ts",
+    "./providerAddress.test.ts",
+    "./myBids.test.ts",
+    "./bidResults.test.ts",
+    "./moneyEvents.test.ts",
     "./translations.test.ts"
   ]
 }
