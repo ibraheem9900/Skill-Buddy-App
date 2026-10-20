@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -21,10 +20,20 @@ import JobCard from '@/components/JobCard';
 import EmptyState from '@/components/EmptyState';
 import NearbyJobsFeed from '@/components/NearbyJobsFeed';
 import MyBidsFeed from '@/components/MyBidsFeed';
-import { JOB_STATUS_VALUES, jobStatusLabelKey } from '@/lib/jobList';
+import JobsFilterSheet from '@/components/JobsFilterSheet';
+import {
+  EMPTY_JOB_FILTERS,
+  activeFilterCount,
+  activeFilterIds,
+  isClientProfileMissing,
+  jobStatusLabelKey,
+  removeFilter,
+  resolveJobsViewState,
+  type JobFilterId,
+} from '@/lib/jobList';
 import useJobList, { hasActiveFilters } from '@/hooks/useJobList';
 import { useRole } from '@/context/RoleContext';
-import type { JobApiStatus, JobListItem, JobRequestType } from '@/types';
+import type { JobListItem } from '@/types';
 import type { TranslationKey } from '@/context/LanguageContext';
 
 /**
@@ -37,29 +46,33 @@ import type { TranslationKey } from '@/context/LanguageContext';
  * Pagination is offset-based (limit 20), and a page shorter than the limit ends
  * the list — there is no total count to read (see hooks/useJobList).
  *
+ * FILTERS: one compact row — a Filters button carrying the number of active
+ * filters, plus one removable chip per active filter. The filters themselves live
+ * in a single bottom sheet (components/JobsFilterSheet) built with the same sheet
+ * component as every other picker, and the sheet edits a local draft so opening
+ * it can never change the list.
+ *
+ * STATES: a 200 with an empty array is an EMPTY state (with and without filters),
+ * and an error card appears only for a real failure — with a message that matches
+ * the actual cause ('network' is the only one allowed to mention the connection).
+ *
  * The provider-side view has TWO tabs, each with a real source behind it:
  *   Available  GET /api/v1/providers/me/nearby-jobs (components/NearbyJobsFeed)
  *   My Bids    GET /api/v1/bids/mine                (components/MyBidsFeed)
- * "Active" stays HIDDEN: no endpoint lists a provider's active jobs yet, and a
- * chip that can only show an empty placeholder is worse than no chip.
- *
- * The client list below is untouched: with a CLIENT active role (or on the
- * client tab) this screen is exactly what it was before.
+ * "Active" stays HIDDEN: no endpoint lists a provider's active jobs yet.
  */
-
-const REQUEST_TYPES: JobRequestType[] = ['URGENT', 'REGULAR'];
-
-/** The provider's chips, in order. Only tabs with an endpoint behind them. */
-const PROVIDER_TABS: { key: ProviderTab; labelKey: TranslationKey }[] = [
-  { key: 'available', labelKey: 'nearby_tab_available' },
-  { key: 'myBids', labelKey: 'mybids_tab' },
-];
 
 /**
  * The provider's own tabs: "Available" and "My Bids". Both have an endpoint they
  * can fill. "Active" is deliberately NOT here — see the file header.
  */
 type ProviderTab = 'available' | 'myBids';
+
+/** The provider's chips, in order. Only tabs with an endpoint behind them. */
+const PROVIDER_TABS: { key: ProviderTab; labelKey: TranslationKey }[] = [
+  { key: 'available', labelKey: 'nearby_tab_available' },
+  { key: 'myBids', labelKey: 'mybids_tab' },
+];
 
 export default function JobsScreen() {
   const insets = useSafeAreaInsets();
@@ -69,6 +82,7 @@ export default function JobsScreen() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { activeRole } = useRole();
   const [providerTab, setProviderTab] = useState<ProviderTab>('available');
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const providerMode = activeRole === 'PROVIDER';
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
@@ -80,6 +94,7 @@ export default function JobsScreen() {
     refreshing,
     inlineError,
     serverMessage,
+    failure,
     filters,
     setFilters,
     refresh,
@@ -97,10 +112,23 @@ export default function JobsScreen() {
   }, [authLoading, isAuthenticated, router]);
 
   const filtered = hasActiveFilters(filters);
-  const firstLoad = status === 'loading' && jobs.length === 0;
-  const hardFailed =
-    jobs.length === 0 &&
-    (status === 'error' || status === 'invalid' || status === 'unauthorized');
+  const filterCount = activeFilterCount(filters);
+  const filterIds = activeFilterIds(filters);
+  // ONE decision for the whole screen: a 200 + [] is an empty state (never an
+  // error), and an error card only appears when nothing is on screen.
+  const view = resolveJobsViewState({ status, jobCount: jobs.length, hasFilters: filtered });
+
+  /** The label of one active-filter chip (translated, never a raw enum). */
+  const filterChipLabel = (id: JobFilterId): string => {
+    if (id === 'status') {
+      const key = filters.status ? jobStatusLabelKey(filters.status) : null;
+      return key ? t(key) : '';
+    }
+    if (id === 'requestType') {
+      return filters.requestType === 'URGENT' ? t('jobs_urgent') : t('jobs_regular');
+    }
+    return t('jobs_filter_bidding');
+  };
 
   const openJob = (job: JobListItem) => {
     // Details come from GET /api/v1/jobs/{job_id} on that screen — the list
@@ -108,49 +136,74 @@ export default function JobsScreen() {
     router.push(`/job/${job.id}` as any);
   };
 
-  const statusChip = (value: JobApiStatus | null, label: string) => {
-    const active = filters.status === value;
-    return (
-      <TouchableOpacity
-        key={value ?? 'all'}
-        style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
-        onPress={() => setFilters({ ...filters, status: value })}
-      >
-        <Text style={[styles.chipText, { color: active ? c.primaryForeground : c.mutedForeground }]}>
-          {label}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
+  /**
+   * The failure card: ONE message per real cause. Only a genuine connectivity
+   * failure may say "check your connection"; a rejected request shows the
+   * backend's own text, and "Client profile not found" gets its own explanation
+   * (the app cannot create that profile — the live API has no endpoint for it).
+   */
+  const errorCard = useMemo(() => {
+    const kind = failure?.kind ?? 'unknown';
+    const message = failure?.message ?? null;
 
-  const errorCard = () => {
-    const title = status === 'unauthorized' ? t('jobs_session_title') : t('jobs_load_error');
-    const message =
-      status === 'invalid'
-        ? serverMessage ?? t('jobs_filter_invalid')
-        : status === 'unauthorized'
-          ? t('jobs_unauthorized_msg')
-          : t('jobs_load_error_sub');
+    let titleKey: TranslationKey = 'jobs_error_unknown_title';
+    let bodyKey: TranslationKey | null = 'jobs_error_unknown_msg';
+    let icon: keyof typeof Feather.glyphMap = 'alert-triangle';
+    let body = t('jobs_error_unknown_msg');
+
+    if (kind === 'network') {
+      titleKey = 'jobs_error_network_title';
+      bodyKey = 'jobs_error_network_msg';
+      icon = 'wifi-off';
+    } else if (kind === 'timeout') {
+      titleKey = 'jobs_error_timeout_title';
+      bodyKey = 'jobs_error_timeout_msg';
+      icon = 'clock';
+    } else if (kind === 'server') {
+      titleKey = 'jobs_error_server_title';
+      bodyKey = 'jobs_error_server_msg';
+    } else if (kind === 'unauthorized' || status === 'unauthorized') {
+      titleKey = 'jobs_session_title';
+      bodyKey = 'jobs_unauthorized_msg';
+      icon = 'lock';
+    } else if (kind === 'client-profile' || isClientProfileMissing(message)) {
+      titleKey = 'jobs_error_profile_title';
+      bodyKey = 'jobs_error_profile_msg';
+      icon = 'user-x';
+    } else if (
+      kind === 'badrequest' ||
+      kind === 'forbidden' ||
+      kind === 'notfound' ||
+      kind === 'conflict' ||
+      kind === 'invalid'
+    ) {
+      // The backend's own readable text is the most useful copy for a rejected
+      // request; the generic line is only the fallback.
+      titleKey = 'jobs_load_error';
+      bodyKey = null;
+      icon = 'alert-circle';
+    }
+
+    if (bodyKey) body = t(bodyKey);
+    else body = message ?? serverMessage ?? t('jobs_load_error_sub');
+
     return (
       <View style={styles.stateWrap}>
         <View style={[styles.stateCard, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Feather
-            name={status === 'unauthorized' ? 'lock' : 'alert-circle'}
-            size={28}
-            color={c.destructive}
-          />
-          <Text style={[styles.stateTitle, { color: c.text }]}>{title}</Text>
-          <Text style={[styles.stateText, { color: c.mutedForeground }]}>{message}</Text>
+          <Feather name={icon} size={28} color={c.destructive} />
+          <Text style={[styles.stateTitle, { color: c.text }]}>{t(titleKey)}</Text>
+          <Text style={[styles.stateText, { color: c.mutedForeground }]}>{body}</Text>
           <TouchableOpacity
             style={[styles.retryBtn, { backgroundColor: c.primary }]}
             onPress={retry}
+            accessibilityRole="button"
           >
             <Text style={[styles.retryText, { color: c.primaryForeground }]}>{t('jobs_retry')}</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
-  };
+  }, [c, failure, retry, serverMessage, status, t]);
 
   const footer = () => {
     if (loadingMore) {
@@ -185,6 +238,7 @@ export default function JobsScreen() {
           <TouchableOpacity
             style={[styles.postBtn, { backgroundColor: c.primary }]}
             onPress={() => router.push('/job/post' as any)}
+            accessibilityRole="button"
           >
             <Feather name="plus" size={16} color={c.primaryForeground} />
             <Text style={[styles.postBtnText, { color: c.primaryForeground }]}>{t('post_a_job')}</Text>
@@ -204,6 +258,8 @@ export default function JobsScreen() {
                     key={key}
                     style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
                     onPress={() => setProviderTab(key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                   >
                     <Text
                       style={[
@@ -230,152 +286,133 @@ export default function JobsScreen() {
         </>
       ) : (
         <>
-      {/* Status filter — every documented JobStatus value, nothing invented. */}
-      <View style={[styles.filterBlock, { borderBottomColor: c.border }]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-        >
-          {statusChip(null, t('jobs_filter_all'))}
-          {JOB_STATUS_VALUES.map((value) => {
-            const key = jobStatusLabelKey(value);
-            return key ? statusChip(value, t(key)) : null;
-          })}
-        </ScrollView>
-
-        <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[
-              styles.chip,
-              {
-                backgroundColor: filters.requestType === null ? c.primary : c.muted,
-              },
-            ]}
-            onPress={() => setFilters({ ...filters, requestType: null })}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                {
-                  color:
-                    filters.requestType === null ? c.primaryForeground : c.mutedForeground,
-                },
-              ]}
-            >
-              {t('jobs_filter_all_types')}
-            </Text>
-          </TouchableOpacity>
-
-          {REQUEST_TYPES.map((value) => {
-            const active = filters.requestType === value;
-            return (
+          {/* ONE compact filter row: the Filters button (+ active count) and the
+              active filters as removable chips. The row wraps, so it can never
+              push anything off-screen however long a translated label is. */}
+          <View style={[styles.filterBlock, { borderBottomColor: c.border }]}>
+            <View style={styles.filterRow}>
               <TouchableOpacity
-                key={value}
-                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
-                onPress={() => setFilters({ ...filters, requestType: value })}
+                style={[
+                  styles.filterBtn,
+                  {
+                    backgroundColor: filterCount > 0 ? c.primary : c.muted,
+                    borderColor: filterCount > 0 ? c.primary : c.border,
+                  },
+                ]}
+                onPress={() => setFilterSheetOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('jobs_filter_title')}
               >
+                <Feather
+                  name="sliders"
+                  size={14}
+                  color={filterCount > 0 ? c.primaryForeground : c.mutedForeground}
+                />
                 <Text
                   style={[
-                    styles.chipText,
-                    { color: active ? c.primaryForeground : c.mutedForeground },
+                    styles.filterBtnText,
+                    { color: filterCount > 0 ? c.primaryForeground : c.text },
                   ]}
                 >
-                  {value === 'URGENT' ? t('jobs_urgent') : t('jobs_regular')}
+                  {t('jobs_filters_button')}
                 </Text>
+                {filterCount > 0 ? (
+                  <View style={[styles.badge, { backgroundColor: c.primaryForeground }]}>
+                    <Text style={[styles.badgeText, { color: c.primary }]}>{filterCount}</Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
-            );
-          })}
 
-          <TouchableOpacity
-            style={[
-              styles.chip,
-              styles.biddingChip,
-              {
-                backgroundColor: filters.onlyActivelyBidding ? c.primary : c.muted,
-                borderColor: filters.onlyActivelyBidding ? c.primary : c.border,
-              },
-            ]}
-            onPress={() =>
-              setFilters({ ...filters, onlyActivelyBidding: !filters.onlyActivelyBidding })
-            }
-          >
-            <Feather
-              name="radio"
-              size={12}
-              color={filters.onlyActivelyBidding ? c.primaryForeground : c.mutedForeground}
-            />
-            <Text
-              style={[
-                styles.chipText,
-                {
-                  color: filters.onlyActivelyBidding
-                    ? c.primaryForeground
-                    : c.mutedForeground,
-                },
-              ]}
-            >
-              {t('jobs_filter_bidding')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+              {filterIds.length === 0 ? (
+                <Text style={[styles.allJobs, { color: c.mutedForeground }]}>
+                  {t('jobs_all_jobs_quiet')}
+                </Text>
+              ) : (
+                filterIds.map((id) => (
+                  <TouchableOpacity
+                    key={id}
+                    style={[styles.activeChip, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
+                    onPress={() => setFilters(removeFilter(filters, id))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${filterChipLabel(id)} — ${t('jobs_filter_remove')}`}
+                  >
+                    <Text
+                      style={[styles.activeChipText, { color: c.primary }]}
+                      numberOfLines={1}
+                    >
+                      {filterChipLabel(id)}
+                    </Text>
+                    <Feather name="x" size={12} color={c.primary} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          </View>
 
-      {firstLoad ? (
-        <View style={styles.stateWrap}>
-          <ActivityIndicator color={c.primary} size="large" />
-        </View>
-      ) : hardFailed ? (
-        errorCard()
-      ) : (
-        <FlatList
-          data={jobs}
-          keyExtractor={(job) => String(job.id)}
-          contentContainerStyle={{
-            padding: 20,
-            paddingBottom: TAB_HEIGHT + insets.bottom + 20,
-            flexGrow: 1,
-          }}
-          showsVerticalScrollIndicator={false}
-          onEndReachedThreshold={0.4}
-          onEndReached={() => loadMore()}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refresh}
-              tintColor={c.primary}
-              colors={[c.primary]}
+          {view === 'loading' ? (
+            <View style={styles.stateWrap}>
+              <ActivityIndicator color={c.primary} size="large" />
+            </View>
+          ) : view === 'error' ? (
+            errorCard
+          ) : (
+            <FlatList
+              data={jobs}
+              keyExtractor={(job) => String(job.id)}
+              contentContainerStyle={{
+                padding: 20,
+                // Leave room for the tab bar AND the Android navigation bar.
+                paddingBottom: TAB_HEIGHT + insets.bottom + 20,
+                flexGrow: 1,
+              }}
+              showsVerticalScrollIndicator={false}
+              onEndReachedThreshold={0.4}
+              onEndReached={() => loadMore()}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={refresh}
+                  tintColor={c.primary}
+                  colors={[c.primary]}
+                />
+              }
+              ListEmptyComponent={
+                view === 'empty-filtered' ? (
+                  <EmptyState
+                    icon="filter"
+                    title={t('jobs_empty_filtered_title')}
+                    subtitle={t('jobs_empty_filtered_sub')}
+                    actionLabel={t('jobs_filter_reset')}
+                    onAction={() => setFilters(EMPTY_JOB_FILTERS)}
+                  />
+                ) : (
+                  <EmptyState
+                    icon="briefcase"
+                    title={t('jobs_empty_title')}
+                    subtitle={t('jobs_empty_hint')}
+                    actionLabel={t('post_a_job')}
+                    onAction={() => router.push('/job/post' as any)}
+                  />
+                )
+              }
+              ListFooterComponent={footer()}
+              renderItem={({ item, index }) => (
+                <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 60).duration(350)}>
+                  <JobCard job={item} onPress={() => openJob(item)} />
+                </Animated.View>
+              )}
             />
-          }
-          ListEmptyComponent={
-            filtered ? (
-              <EmptyState
-                icon="filter"
-                title={t('jobs_empty_filtered_title')}
-                subtitle={t('jobs_empty_filtered_sub')}
-                actionLabel={t('jobs_clear_filters')}
-                onAction={() =>
-                  setFilters({ status: null, requestType: null, onlyActivelyBidding: false })
-                }
-              />
-            ) : (
-              <EmptyState
-                icon="briefcase"
-                title={t('jobs_no_jobs_client')}
-                subtitle={t('jobs_empty_client_sub')}
-                actionLabel={t('post_a_job')}
-                onAction={() => router.push('/job/post' as any)}
-              />
-            )
-          }
-          ListFooterComponent={footer()}
-          renderItem={({ item, index }) => (
-            <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 60).duration(350)}>
-              <JobCard job={item} onPress={() => openJob(item)} />
-            </Animated.View>
           )}
-        />
-      )}
+
+          <JobsFilterSheet
+            visible={filterSheetOpen}
+            onClose={() => setFilterSheetOpen(false)}
+            value={filters}
+            onApply={(next) => {
+              setFilterSheetOpen(false);
+              setFilters(next);
+            }}
+          />
         </>
       )}
     </View>
@@ -407,12 +444,43 @@ const styles = StyleSheet.create({
   filterBlock: { borderBottomWidth: 1, paddingVertical: 10, gap: 8 },
   filterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     paddingHorizontal: 20,
     alignItems: 'center',
   },
+  filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  filterBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  badge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { fontFamily: 'Manrope_700Bold', fontSize: 10 },
+  allJobs: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  activeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    maxWidth: '100%',
+  },
+  activeChipText: { fontFamily: 'Manrope_500Medium', fontSize: 12, flexShrink: 1 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
-  biddingChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   stateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   stateCard: {

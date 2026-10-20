@@ -36,6 +36,89 @@ import type {
   ValidationErrorDetail,
 } from '@/types';
 
+/* ── Description: the user's text plus the "Preferred time" line ────────────
+ *
+ * The job API has NO field for the END of a time window (`JobMilestoneCreate` is
+ * just `scheduled_at` + `expected_hours`), so the window's end is carried at the
+ * very END of the description as one fixed English line:
+ *
+ *     Preferred time: 8:00 AM - 11:00 AM
+ *
+ * It is STORED data a provider reads, so it is deliberately NOT translated (the
+ * rest of the UI still is). It is never part of the user's text field and never
+ * counted by that field's word counter: the wizard appends it when building the
+ * payload and strips it again when a saved draft is loaded, so it can never be
+ * duplicated or edited by hand.
+ *
+ * The LIVE backend enforces the word limit the app already shows (HTTP 422
+ * "Description cannot exceed 500 words (got 1203)", captured 2026-10-20), so the
+ * combined text — user words PLUS this line — must stay under it.
+ */
+
+/** The live backend's own description ceiling (words). */
+export const DESC_WORD_MAX = 500;
+
+/** Exact prefix of the stored line, at the very end of the description. */
+export const PREFERRED_TIME_PREFIX = 'Preferred time:';
+
+/** Words, counted the way the backend counts them (whitespace separated). */
+export function countWords(text: string | null | undefined): number {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+/** The stored line for a `8:00 AM - 11:00 AM` window label, or null. */
+export function buildPreferredTimeLine(windowLabel: string | null | undefined): string | null {
+  const label = typeof windowLabel === 'string' ? windowLabel.trim() : '';
+  return label.length > 0 ? `${PREFERRED_TIME_PREFIX} ${label}` : null;
+}
+
+/**
+ * Remove a trailing "Preferred time: …" line from a stored description.
+ * Only the EXACT prefix on the LAST line is removed, so user prose that happens
+ * to contain the words "preferred time" is untouched.
+ */
+export function stripPreferredTimeLine(description: string | null | undefined): string {
+  const text = typeof description === 'string' ? description : '';
+  const trimmedEnd = text.replace(/\s+$/, '');
+  const cut = trimmedEnd.lastIndexOf('\n');
+  const lastLine = cut >= 0 ? trimmedEnd.slice(cut + 1) : trimmedEnd;
+  if (!lastLine.trimStart().startsWith(PREFERRED_TIME_PREFIX)) return trimmedEnd;
+  return cut >= 0 ? trimmedEnd.slice(0, cut).replace(/\s+$/, '') : '';
+}
+
+/**
+ * The description to send: the user's own text, with any stale line removed, and
+ * the current line appended once at the end. A null/empty result means "no
+ * description", exactly as before.
+ */
+export function withPreferredTimeLine(
+  userText: string | null | undefined,
+  line: string | null | undefined
+): string | null {
+  const body = stripPreferredTimeLine(userText).trim();
+  const suffix = typeof line === 'string' ? line.trim() : '';
+  if (body.length === 0) return suffix.length > 0 ? suffix : null;
+  if (suffix.length === 0) return body;
+  return `${body}\n${suffix}`;
+}
+
+/** Words the description will actually contain (user text + the line). */
+export function descriptionWordCount(
+  userText: string | null | undefined,
+  line: string | null | undefined
+): number {
+  return countWords(withPreferredTimeLine(userText, line));
+}
+
+/** Would the composed description break the backend's word limit? */
+export function exceedsDescriptionLimit(
+  userText: string | null | undefined,
+  line: string | null | undefined
+): boolean {
+  return descriptionWordCount(userText, line) > DESC_WORD_MAX;
+}
+
 /** One booked day of a long-term job, as the wizard's form state holds it. */
 export interface JobMilestoneInput {
   /** ISO 8601 UTC, composed from the local day + clock time. */
@@ -76,6 +159,11 @@ export interface JobFormValues {
   formattedAddress: string;
   /** true → draft (Save as draft); false → publish straight away. */
   isDraft: boolean;
+  /**
+   * The `Preferred time: …` line for the chosen window (null for a plain slot
+   * the provider does not need: only Anytime carries a custom window).
+   */
+  preferredTimeLine?: string | null;
 }
 
 /** Form error keys the wizard can render under an input. */
@@ -263,7 +351,8 @@ export function buildCreateJobRequest(
     service_id: values.serviceId,
     category_id: values.serviceCategoryId,
     title,
-    description: text(values.description),
+    // The user's text plus the stored `Preferred time: …` line, appended once.
+    description: withPreferredTimeLine(values.description, values.preferredTimeLine),
     request_type: requestType,
     booking_type: bookingTypeFor(values.bookingType),
     milestones: resolveMilestones(values),

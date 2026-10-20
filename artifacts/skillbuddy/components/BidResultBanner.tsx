@@ -3,11 +3,12 @@ import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useBidResults } from '@/context/BidResultsContext';
 import { bidResultBannerMessage } from '@/lib/bidResults';
+import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '@/lib/motion';
 
 /**
  * The provider's live bid result, announced app-wide.
@@ -45,8 +46,8 @@ export default function BidResultBanner() {
 
   return (
     <Animated.View
-      entering={FadeInUp.duration(220)}
-      exiting={FadeOutUp.duration(180)}
+      entering={FadeIn.duration(POPUP_FADE_IN_MS)}
+      exiting={FadeOut.duration(POPUP_FADE_OUT_MS)}
       style={[styles.wrap, { top: insets.top + 8 }]}
       pointerEvents="box-none"
     >

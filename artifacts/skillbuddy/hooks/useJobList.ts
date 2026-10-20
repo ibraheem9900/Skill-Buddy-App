@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authApi } from '@/services/api';
-import { JOBS_PAGE_SIZE, firstErrorMessage, mergeJobsPage } from '@/lib/jobList';
-import type { JobApiStatus, JobListItem, JobRequestType } from '@/types';
+import {
+  EMPTY_JOB_FILTERS,
+  JOBS_PAGE_SIZE,
+  firstErrorMessage,
+  hasActiveFilters,
+  mergeJobsPage,
+  type JobListFilters,
+} from '@/lib/jobList';
+import { classifyCreateJobFailure, type CreateJobFailureKind } from '@/lib/jobCreate';
+import type { JobListItem } from '@/types';
+
+// The filter shape and its helpers live in lib/jobList (pure + unit-tested); they
+// are re-exported here so every existing importer keeps working.
+export { EMPTY_JOB_FILTERS, hasActiveFilters };
+export type { JobListFilters };
 
 /**
  * The authenticated user's jobs (GET /api/v1/jobs), paginated.
@@ -39,25 +52,15 @@ export type JobListStatus =
   | 'unauthorized'
   | 'error';
 
-export interface JobListFilters {
-  status: JobApiStatus | null;
-  requestType: JobRequestType | null;
-  onlyActivelyBidding: boolean;
-}
-
-export const EMPTY_JOB_FILTERS: JobListFilters = {
-  status: null,
-  requestType: null,
-  onlyActivelyBidding: false,
-};
-
-/** True when any filter is narrowing the list (drives the empty-state copy). */
-export function hasActiveFilters(filters: JobListFilters): boolean {
-  return (
-    filters.status !== null ||
-    filters.requestType !== null ||
-    filters.onlyActivelyBidding
-  );
+/**
+ * WHY a load failed, kept apart so the screen never answers every failure with
+ * "check your connection": only 'network' may claim a connectivity problem.
+ * 'client-profile' is the backend's "Client profile not found" case.
+ */
+export interface JobListFailure {
+  kind: CreateJobFailureKind | 'client-profile';
+  /** The backend's own readable text, when it sent one. */
+  message: string | null;
 }
 
 /* ── Module-level invalidation ─────────────────────────────────────────────── */
@@ -93,6 +96,7 @@ export function useJobList() {
   const [refreshing, setRefreshing] = useState(false);
   const [inlineError, setInlineError] = useState(false);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
+  const [failure, setFailure] = useState<JobListFailure | null>(null);
 
   const jobsRef = useRef<JobListItem[]>([]);
   const filtersRef = useRef<JobListFilters>(EMPTY_JOB_FILTERS);
@@ -124,6 +128,7 @@ export function useJobList() {
         setStatus('loading');
         setInlineError(false);
         setServerMessage(null);
+        setFailure(null);
       } else if (mode === 'refresh') {
         setRefreshing(true);
       } else {
@@ -160,21 +165,34 @@ export function useJobList() {
 
         setStatus('ready');
         setServerMessage(null);
+        setFailure(null);
       } catch (err: any) {
         if (seq !== seqRef.current) return;
 
         const httpStatus: number | undefined = err?.response?.status;
         const message = firstErrorMessage(err?.response?.data);
+        // One classifier for every failure mode. The "Client profile not found"
+        // body gets its own kind because it is a backend DATA problem, not a
+        // connection problem, and must never read like one.
+        const classified = classifyCreateJobFailure(err);
+        const kind: JobListFailure['kind'] =
+          classified.message && /client profile/i.test(classified.message) && /not found/i.test(classified.message)
+            ? 'client-profile'
+            : classified.kind;
 
         if (mode !== 'initial' && httpStatus !== 401) {
           // Keep what the user can already see; just flag the soft failure.
           setInlineError(true);
+          setFailure({ kind, message });
         } else if (httpStatus === 422) {
           setServerMessage(message);
+          setFailure({ kind: 'invalid', message });
           setStatus('invalid');
         } else if (httpStatus === 401) {
+          setFailure({ kind: 'unauthorized', message });
           setStatus('unauthorized');
         } else {
+          setFailure({ kind, message });
           setStatus('error');
         }
       } finally {
@@ -221,6 +239,7 @@ export function useJobList() {
       setHasMore(false);
       setInlineError(false);
       setServerMessage(null);
+      setFailure(null);
 
       void fetchPage('initial');
     },
@@ -252,6 +271,7 @@ export function useJobList() {
     refreshing,
     inlineError,
     serverMessage,
+    failure,
     filters,
     setFilters,
     refresh,

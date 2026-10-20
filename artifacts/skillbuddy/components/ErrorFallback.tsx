@@ -98,7 +98,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
       {__DEV__ ? (
         <Modal
           visible={isModalVisible}
-          animationType="slide"
+          animationType="fade"
           transparent={true}
           onRequestClose={() => setIsModalVisible(false)}
         >

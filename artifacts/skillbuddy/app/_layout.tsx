@@ -117,12 +117,13 @@ function RootLayoutNav() {
           name="location"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
+        {/* A popup screen: fade only, per the one shared rule in lib/motion. */}
         <Stack.Screen
           name="filter"
           options={{
             headerShown: false,
             presentation: 'transparentModal',
-            animation: 'slide_from_bottom',
+            animation: 'fade',
             contentStyle: { backgroundColor: 'transparent' },
           }}
         />

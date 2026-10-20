@@ -27,7 +27,7 @@ import BackButton from '@/components/BackButton';
 import { useAppAlert } from '@/context/AlertModalContext';
 import InlineLoader from '@/components/InlineLoader';
 import BottomSheet from '@/components/BottomSheet';
-import DateRangePickerSheet from '@/components/DateRangePickerSheet';
+import DateWindowPickerSheet from '@/components/DateWindowPickerSheet';
 import TimePickerSheet from '@/components/TimePickerSheet';
 import ServicePickerSheet from '@/components/ServicePickerSheet';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -39,27 +39,40 @@ import useAddresses from '@/hooks/useAddresses';
 import { invalidateJobList } from '@/hooks/useJobList';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
-import { jobStatusLabelKey } from '@/lib/jobList';
+import { isClientProfileMissing, jobStatusLabelKey } from '@/lib/jobList';
 import { splitTable, startOfDay } from '@/lib/jobSchedule';
 import {
+  FIXED_SLOTS,
   MAX_EXPECTED_HOURS,
+  MAX_MILESTONE_DAYS,
   MIN_EXPECTED_HOURS,
+  type BookingChoice,
   type BookingErrorKey,
   type BookingKind,
-  type ClockTime,
   type OneTimeDay,
+  type FormRequestType,
+  type TimeChoice,
+  applyBookingKind,
+  applyRequestType,
   buildMultiDayMilestones,
   buildOneTimeMilestones,
   clampExpectedHours,
-  enumerateDays,
   formatDayLabel,
-  formatRangeLabel,
+  formatDaysList,
   formatTimeLabel,
+  formatWindowLabel,
+  hasSlotStarted,
+  isBookingKindAllowed,
   isRequestTypeAllowed,
   oneTimeDay,
-  resolveRequestTypeForBooking,
+  selectionForStart,
+  sortDays,
+  toggleSelectedDay,
   validateMultiDay,
   validateOneTime,
+  validateTimeChoice,
+  windowMinutes,
+  windowShorterThanHours,
 } from '@/lib/jobBooking';
 import {
   buildProfileAddressPayload,
@@ -67,12 +80,17 @@ import {
   type ProfileAddressForm,
 } from '@/lib/profileAddressSync';
 import {
+  DESC_WORD_MAX,
   JOB_TITLE_MAX,
   buildCreateJobRequest,
+  buildPreferredTimeLine,
   classifyCreateJobFailure,
+  countWords,
   createJobErrorCopy,
+  descriptionWordCount,
   firstErrorStep,
   mapValidationErrors,
+  stripPreferredTimeLine,
   validateJobTitle,
   type JobFormField,
 } from '@/lib/jobCreate';
@@ -83,18 +101,23 @@ import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/type
  *
  *   Step 1  Job Details    service (locked from "Book now" or the cascading
  *                          picker), title, description
- *   Step 2  Booking Type   One-time | Long-term — the API's BookingType enum
- *                          is exactly ONE_TIME | MULTI_DAY (live OpenAPI), so
- *                          the long-term card maps to MULTI_DAY
- *   Step 3  Date & Time    one-time: Today/Tomorrow + the CLOCK picker;
- *                          long-term: the CALENDAR range picker + the clock,
- *                          then one milestone per day
+ *   Step 2  Request Type   Urgent | Regular, then the booking type:
+ *                          Single day | Multiple days. The API's BookingType
+ *                          stays ONE_TIME | MULTI_DAY (live OpenAPI) — only the
+ *                          labels change. The pair is locked two ways: Urgent
+ *                          forces Single day, Multiple days forces Regular.
+ *   Step 3  Date & Time    Single day: Today/Tomorrow chips. Multiple days: ONE
+ *                          start day opening a seven-day window
+ *                          (components/DateWindowPickerSheet) where any subset of
+ *                          the seven days can be toggled. Then five fixed time
+ *                          slots + "Anytime" (which opens the clock for its own
+ *                          start and end), and the expected-hours stepper.
  *   Step 4  Service Address country/county/city + street fields, prefilled from
  *                          the profile's saved address (GET /api/v1/addresses)
  *
  * The date picker and the time picker are separate components and are never
- * combined: DateTimeSheet (one sheet holding a calendar AND hour chips) is gone
- * along with the Today/Tomorrow/Weekend chips and the six hardcoded time slots.
+ * combined: DateTimeSheet (one sheet holding a calendar AND hour chips) is gone,
+ * and so is the start→end RANGE picker (DateRangePickerSheet) it was replaced by.
  *
  * SCHEDULE: every instant is composed from LOCAL calendar parts and serialised
  * with toISOString(), so the API receives UTC and a booking made late at night
@@ -110,9 +133,10 @@ import type { AddressRegionResponse, JobResponse, ServiceListItem } from '@/type
  * hourly-rate/budget fields.
  */
 
-// The title bounds (3..150 trimmed) live in lib/jobCreate with the schema that
-// declares them; this screen only renders what validateJobTitle reports.
-const DESC_WORD_MAX = 500;
+// The title bounds (3..150 trimmed) and the description's 500-word ceiling live
+// in lib/jobCreate with the schema that declares them (the live backend rejects
+// a longer description with 422 "Description cannot exceed 500 words"); this
+// screen only renders what those helpers report.
 
 const STEP_KEYS: TranslationKey[] = [
   'post_step_details',
@@ -214,19 +238,27 @@ function RequestTypeCard({
   );
 }
 
-/** Booking-type card: identical structure to the request-type card. */
+/**
+ * Booking-type card: identical structure to the request-type card — same
+ * width/minHeight, icon circle, title and description slots, and a badge in the
+ * SAME corner in every state — so the two pairs line up exactly whether a card
+ * is selected, idle or disabled.
+ */
 function BookingTypeCard({
   active,
   icon,
   title,
   description,
   onPress,
+  disabled = false,
 }: {
   active: boolean;
   icon: 'calendar' | 'repeat';
   title: string;
   description: string;
   onPress: () => void;
+  /** Greved out and inert (Multiple days while Urgent is selected). */
+  disabled?: boolean;
 }) {
   const { colors: c } = useTheme();
   const scale = useSharedValue(1);
@@ -240,17 +272,20 @@ function BookingTypeCard({
           {
             backgroundColor: active ? c.primaryLight : c.muted,
             borderColor: active ? c.primary : c.border,
+            opacity: disabled ? 0.5 : 1,
           },
         ]}
         onPressIn={() => {
+          if (disabled) return;
           scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
         }}
         onPressOut={() => {
           scale.value = withSpring(1, { damping: 16, stiffness: 280 });
         }}
-        onPress={onPress}
+        onPress={disabled ? undefined : onPress}
+        disabled={disabled}
         accessibilityRole="button"
-        accessibilityState={{ selected: active }}
+        accessibilityState={{ selected: active, disabled }}
       >
         <View style={[styles.optionIcon, { backgroundColor: active ? c.primary : c.muted }]}>
           <Feather name={icon} size={17} color={active ? c.primaryForeground : c.mutedForeground} />
@@ -365,18 +400,30 @@ export default function PostJobScreen() {
   const [description, setDescription] = useState('');
 
   const [bookingKind, setBookingKind] = useState<BookingKind>('one_time');
-  /** One-time notice: Urgent was auto-switched to Regular for a long-term stay. */
-  const [bookingSwitchNotice, setBookingSwitchNotice] = useState(false);
+  const [urgency, setUrgency] = useState<FormRequestType>('regular');
+  /**
+   * One-time notice when the other card pair corrected the choice:
+   *   'urgent_single' Urgent forced Single day (Multiple days was selected)
+   *   'multi_regular' Multiple days forced Regular (Urgent was selected)
+   */
+  const [bookingSwitchNotice, setBookingSwitchNotice] = useState<
+    'urgent_single' | 'multi_regular' | null
+  >(null);
   const [oneTimeDayKind, setOneTimeDayKind] = useState<OneTimeDay>('today');
-  const [oneTimeClock, setOneTimeClock] = useState<ClockTime | null>(null);
-  const [rangeStart, setRangeStart] = useState<Date | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
-  const [multiClock, setMultiClock] = useState<ClockTime | null>(null);
-  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+  /**
+   * The time window. ONE choice drives BOTH booking kinds: one of the five fixed
+   * slots, or Anytime with its own start/end. Switching the booking kind keeps
+   * it (only the dates are reset).
+   */
+  const [timeChoice, setTimeChoice] = useState<TimeChoice | null>(null);
+  /** Multiple days: ONE start date plus any subset of its seven days. */
+  const [startDay, setStartDay] = useState<Date | null>(null);
+  const [selectedDays, setSelectedDays] = useState<Date[]>([]);
+  /** Which clock is open: Anytime's start, Anytime's end, or the slot itself. */
+  const [clockTarget, setClockTarget] = useState<'start' | 'end' | null>(null);
   const [dateSheetOpen, setDateSheetOpen] = useState(false);
 
   const [hours, setHours] = useState(2);
-  const [urgency, setUrgency] = useState<'urgent' | 'regular'>('regular');
 
   // ── Address (step 4) ──────────────────────────────────────────────────────
   const { status: countriesStatus, countries, load: loadCountries, refresh: refreshCountries } = useCountries();
@@ -424,7 +471,9 @@ export default function PostJobScreen() {
   const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
   const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
 
-  const wordCount = description.trim().length ? description.trim().split(/\s+/).length : 0;
+  // The counter is the USER's text only — the appended "Preferred time" line is
+  // never something they typed (lib/jobCreate owns both rules).
+  const wordCount = countWords(description);
   const country = countries?.find((x) => x.id === countryId) ?? null;
   const county = counties?.find((x) => x.id === countyId) ?? null;
   const city = cities?.find((x) => x.id === cityId) ?? null;
@@ -440,38 +489,58 @@ export default function PostJobScreen() {
 
   const clearAllErrors = useCallback(() => setStepErrors({}), []);
 
-  // ── Booking kind → request-type lock ──────────────────────────────────
+  // ── The two-way Request Type ↔ Booking Type lock ─────────────────────
   // The live backend refuses URGENT + MULTI_DAY at create time (HTTP 422
   // "Multiple-day bookings only support Regular bidding, not Urgent", captured
-  // 2026-10-14), so choosing Long-term while Urgent is selected switches to
-  // Regular automatically and says so exactly once.
-  const selectBookingKind = useCallback(
-    (kind: BookingKind) => {
-      // The lock lives in lib/jobBooking (resolveRequestTypeForBooking) so the
-      // rule is unit-tested, not re-implemented here.
-      const locked = resolveRequestTypeForBooking(kind, urgency);
-      setBookingKind(locked.kind);
-      if (locked.switched) {
-        setUrgency(locked.requestType);
-        setBookingSwitchNotice(true);
-      }
+  // 2026-10-14), so the two card pairs correct each other:
+  //   • Urgent disables Multiple days  (and selects Single day);
+  //   • Multiple days disables Urgent  (and selects Regular).
+  // The rules live in lib/jobBooking (applyRequestType / applyBookingKind) so
+  // they are unit-tested rather than re-implemented here.
+  const choice: BookingChoice = { requestType: urgency, kind: bookingKind };
+
+  const clearDates = useCallback(() => {
+    setStartDay(null);
+    setSelectedDays([]);
+  }, []);
+
+  const selectRequestType = useCallback(
+    (requestType: FormRequestType) => {
+      if (!isRequestTypeAllowed(bookingKind, requestType)) return;
+      const next = applyRequestType({ requestType: urgency, kind: bookingKind }, requestType);
+      setUrgency(next.requestType);
+      setBookingKind(next.kind);
+      if (next.datesReset) clearDates();
+      // No alarming notice here: choosing Urgent just re-selects Single day,
+      // which the cards themselves show.
+      setStepErrors((prev) => {
+        const { date, time, ...rest } = prev;
+        return rest;
+      });
     },
-    [urgency]
+    [bookingKind, urgency, clearDates]
   );
 
-  // Safety net for any OTHER path into the locked combination: Regular is
-  // forced silently — the one-time notice belongs to the moment the user's own
-  // choice is changed, not to re-renders. (The payload builder forces REGULAR
-  // for MULTI_DAY as well, so this rule holds even if this effect is bypassed.)
-  useEffect(() => {
-    const locked = resolveRequestTypeForBooking(bookingKind, urgency);
-    if (locked.switched) setUrgency(locked.requestType);
-  }, [bookingKind, urgency]);
+  const selectBookingKind = useCallback(
+    (kind: BookingKind) => {
+      if (!isBookingKindAllowed(kind, urgency)) return;
+      const next = applyBookingKind({ requestType: urgency, kind: bookingKind }, kind);
+      setUrgency(next.requestType);
+      setBookingKind(next.kind);
+      if (next.datesReset) clearDates();
+      if (next.switched) setBookingSwitchNotice('multi_regular');
+      setStepErrors((prev) => {
+        const { date, time, ...rest } = prev;
+        return rest;
+      });
+    },
+    [bookingKind, urgency, clearDates]
+  );
 
   // The notice hides itself; it is informational, never a dialog.
   useEffect(() => {
     if (!bookingSwitchNotice) return;
-    const timer = setTimeout(() => setBookingSwitchNotice(false), 5000);
+    const timer = setTimeout(() => setBookingSwitchNotice(null), 5000);
     return () => clearTimeout(timer);
   }, [bookingSwitchNotice]);
 
@@ -594,7 +663,10 @@ export default function PostJobScreen() {
       const titleError = validateJobTitle(title);
       if (titleError) next.title = t(titleError);
       if (!description.trim()) next.description = t('post_err_desc');
-      else if (wordCount > DESC_WORD_MAX) next.description = t('post_err_desc_long');
+      // The counter shows the user's own words, but the backend counts the WHOLE
+      // stored description — including the "Preferred time" line the app appends.
+      else if (descriptionWordCount(description, preferredLine) > DESC_WORD_MAX)
+        next.description = t('post_err_desc_line_limit', { n: DESC_WORD_MAX });
     }
     if (target === 1) {
       // One-time is preselected, so this step is always answerable.
@@ -602,10 +674,10 @@ export default function PostJobScreen() {
     if (target === 2) {
       const now = new Date();
       if (bookingKind === 'one_time') {
-        const error = validateOneTime(oneTimeDayKind, oneTimeClock, now);
+        const error = validateOneTime(oneTimeDayKind, timeChoice, now);
         if (error) next.time = t(error);
       } else {
-        const error = validateMultiDay(rangeStart, rangeEnd, multiClock, now);
+        const error = validateMultiDay(startDay, selectedDays, timeChoice, now);
         if (error) next.date = t(error);
       }
       if (hours < MIN_EXPECTED_HOURS) next.hours = t('post_err_hours');
@@ -624,38 +696,37 @@ export default function PostJobScreen() {
     const now = new Date();
     const error =
       bookingKind === 'one_time'
-        ? validateOneTime(oneTimeDayKind, oneTimeClock, now)
-        : validateMultiDay(rangeStart, rangeEnd, multiClock, now);
+        ? validateOneTime(oneTimeDayKind, timeChoice, now)
+        : validateMultiDay(startDay, selectedDays, timeChoice, now);
     return error ? t(error) : null;
-  }, [step, bookingKind, oneTimeDayKind, oneTimeClock, rangeStart, rangeEnd, multiClock, t]);
+  }, [step, bookingKind, oneTimeDayKind, timeChoice, startDay, selectedDays, t]);
 
   // ── Picker wiring ─────────────────────────────────────────────────────────
   const today = startOfDay(new Date());
-  const activeDay =
-    bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : (rangeStart ?? null);
-  const activeClock = bookingKind === 'one_time' ? oneTimeClock : multiClock;
+  const activeDay = bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : startDay;
 
-  const timeFieldLabel = activeClock
-    ? formatTimeLabel(activeClock.hour, activeClock.minute, {
-        am: t('post_sched_am'),
-        pm: t('post_sched_pm'),
-      })
-    : t('post_time_pick');
-
-  const days = useMemo(
-    () => (rangeStart && rangeEnd ? enumerateDays(rangeStart, rangeEnd) : []),
-    [rangeStart, rangeEnd]
+  const meridiem = useMemo(
+    () => ({ am: t('post_sched_am'), pm: t('post_sched_pm') }),
+    [t]
   );
+  /** `8:00 AM - 11:00 AM` for the chosen window ('' while nothing is chosen). */
+  const windowLabel = formatWindowLabel(timeChoice, meridiem);
+  /** The line appended to the description so the provider sees the window's end. */
+  const preferredLine = useMemo(() => buildPreferredTimeLine(windowLabel), [windowLabel]);
+  /** The selected days, chronological (Multiple days only). */
+  const days = bookingKind === 'multi_day' ? sortDays(selectedDays) : [];
+  const daysSummary = formatDaysList(days, months, weekdays);
+  const shortWindow = !!timeChoice && windowShorterThanHours(timeChoice, hours);
 
   const milestonePreview = useMemo(() => {
-    if (bookingKind !== 'multi_day' || !multiClock || days.length === 0) return [];
+    if (bookingKind !== 'multi_day' || !timeChoice || days.length === 0) return [];
     return days.map((day, index) => ({
       key: `${day.toISOString()}-${index}`,
       label: t('post_milestone_n', { n: index + 1 }),
       day: formatDayLabel(day, months, weekdays),
-      time: timeFieldLabel,
+      time: windowLabel,
     }));
-  }, [bookingKind, multiClock, days, t, months, weekdays, timeFieldLabel]);
+  }, [bookingKind, timeChoice, days, t, months, weekdays, windowLabel]);
 
   // ── Profile address sync (only after a successful non-draft post) ─────────
   const syncProfileAddress = useCallback(async (): Promise<boolean> => {
@@ -781,20 +852,27 @@ export default function PostJobScreen() {
     }
 
     const now = new Date();
+    const chosenHours = clampExpectedHours(hours);
+    // ONE milestone for a single day; one per SELECTED day for multiple days
+    // (they need not be consecutive). Every instant is composed from local
+    // calendar parts and serialised to UTC by lib/jobBooking.
     const milestones =
       bookingKind === 'one_time'
         ? buildOneTimeMilestones(
             oneTimeDay(oneTimeDayKind, now),
-            oneTimeClock as ClockTime,
-            clampExpectedHours(hours)
+            timeChoice as TimeChoice,
+            chosenHours
           )
-        : buildMultiDayMilestones(days, multiClock as ClockTime, clampExpectedHours(hours));
+        : buildMultiDayMilestones(days, timeChoice as TimeChoice, chosenHours);
 
     const payload = buildCreateJobRequest({
       serviceId: serviceId!,
       serviceCategoryId,
       title,
       description,
+      // The window's END has no API field, so it rides as one stored line at the
+      // end of the description (never part of the user's text field).
+      preferredTimeLine: preferredLine,
       requestType: urgency,
       bookingType: bookingKind,
       scheduledAtIso: milestones[0]?.scheduled_at ?? null,
@@ -841,6 +919,16 @@ export default function PostJobScreen() {
         if (step !== null) setStep(step);
         if (mapped.formErrors.length > 0) showUnmapped(mapped.formErrors);
         else if (step === null) showUnmapped([t('post_err_invalid_msg')]);
+      } else if (isClientProfileMissing(failure.message)) {
+        // PART H: the backend's "Client profile not found." is a DATA problem on
+        // the account (the live API has no POST /clients/profile, so the app
+        // cannot create one). Say that in the user's language instead of passing
+        // the English sentence through.
+        showAlert({
+          title: t('post_err_profile_title'),
+          message: t('post_err_profile_msg'),
+          icon: 'user-x',
+        });
       } else {
         const copy = createJobErrorCopy(failure.kind);
         showAlert({
@@ -1125,33 +1213,82 @@ export default function PostJobScreen() {
     </>
   );
 
+  /**
+   * Step 2 — REQUEST TYPE first, then BOOKING TYPE.
+   *
+   * Both pairs use the same card component and the same two-column grid, so they
+   * line up exactly in every state (selected, idle, disabled). The two-way lock
+   * is visible rather than hidden: the disabled card is greyed and says why.
+   */
   const renderBookingStep = () => (
     <>
-      <Text style={[styles.label, { color: c.text, marginTop: 4 }]}>{t('post_booking_pick')}</Text>
+      <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
+      <View style={styles.optionRow}>
+        <RequestTypeCard
+          active={urgency === 'urgent'}
+          icon="zap"
+          title={t('post_urgent')}
+          description={t('post_urgent_desc')}
+          accent={c.urgent}
+          accentSoft={c.urgentLight}
+          onAccent={c.primaryForeground}
+          idle={c.muted}
+          border={c.border}
+          titleColor={c.text}
+          bodyColor={c.mutedForeground}
+          onPress={() => selectRequestType('urgent')}
+          disabled={!isRequestTypeAllowed(bookingKind, 'urgent')}
+        />
+        <RequestTypeCard
+          active={urgency === 'regular'}
+          icon="clock"
+          title={t('post_regular')}
+          description={t('post_regular_desc')}
+          accent={c.success}
+          accentSoft={c.successLight}
+          onAccent={c.primaryForeground}
+          idle={c.muted}
+          border={c.border}
+          titleColor={c.text}
+          bodyColor={c.mutedForeground}
+          onPress={() => selectRequestType('regular')}
+        />
+      </View>
+      {!isRequestTypeAllowed(bookingKind, 'urgent') ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_urgent_locked')}</Text>
+      ) : null}
+
+      <Text style={[styles.label, { color: c.text }]}>{t('post_booking_pick')}</Text>
       <View style={styles.optionRow}>
         <BookingTypeCard
           active={bookingKind === 'one_time'}
           icon="calendar"
-          title={t('post_booking_one_time')}
-          description={t('post_booking_one_time_desc')}
+          title={t('post_booking_single_day')}
+          description={t('post_booking_single_day_desc')}
           onPress={() => selectBookingKind('one_time')}
         />
         <BookingTypeCard
           active={bookingKind === 'multi_day'}
           icon="repeat"
-          title={t('post_booking_long_term')}
-          description={t('post_booking_long_term_desc')}
+          title={t('post_booking_multi_day')}
+          description={t('post_booking_multi_day_desc')}
           onPress={() => selectBookingKind('multi_day')}
+          disabled={!isBookingKindAllowed('multi_day', urgency)}
         />
       </View>
-      <Text style={[styles.hint, { color: c.mutedForeground }]}>
-        {bookingKind === 'one_time' ? t('post_booking_one_time_note') : t('post_booking_long_term_note')}
-      </Text>
+      {!isBookingKindAllowed('multi_day', urgency) ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>
+          {t('post_lock_urgent_single')}
+        </Text>
+      ) : null}
+
       {bookingSwitchNotice ? (
         <View style={[styles.switchNotice, { backgroundColor: c.muted, borderColor: c.border }]}>
           <Feather name="info" size={14} color={c.mutedForeground} />
           <Text style={[styles.switchNoticeText, { color: c.mutedForeground }]}>
-            {t('post_booking_switched_notice')}
+            {bookingSwitchNotice === 'multi_regular'
+              ? t('post_lock_multi_regular_notice')
+              : t('post_lock_urgent_single_notice')}
           </Text>
         </View>
       ) : null}
@@ -1186,27 +1323,6 @@ export default function PostJobScreen() {
             })}
           </View>
 
-          <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-          <TouchableOpacity
-            style={[
-              styles.input,
-              styles.fieldButton,
-              {
-                backgroundColor: c.input,
-                borderColor: stepErrors.time || stepErrors.date ? c.destructive : c.border,
-              },
-            ]}
-            onPress={() => setTimeSheetOpen(true)}
-            accessibilityRole="button"
-          >
-            <Feather name="clock" size={15} color={activeClock ? c.primary : c.mutedForeground} />
-            <Text
-              style={[styles.fieldButtonText, { color: activeClock ? c.text : c.mutedForeground }]}
-            >
-              {timeFieldLabel}
-            </Text>
-            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
-          </TouchableOpacity>
         </>
       ) : (
         <>
@@ -1226,48 +1342,25 @@ export default function PostJobScreen() {
             <Feather
               name="calendar"
               size={15}
-              color={rangeStart ? c.primary : c.mutedForeground}
+              color={startDay ? c.primary : c.mutedForeground}
             />
             <Text
               style={[
                 styles.fieldButtonText,
-                { color: rangeStart ? c.text : c.mutedForeground },
+                { color: startDay ? c.text : c.mutedForeground },
               ]}
               numberOfLines={1}
             >
-              {rangeStart && rangeEnd
-                ? formatRangeLabel(rangeStart, rangeEnd, months, weekdays)
-                : t('post_dates_pick')}
+              {startDay && days.length > 0 ? daysSummary : t('post_date_start_pick')}
             </Text>
             <Feather name="chevron-right" size={16} color={c.mutedForeground} />
           </TouchableOpacity>
+          <Text style={[styles.hint, { color: c.mutedForeground }]}>
+            {startDay
+              ? t('post_days_selected_of', { n: days.length, total: MAX_MILESTONE_DAYS })
+              : t('post_date_window_hint', { n: MAX_MILESTONE_DAYS })}
+          </Text>
 
-          <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-          <TouchableOpacity
-            style={[
-              styles.input,
-              styles.fieldButton,
-              {
-                backgroundColor: c.input,
-                borderColor: stepErrors.time ? c.destructive : c.border,
-                opacity: rangeStart ? 1 : 0.55,
-              },
-            ]}
-            onPress={() => rangeStart && setTimeSheetOpen(true)}
-            disabled={!rangeStart}
-            accessibilityRole="button"
-          >
-            <Feather name="clock" size={15} color={multiClock ? c.primary : c.mutedForeground} />
-            <Text
-              style={[styles.fieldButtonText, { color: multiClock ? c.text : c.mutedForeground }]}
-            >
-              {timeFieldLabel}
-            </Text>
-            <Feather name="chevron-right" size={16} color={c.mutedForeground} />
-          </TouchableOpacity>
-          {!rangeStart ? (
-            <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_time_after_dates')}</Text>
-          ) : null}
 
           {milestonePreview.length > 0 ? (
             <View style={styles.milestoneWrap}>
@@ -1302,6 +1395,151 @@ export default function PostJobScreen() {
         </>
       )}
 
+      {/* ── Time: five fixed slots + Anytime ────────────────────────────── */}
+      <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+      <View style={styles.slotGrid}>
+        {FIXED_SLOTS.map((slot) => {
+          const slotChoice: TimeChoice = { kind: 'slot', key: slot.key };
+          const active = timeChoice?.kind === 'slot' && timeChoice.key === slot.key;
+          const started = hasSlotStarted(slotChoice, activeDay);
+          return (
+            <TouchableOpacity
+              key={slot.key}
+              style={[
+                styles.slot,
+                {
+                  backgroundColor: active ? c.primary : c.input,
+                  borderColor: active ? c.primary : c.border,
+                  opacity: started ? 0.45 : 1,
+                },
+              ]}
+              onPress={() => {
+                if (started) return;
+                setTimeChoice(slotChoice);
+                clearError('time');
+                clearError('date');
+              }}
+              disabled={started}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active, disabled: started }}
+            >
+              <Text
+                style={[styles.slotText, { color: active ? c.primaryForeground : c.text }]}
+                numberOfLines={1}
+              >
+                {`${formatTimeLabel(slot.start.hour, slot.start.minute, meridiem)} - ${formatTimeLabel(
+                  slot.end.hour,
+                  slot.end.minute,
+                  meridiem
+                )}`}
+              </Text>
+              {started ? (
+                <Text
+                  style={[
+                    styles.slotNote,
+                    { color: active ? c.primaryForeground : c.mutedForeground },
+                  ]}
+                >
+                  {t('post_time_slot_started')}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+
+        <TouchableOpacity
+          style={[
+            styles.slot,
+            {
+              backgroundColor: timeChoice?.kind === 'anytime' ? c.primary : c.input,
+              borderColor: timeChoice?.kind === 'anytime' ? c.primary : c.border,
+            },
+          ]}
+          onPress={() => {
+            if (timeChoice?.kind === 'anytime') {
+              setClockTarget('start');
+              return;
+            }
+            setTimeChoice({
+              kind: 'anytime',
+              start: { hour: 9, minute: 0 },
+              end: { hour: 12, minute: 0 },
+            });
+            clearError('time');
+            clearError('date');
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ selected: timeChoice?.kind === 'anytime' }}
+        >
+          <Feather
+            name="clock"
+            size={13}
+            color={timeChoice?.kind === 'anytime' ? c.primaryForeground : c.mutedForeground}
+          />
+          <Text
+            style={[
+              styles.slotText,
+              { color: timeChoice?.kind === 'anytime' ? c.primaryForeground : c.text },
+            ]}
+          >
+            {t('post_time_anytime')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Anytime reveals its own start and end, each opened on the same clock. */}
+      {timeChoice?.kind === 'anytime' ? (
+        <View style={styles.anytimeWrap}>
+          <View style={styles.fieldWrap}>
+            <Text style={[styles.smallLabel, { color: c.mutedForeground }]}>
+              {t('post_time_start')}
+            </Text>
+            <TouchableOpacity
+              style={[styles.input, styles.fieldButton, { backgroundColor: c.input, borderColor: c.border }]}
+              onPress={() => setClockTarget('start')}
+              accessibilityRole="button"
+            >
+              <Feather name="clock" size={15} color={c.primary} />
+              <Text style={[styles.fieldButtonText, { color: c.text }]}>
+                {formatTimeLabel(timeChoice.start.hour, timeChoice.start.minute, meridiem)}
+              </Text>
+              <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.fieldWrap}>
+            <Text style={[styles.smallLabel, { color: c.mutedForeground }]}>
+              {t('post_time_end')}
+            </Text>
+            <TouchableOpacity
+              style={[styles.input, styles.fieldButton, { backgroundColor: c.input, borderColor: c.border }]}
+              onPress={() => setClockTarget('end')}
+              accessibilityRole="button"
+            >
+              <Feather name="clock" size={15} color={c.primary} />
+              <Text style={[styles.fieldButtonText, { color: c.text }]}>
+                {formatTimeLabel(timeChoice.end.hour, timeChoice.end.minute, meridiem)}
+              </Text>
+              <Feather name="chevron-right" size={16} color={c.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[styles.anytimeSummary, { color: c.primary }]}>{windowLabel}</Text>
+          {windowMinutes(timeChoice) <= 0 ? (
+            <View style={styles.inlineError}>
+              <Feather name="alert-circle" size={13} color={c.destructive} />
+              <Text style={[styles.error, { color: c.destructive, marginTop: 0, flex: 1 }]}>
+                {t('post_err_time_window')}
+              </Text>
+            </View>
+          ) : shortWindow ? (
+            <Text style={[styles.hint, { color: c.mutedForeground }]}>
+              {t('post_time_short_hint', { h: hours })}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {stepErrors.date || stepErrors.time ? (
         <Animated.View entering={FadeIn.duration(180)} style={styles.inlineError}>
           <Feather name="alert-circle" size={13} color={c.destructive} />
@@ -1335,42 +1573,6 @@ export default function PostJobScreen() {
           <Feather name="plus" size={16} color={c.text} />
         </TouchableOpacity>
       </View>
-
-      <Text style={[styles.label, { color: c.text }]}>{t('post_request_type')}</Text>
-      <View style={styles.optionRow}>
-        <RequestTypeCard
-          active={urgency === 'urgent'}
-          icon="zap"
-          title={t('post_urgent')}
-          description={t('post_urgent_desc')}
-          accent={c.urgent}
-          accentSoft={c.urgentLight}
-          onAccent={c.primaryForeground}
-          idle={c.muted}
-          border={c.border}
-          titleColor={c.text}
-          bodyColor={c.mutedForeground}
-          onPress={() => setUrgency('urgent')}
-          disabled={!isRequestTypeAllowed(bookingKind, 'urgent')}
-        />
-        <RequestTypeCard
-          active={urgency === 'regular'}
-          icon="clock"
-          title={t('post_regular')}
-          description={t('post_regular_desc')}
-          accent={c.success}
-          accentSoft={c.successLight}
-          onAccent={c.primaryForeground}
-          idle={c.muted}
-          border={c.border}
-          titleColor={c.text}
-          bodyColor={c.mutedForeground}
-          onPress={() => setUrgency('regular')}
-        />
-      </View>
-      {bookingKind === 'multi_day' ? (
-        <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_urgent_locked')}</Text>
-      ) : null}
     </>
   );
 
@@ -1590,32 +1792,54 @@ export default function PostJobScreen() {
         }}
       />
 
-      {/* Time — its own clock picker, never combined with the calendar. */}
+      {/* Clock — the app's ONE clock, opened for Anytime's start or end. */}
       <TimePickerSheet
-        visible={timeSheetOpen}
-        onClose={() => setTimeSheetOpen(false)}
-        title={t('post_time_picker_title')}
-        value={activeClock}
+        visible={clockTarget !== null}
+        onClose={() => setClockTarget(null)}
+        title={
+          clockTarget === 'end'
+            ? t('post_time_end')
+            : clockTarget === 'start'
+              ? t('post_time_start')
+              : t('post_time_picker_title')
+        }
+        value={
+          clockTarget !== null && timeChoice?.kind === 'anytime'
+            ? clockTarget === 'end'
+              ? timeChoice.end
+              : timeChoice.start
+            : null
+        }
         day={activeDay}
         onConfirm={(value) => {
-          if (bookingKind === 'one_time') setOneTimeClock(value);
-          else setMultiClock(value);
+          setTimeChoice((current) => {
+            const base =
+              current && current.kind === 'anytime'
+                ? current
+                : { kind: 'anytime' as const, start: { hour: 9, minute: 0 }, end: { hour: 12, minute: 0 } };
+            return clockTarget === 'end' ? { ...base, end: value } : { ...base, start: value };
+          });
           clearError('time');
           clearError('date');
-          setTimeSheetOpen(false);
+          setClockTarget(null);
         }}
       />
 
-      {/* Dates — calendar only, range mode, 7-day cap built in. */}
-      <DateRangePickerSheet
+      {/* Dates — one start day plus any subset of its seven days. */}
+      <DateWindowPickerSheet
         visible={dateSheetOpen}
         onClose={() => setDateSheetOpen(false)}
         title={t('post_date_picker_title')}
-        value={rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null}
+        value={startDay ? { start: startDay, days: selectedDays } : null}
         minDay={today}
-        onConfirm={(range) => {
-          setRangeStart(range.start);
-          setRangeEnd(range.end);
+        onConfirm={(choice) => {
+          // A NEW start day resets the chosen days; the same start keeps them.
+          setStartDay(choice.start);
+          setSelectedDays(
+            startDay && startDay.getTime() === choice.start.getTime()
+              ? choice.days
+              : selectionForStart(choice.start)
+          );
           clearError('date');
           clearError('time');
           setDateSheetOpen(false);
@@ -1687,6 +1911,30 @@ const styles = StyleSheet.create({
   chipWrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
   chipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  // Two equal slots per row, in every language (no horizontal scrolling).
+  slotGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 8,
+    columnGap: 8,
+  },
+  slot: {
+    width: '47.5%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    minHeight: 52,
+  },
+  slotText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, flexShrink: 1 },
+  slotNote: { fontFamily: 'Manrope_400Regular', fontSize: 9 },
+  anytimeWrap: { marginTop: 10 },
+  anytimeSummary: { fontFamily: 'Manrope_700Bold', fontSize: 12, marginTop: 4 },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',

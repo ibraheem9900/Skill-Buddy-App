@@ -1,10 +1,11 @@
 import React from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatReleaseLabel } from '@/lib/appUpdate';
+import { POPUP_FADE_IN_MS } from '@/lib/motion';
 import useAppUpdate from '@/hooks/useAppUpdate';
 
 /**
@@ -29,7 +30,7 @@ export default function UpdateBanner() {
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(15).duration(380)}
+      entering={FadeIn.duration(POPUP_FADE_IN_MS)}
       style={[styles.card, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
     >
       <View style={styles.headerRow}>

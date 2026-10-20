@@ -490,7 +490,7 @@ export default function AddJobAddressScreen() {
       <Modal
         visible={pickerOpen !== null}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setPickerOpen(null)}
       >
         <View style={styles.modalBackdrop}>

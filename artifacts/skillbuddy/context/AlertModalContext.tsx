@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BlurView } from 'expo-blur';
-import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '@/lib/motion';
 
 export interface AppAlertButton {
   text: string;
@@ -65,13 +66,21 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
   return (
     <AlertModalContext.Provider value={value}>
       {children}
-      <Modal visible={!!config} transparent animationType="none" onRequestClose={close}>
-        <Animated.View entering={FadeIn.duration(180)} style={StyleSheet.absoluteFill}>
+      {/* FADE ONLY (lib/motion): the OS fade covers the cross-fade of the
+          backdrop, and the card itself just fades in and out at its final
+          position — no ZoomIn, no spring, no vertical movement. */}
+      <Modal visible={!!config} transparent animationType="fade" onRequestClose={close}>
+        <Animated.View
+          entering={FadeIn.duration(POPUP_FADE_IN_MS)}
+          exiting={FadeOut.duration(POPUP_FADE_OUT_MS)}
+          style={StyleSheet.absoluteFill}
+        >
           <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
           <Pressable style={styles.backdrop} onPress={close} />
           <View style={styles.centerWrap} pointerEvents="box-none">
             <Animated.View
-              entering={ZoomIn.duration(220).springify().damping(16)}
+              entering={FadeIn.duration(POPUP_FADE_IN_MS)}
+              exiting={FadeOut.duration(POPUP_FADE_OUT_MS)}
               style={[styles.card, { backgroundColor: c.card }]}
             >
               {config?.icon && (
@@ -117,7 +126,9 @@ export function AlertModalProvider({ children }: { children: React.ReactNode }) 
 
 export function useAppAlert() {
   return useContext(AlertModalContext).showAlert;
-}const styles = StyleSheet.create({
+}
+
+const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFill },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   card: { width: '100%', borderRadius: 20, padding: 24, alignItems: 'center', gap: 6 },

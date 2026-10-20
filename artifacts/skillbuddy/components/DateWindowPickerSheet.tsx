@@ -8,42 +8,45 @@ import { useLanguage } from '@/context/LanguageContext';
 import { canPageMonth, monthMatrix, shiftMonth, splitTable } from '@/lib/jobSchedule';
 import {
   MAX_MILESTONE_DAYS,
-  formatRangeLabel,
-  inclusiveDayCount,
-  isRangeDaySelectable,
+  formatDayButton,
+  formatDayLabel,
+  isDayInWindow,
   isSameLocalDay,
+  isStartDaySelectable,
   isValidDate,
   localDay,
-  maxEndDay,
-  rangeExceedsMaxDays,
+  selectionForStart,
+  toggleSelectedDay,
+  windowEndDay,
 } from '@/lib/jobBooking';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   title: string;
-  /** Confirmed range, or null while nothing is chosen. */
-  value: { start: Date; end: Date } | null;
-  onConfirm: (range: { start: Date; end: Date }) => void;
+  /** Confirmed choice: one start day plus the selected days inside its window. */
+  value: { start: Date | null; days: Date[] } | null;
+  onConfirm: (choice: { start: Date; days: Date[] }) => void;
   /** Earliest selectable day — today, so no past date is ever offered. */
   minDay: Date;
 }
 
 /**
- * Calendar-only date picker for LONG-TERM (MULTI_DAY) bookings.
+ * The Multiple-days date sheet.
  *
- * Deliberately NOT combined with the clock: this sheet has a calendar and
- * nothing else. It is used in range mode — tap a start day, then an end day —
- * and the API's one-week ceiling is built into the calendar itself: while a
- * start day is chosen, every day after start + 6 is disabled, so an 8-day
- * range cannot even be assembled. The same rule is re-checked on confirm as
- * belt-and-braces, with the translated "maximum 7 days" message.
+ * The RANGE picker is gone. Instead:
+ *   1. the user taps ONE start date (past dates disabled);
+ *   2. that start opens a SEVEN-calendar-day window (start .. start+6, across
+ *      month boundaries if needed) and EVERY date outside it is disabled;
+ *   3. a row of seven day buttons appears — the start day is selected and
+ *      locked, and any of the other six can be toggled on or off, so 20, 22 and
+ *      25 is a legal choice ("3 of 7 days selected");
+ *   4. "Change start date" clears the choice and re-enables the calendar.
  *
- * Latitude-free, dependency-free: it reuses the unit-tested monthMatrix /
- * shiftMonth / canPageMonth helpers, so the grid on screen is the grid the
- * tests assert on.
+ * Apply commits, Cancel discards, and reopening the sheet restores whatever was
+ * committed — the draft lives here, not on the screen.
  */
-export default function DateRangePickerSheet({
+export default function DateWindowPickerSheet({
   visible,
   onClose,
   title,
@@ -55,18 +58,16 @@ export default function DateRangePickerSheet({
   const { t } = useLanguage();
 
   const [start, setStart] = useState<Date | null>(null);
-  const [end, setEnd] = useState<Date | null>(null);
+  const [days, setDays] = useState<Date[]>([]);
   const [view, setView] = useState(() => ({ year: minDay.getFullYear(), month: minDay.getMonth() }));
-  const [rangeError, setRangeError] = useState<string | null>(null);
 
-  // Re-seed on every open so the sheet never shows a stale month.
+  // Re-seed on every open, so the sheet always shows what is committed.
   useEffect(() => {
     if (!visible) return;
-    const seed = value ?? null;
-    setStart(seed?.start ?? null);
-    setEnd(seed?.end ?? null);
-    setRangeError(null);
-    const month = seed?.start ?? minDay;
+    const seedStart = value?.start ?? null;
+    setStart(seedStart);
+    setDays(value?.days?.length ? value.days : selectionForStart(seedStart));
+    const month = seedStart ?? minDay;
     setView({ year: month.getFullYear(), month: month.getMonth() });
     // minDay is derived from the clock at open time by the caller.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,37 +78,35 @@ export default function DateRangePickerSheet({
   const weeks = useMemo(() => monthMatrix(view.year, view.month), [view]);
   const paging = canPageMonth(view.year, view.month, minDay);
 
+  const windowDays = useMemo(() => {
+    if (!start) return [];
+    return Array.from({ length: MAX_MILESTONE_DAYS }, (_, index) => {
+      const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
+      return day;
+    });
+  }, [start]);
+
   const pick = (day: Date) => {
-    setRangeError(null);
-    // No start yet, or a completed range → this tap starts a new range.
-    if (!start || (start && end)) {
-      setStart(day);
-      setEnd(null);
+    if (!start) {
+      setStart(localDay(day));
+      setDays(selectionForStart(day));
       return;
     }
-    // Tapping before the current start restarts the range from that day.
-    if (day.getTime() < start.getTime()) {
-      setStart(day);
-      setEnd(null);
-      return;
-    }
-    setEnd(day);
+    setDays((current) => toggleSelectedDay(current, start, day));
+  };
+
+  const changeStart = () => {
+    setStart(null);
+    setDays([]);
   };
 
   const confirm = () => {
     if (!isValidDate(start)) return;
-    const to = end ?? start;
-    if (rangeExceedsMaxDays(start, to)) {
-      setRangeError(t('post_err_dates_max'));
-      return;
-    }
-    onConfirm({ start, end: to });
+    const chosen = days.some((day) => isSameLocalDay(day, start)) ? days : selectionForStart(start);
+    onConfirm({ start, days: chosen });
   };
 
-  const summary = start
-    ? formatRangeLabel(start, end ?? start, months, weekdays)
-    : t('post_err_dates_pick');
-  const dayCount = start ? inclusiveDayCount(start, end ?? start) : 0;
+  const selectedLabel = start ? `${t('post_date_start')}: ${formatDayLabel(start, months, weekdays)}` : t('post_date_start_pick');
 
   return (
     <BottomSheet
@@ -118,25 +117,31 @@ export default function DateRangePickerSheet({
         <View style={[styles.summary, { borderBottomColor: c.border }]}>
           <Feather name="calendar" size={15} color={c.primary} />
           <Text style={[styles.summaryText, { color: c.text }]} numberOfLines={1}>
-            {summary}
+            {selectedLabel}
           </Text>
-          {dayCount > 0 ? (
+          {start ? (
             <Text style={[styles.summaryCount, { color: c.primary }]}>
-              {t('post_days_selected', { n: dayCount })}
+              {t('post_days_selected_of', { n: days.length, total: MAX_MILESTONE_DAYS })}
             </Text>
           ) : null}
         </View>
       }
       footer={
         <View style={[styles.footer, { borderTopColor: c.border }]}>
-          {rangeError ? (
-            <Animated.View entering={FadeIn.duration(180)} style={styles.errorRow}>
-              <Feather name="alert-circle" size={13} color={c.destructive} />
-              <Text style={[styles.errorText, { color: c.destructive }]}>{rangeError}</Text>
-            </Animated.View>
+          {start ? (
+            <TouchableOpacity
+              style={styles.changeBtn}
+              onPress={changeStart}
+              accessibilityRole="button"
+            >
+              <Feather name="refresh-cw" size={12} color={c.primary} />
+              <Text style={[styles.changeText, { color: c.primary }]}>
+                {t('post_date_change_start')}
+              </Text>
+            </TouchableOpacity>
           ) : (
             <Text style={[styles.hint, { color: c.mutedForeground }]}>
-              {t('post_dates_hint', { n: MAX_MILESTONE_DAYS })}
+              {t('post_date_window_hint', { n: MAX_MILESTONE_DAYS })}
             </Text>
           )}
           <View style={styles.footerButtons}>
@@ -203,38 +208,44 @@ export default function DateRangePickerSheet({
           <View key={`w-${wi}`} style={styles.weekRow}>
             {week.map((cell, ci) => {
               if (!cell) return <View key={`c-${wi}-${ci}`} style={styles.cell} />;
-              const enabled = isRangeDaySelectable(cell, minDay, start);
+
+              // Before a start date: any day from today on. After it: only the
+              // seven days of the window, so an eighth day cannot be picked.
+              const enabled = start
+                ? isDayInWindow(cell, start)
+                : isStartDaySelectable(cell, minDay);
+              const inWindow = !!start && isDayInWindow(cell, start);
+              const selected = days.some((day) => isSameLocalDay(day, cell));
               const isStart = !!start && isSameLocalDay(cell, start);
-              const isEnd = !!end && isSameLocalDay(cell, end);
-              const inRange =
-                !!start &&
-                !!end &&
-                cell.getTime() > start.getTime() &&
-                cell.getTime() < end.getTime();
               const isToday = isSameLocalDay(cell, localDay(minDay));
-              const edge = isStart || isEnd;
+
               return (
                 <View
                   key={`c-${wi}-${ci}`}
-                  style={[styles.cell, (inRange || edge) && { backgroundColor: c.primaryLight }]}
+                  style={[styles.cell, inWindow && { backgroundColor: c.primaryLight }]}
                 >
                   <TouchableOpacity
                     style={[
                       styles.day,
-                      edge && { backgroundColor: c.primary },
-                      !edge && isToday && { borderColor: c.primary, borderWidth: 1 },
+                      selected && { backgroundColor: c.primary },
+                      !selected && isToday && { borderColor: c.primary, borderWidth: 1 },
                     ]}
                     onPress={() => pick(cell)}
                     disabled={!enabled}
                     accessibilityRole="button"
-                    accessibilityState={{ disabled: !enabled, selected: edge }}
+                    accessibilityState={{ disabled: !enabled, selected }}
                   >
                     <Text
                       style={[
                         styles.dayText,
                         {
-                          color: edge ? c.primaryForeground : enabled ? c.text : c.mutedForeground,
+                          color: selected
+                            ? c.primaryForeground
+                            : enabled
+                              ? c.text
+                              : c.mutedForeground,
                           opacity: enabled ? 1 : 0.4,
+                          fontFamily: isStart || selected ? 'Manrope_700Bold' : 'Manrope_500Medium',
                         },
                       ]}
                     >
@@ -247,13 +258,53 @@ export default function DateRangePickerSheet({
           </View>
         ))}
 
-        <Text style={[styles.rangeHint, { color: c.mutedForeground }]}>
-          {start
-            ? t('post_dates_max_last', {
-                date: formatRangeLabel(start, maxEndDay(start), months, weekdays),
-              })
-            : t('post_dates_hint', { n: MAX_MILESTONE_DAYS })}
-        </Text>
+        {/* ── The seven day buttons ───────────────────────────────────── */}
+        {start ? (
+          <Animated.View entering={FadeIn.duration(180)} style={styles.dayButtonsWrap}>
+            <View style={styles.dayButtons}>
+              {windowDays.map((day) => {
+                const isStart = isSameLocalDay(day, start);
+                const selected = days.some((d) => isSameLocalDay(d, day));
+                return (
+                  <TouchableOpacity
+                    key={day.toISOString()}
+                    style={[
+                      styles.dayBtn,
+                      {
+                        backgroundColor: selected ? c.primary : c.input,
+                        borderColor: selected ? c.primary : c.border,
+                      },
+                    ]}
+                    onPress={() => pick(day)}
+                    disabled={isStart}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected, disabled: isStart }}
+                  >
+                    <Text
+                      style={[
+                        styles.dayBtnText,
+                        { color: selected ? c.primaryForeground : c.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {formatDayButton(day, weekdays)}
+                    </Text>
+                    {isStart ? (
+                      <Feather name="lock" size={9} color={c.primaryForeground} />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.rangeHint, { color: c.mutedForeground }]}>
+              {start
+                ? t('post_date_window_until', {
+                    date: formatDayLabel(windowEndDay(start), months, weekdays),
+                  })
+                : ''}
+            </Text>
+          </Animated.View>
+        ) : null}
       </View>
     </BottomSheet>
   );
@@ -270,7 +321,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   summaryText: { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
-  summaryCount: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
+  summaryCount: { fontFamily: 'Manrope_700Bold', fontSize: 11 },
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -290,15 +341,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: 2,
   },
-  dayText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
-  rangeHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 12, lineHeight: 16 },
+  dayText: { fontSize: 12 },
+  dayButtonsWrap: { marginTop: 10 },
+  dayButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  dayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    minWidth: 74,
+  },
+  dayBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  rangeHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 10, lineHeight: 16 },
   footer: { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1 },
   footerButtons: { flexDirection: 'row', gap: 10, marginTop: 10 },
   hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 15 },
+  changeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  changeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
   cancel: { flex: 1, borderWidth: 1.5, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   cancelText: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
   confirm: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   confirmText: { fontFamily: 'Manrope_700Bold', fontSize: 14 },
-  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  errorText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 15 },
 });

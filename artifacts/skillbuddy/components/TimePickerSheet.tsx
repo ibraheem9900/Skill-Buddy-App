@@ -1,16 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, {
-  Easing,
-  FadeIn,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Dimensions,
+  LayoutChangeEvent,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet from '@/components/BottomSheet';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import {
+  angleForValue,
+  hourFromAngle,
+  minuteFromAngle,
+  angleForPoint,
+  isOutsideDeadZone,
+  stepHour12,
+  stepMinute,
+} from '@/lib/clockMath';
 import {
   TIME_MINUTE_STEP,
   composeInstant,
@@ -24,6 +33,7 @@ import {
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** "Select time", or "Start time" / "End time" for the Anytime window. */
   title: string;
   /** Presented value (24-hour clock), or null while nothing is chosen. */
   value: { hour: number; minute: number } | null;
@@ -37,38 +47,91 @@ interface Props {
   now?: Date;
 }
 
-/** Dial geometry. */
+/** Dial geometry: the face is square and its centre is measured after layout. */
 const DIAL = Math.min(Math.max(Dimensions.get('window').width - 140, 196), 264);
-const CENTER = DIAL / 2;
-const HAND_RADIUS = DIAL / 2 - 44;
-const LABEL_RADIUS = DIAL / 2 - 18;
+const HAND_RADIUS = DIAL / 2 - 42;
+const LABEL_RADIUS = DIAL / 2 - 20;
 const HOUR_LABELS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 const MINUTE_LABELS = Array.from({ length: 60 / TIME_MINUTE_STEP }, (_, i) => i * TIME_MINUTE_STEP);
 
-/** Clock position (degrees from 12 o'clock, clockwise) for a dial value. */
-function dialAngle(value: number, mode: 'hour' | 'minute'): number {
-  return mode === 'hour' ? (value % 12) * 30 : value * 6;
-}
-
-/** Where a label sits on the dial for a given angle. */
-function labelPosition(angle: number): { left: number; top: number } {
+/** Where a dial label sits for a given angle (0° = 12 o'clock, clockwise). */
+function labelPosition(angle: number, size: number): { left: number; top: number } {
+  const radius = (size / 2) * (LABEL_RADIUS / (DIAL / 2));
   const rad = ((angle - 90) * Math.PI) / 180;
   return {
-    left: CENTER + LABEL_RADIUS * Math.cos(rad) - 16,
-    top: CENTER + LABEL_RADIUS * Math.sin(rad) - 13,
+    left: size / 2 + radius * Math.cos(rad) - 16,
+    top: size / 2 + radius * Math.sin(rad) - 13,
   };
 }
 
 /**
- * Clock-style time picker.
+ * A stepper arrow that steps once on touch-down and then REPEATS while held.
+ * Touch-down (not onPress) is used so the first step is instant and a hold needs
+ * no second gesture.
+ */
+function StepperButton({
+  icon,
+  onStep,
+  color,
+  label,
+}: {
+  icon: 'chevron-up' | 'chevron-down';
+  onStep: () => void;
+  color: string;
+  label: string;
+}) {
+  const hold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeat = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stop = useCallback(() => {
+    if (hold.current) clearTimeout(hold.current);
+    if (repeat.current) clearInterval(repeat.current);
+    hold.current = null;
+    repeat.current = null;
+  }, []);
+
+  useEffect(() => stop, [stop]);
+
+  return (
+    <TouchableOpacity
+      style={styles.stepperBtn}
+      onPressIn={() => {
+        onStep();
+        hold.current = setTimeout(() => {
+          repeat.current = setInterval(onStep, 90);
+        }, 400);
+      }}
+      onPressOut={stop}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Feather name={icon} size={18} color={color} />
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * Clock-style time picker — the ONE clock in the app (single time, and the
+ * Start/End fields of "Anytime" all open this same sheet).
  *
- * A separate picker from the calendar, exactly as the brief requires: a real
- * CLOCK FACE (hour dial → minute dial), a large digital readout whose hour and
- * minute halves are tappable to switch mode, an AM/PM toggle, a spring-animated
- * hand, minute selection in 5-minute steps, and Cancel / OK.
+ * THE BUG THIS REPLACES: the needle used to jump around and never stay put,
+ * because (a) the angle was tweened with `withTiming` on EVERY move, so the hand
+ * lagged the finger, and (b) the tween from 355° to 0° rotated the long way
+ * round, so crossing 12 o'clock or 59 → 0 spun the hand a full turn. On top of
+ * that, releasing the finger immediately switched the dial to minutes, moving
+ * the hand somewhere else — the "it does not stay on a value" half of the bug.
  *
- * The dial is plain Views — no new native module — so the JS bundle ships as an
- * over-the-air update against the installed build.
+ * How it works now:
+ *  - the angle is ALWAYS derived from the value (`angleForValue`), never
+ *    accumulated, and it is applied with NO animation, so the hand snaps to the
+ *    value the finger is over and stays there;
+ *  - one transparent touch layer covers the whole face, so the coordinates are
+ *    the dial's own; the centre is measured with onLayout (and re-measured when
+ *    the layout changes) instead of being assumed;
+ *  - a tap anywhere picks the NEAREST label (hours) or the nearest 5 minutes;
+ *  - an hour is selected first, then the dial advances to minutes by itself;
+ *
+ * The dial is plain Views — no native module — so this ships as an OTA update.
  */
 export default function TimePickerSheet({
   visible,
@@ -86,15 +149,15 @@ export default function TimePickerSheet({
   const [minute, setMinute] = useState(0);
   const [isPm, setIsPm] = useState(false);
   const [mode, setMode] = useState<'hour' | 'minute'>('hour');
-
-  const angle = useSharedValue(0);
-  const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${angle.value}deg` }] }));
+  /** Measured centre of the face, in the touch layer's coordinates. */
+  const [centre, setCentre] = useState({ x: DIAL / 2, y: DIAL / 2 });
+  const dragging = useRef(false);
 
   /**
    * The opening selection. A remembered value wins; otherwise 09:00 — except
    * when the sheet is for TODAY and 09:00 has already gone, in which case the
-   * next 5-minute slot after now is used, so the user never opens the dial on a
-   * reading the picker is about to refuse.
+   * next 5-minute slot after now is used, so the dial never opens on a reading
+   * the picker is about to refuse.
    */
   const defaultClock = useCallback((): { hour: number; minute: number } => {
     const now = nowProp ?? new Date();
@@ -117,16 +180,48 @@ export default function TimePickerSheet({
     setMinute(seed.minute - (seed.minute % TIME_MINUTE_STEP));
     setIsPm(twelve.isPm);
     setMode('hour');
+    dragging.current = false;
   }, [visible, value, defaultClock]);
 
-  const targetAngle =
-    mode === 'hour' ? dialAngle(hour12 === 12 ? 0 : hour12, 'hour') : dialAngle(minute, 'minute');
-
-  useEffect(() => {
-    angle.value = withTiming(targetAngle, { duration: 180, easing: Easing.out(Easing.cubic) });
-  }, [targetAngle, angle]);
-
   const hour24 = to24Hour(hour12, isPm);
+
+  /**
+   * Where the hand points: DERIVED from the value on every render. No tween, so
+   * there is nothing to spin and nothing to lag behind the finger.
+   */
+  const angle = angleForValue(mode === 'hour' ? hour12 : minute, mode);
+
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) setCentre({ x: width / 2, y: height / 2 });
+  };
+
+  /** Read a touch into the active field. Returns false when it was ignored. */
+  const applyTouch = (locationX: number, locationY: number): boolean => {
+    const dx = locationX - centre.x;
+    const dy = locationY - centre.y;
+    if (!isOutsideDeadZone(dx, dy)) return false;
+    const deg = angleForPoint(dx, dy);
+    if (mode === 'hour') {
+      setHour12(hourFromAngle(deg));
+    } else {
+      setMinute(minuteFromAngle(deg, TIME_MINUTE_STEP));
+    }
+    return true;
+  };
+
+  /** Finger lifted: an hour choice advances the dial to minutes, by itself. */
+  const finishTouch = (locationX: number, locationY: number) => {
+    const applied = dragging.current || applyTouch(locationX, locationY);
+    dragging.current = false;
+    if (mode === 'hour' && applied) setMode('minute');
+  };
+
+  /** Stepper arrows act on the ACTIVE field only. */
+  const step = (delta: number) => {
+    if (mode === 'hour') setHour12((current) => stepHour12(current, delta));
+    else setMinute((current) => stepMinute(current, delta));
+  };
 
   /** A reading that is already in the past (only possible for TODAY). */
   const isPast = useMemo(() => {
@@ -136,39 +231,8 @@ export default function TimePickerSheet({
     return composeInstant(day, hour24, minute).getTime() <= now.getTime();
   }, [day, hour24, minute, nowProp]);
 
-  const pick = (locationX: number, locationY: number) => {
-    const dx = locationX - CENTER;
-    const dy = locationY - CENTER;
-    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-    let deg = (Math.atan2(dx, -dy) * 180) / Math.PI;
-    if (deg < 0) deg += 360;
-
-    if (mode === 'hour') {
-      const raw = Math.round(deg / 30) % 12;
-      setHour12(raw === 0 ? 12 : raw);
-      return;
-    }
-    const snapped = (Math.round(deg / TIME_MINUTE_STEP) * TIME_MINUTE_STEP) % 60;
-    setMinute((snapped + 60) % 60);
-  };
-
-  const onDialRelease = (locationX: number, locationY: number) => {
-    pick(locationX, locationY);
-    // Hour first, then minutes — the hand advances by itself, as on a clock.
-    if (mode === 'hour') setMode('minute');
-  };
-
-  const hourSegments: Array<{ value: number; active: boolean }> = useMemo(
-    () => HOUR_LABELS.map((h) => ({ value: h, active: mode === 'hour' && h === hour12 })),
-    [mode, hour12]
-  );
-
-  const minuteSegments: Array<{ value: number; active: boolean }> = useMemo(
-    () => MINUTE_LABELS.map((m) => ({ value: m, active: mode === 'minute' && m === minute })),
-    [mode, minute]
-  );
-
-  const segments = mode === 'hour' ? hourSegments : minuteSegments;
+  const segments = mode === 'hour' ? HOUR_LABELS : MINUTE_LABELS;
+  const activeValue = mode === 'hour' ? hour12 : minute;
 
   return (
     <BottomSheet
@@ -178,12 +242,12 @@ export default function TimePickerSheet({
       footer={
         <View style={[styles.footer, { borderTopColor: c.border }]}>
           {isPast ? (
-            <Animated.View entering={FadeIn.duration(180)} style={styles.errorRow}>
+            <View style={styles.errorRow}>
               <Feather name="alert-circle" size={13} color={c.destructive} />
               <Text style={[styles.errorText, { color: c.destructive }]}>
                 {t('post_err_time_past')}
               </Text>
-            </Animated.View>
+            </View>
           ) : null}
           <View style={styles.footerButtons}>
             <TouchableOpacity
@@ -208,140 +272,203 @@ export default function TimePickerSheet({
       }
     >
       <View style={styles.body}>
-        {/* ── Digital readout ─────────────────────────────────────────── */}
-        <View style={styles.readout}>
-          <TouchableOpacity
-            onPress={() => setMode('hour')}
-            style={[styles.readoutPart, mode === 'hour' && { backgroundColor: c.primaryLight }]}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.readoutText, { color: mode === 'hour' ? c.primary : c.text }]}>
-              {pad2(hour12)}
-            </Text>
-          </TouchableOpacity>
-          <Text style={[styles.readoutColon, { color: c.mutedForeground }]}>:</Text>
-          <TouchableOpacity
-            onPress={() => setMode('minute')}
-            style={[styles.readoutPart, mode === 'minute' && { backgroundColor: c.primaryLight }]}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.readoutText, { color: mode === 'minute' ? c.primary : c.text }]}>
-              {pad2(minute)}
-            </Text>
-          </TouchableOpacity>
-          <View style={[styles.meridiem, { backgroundColor: c.muted, borderColor: c.border }]}>
-            {[false, true].map((pm) => {
-              const active = pm === isPm;
-              return (
-                <TouchableOpacity
-                  key={pm ? 'pm' : 'am'}
-                  style={[styles.meridiemBtn, active && { backgroundColor: c.primary }]}
-                  onPress={() => setIsPm(pm)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text
-                    style={[
-                      styles.meridiemText,
-                      { color: active ? c.primaryForeground : c.mutedForeground },
-                    ]}
+        {/* ── Stepper (up) · readout · stepper (down) ─────────────────── */}
+        <View style={styles.readoutWrap}>
+          <StepperButton
+            icon="chevron-up"
+            onStep={() => step(1)}
+            color={c.primary}
+            label={`${t(mode === 'hour' ? 'post_sched_hour' : 'post_sched_minute')} +1`}
+          />
+
+          <View style={styles.readout}>
+            <TouchableOpacity
+              onPress={() => setMode('hour')}
+              style={[styles.readoutPart, mode === 'hour' && { backgroundColor: c.primaryLight }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === 'hour' }}
+            >
+              <Text style={[styles.readoutText, { color: mode === 'hour' ? c.primary : c.text }]}>
+                {pad2(hour12)}
+              </Text>
+            </TouchableOpacity>
+            <Text style={[styles.readoutColon, { color: c.mutedForeground }]}>:</Text>
+            <TouchableOpacity
+              onPress={() => setMode('minute')}
+              style={[styles.readoutPart, mode === 'minute' && { backgroundColor: c.primaryLight }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === 'minute' }}
+            >
+              <Text style={[styles.readoutText, { color: mode === 'minute' ? c.primary : c.text }]}>
+                {pad2(minute)}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={[styles.meridiem, { backgroundColor: c.muted, borderColor: c.border }]}>
+              {[false, true].map((pm) => {
+                const active = pm === isPm;
+                return (
+                  <TouchableOpacity
+                    key={pm ? 'pm' : 'am'}
+                    style={[styles.meridiemBtn, active && { backgroundColor: c.primary }]}
+                    onPress={() => setIsPm(pm)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                   >
-                    {t(pm ? 'post_sched_pm' : 'post_sched_am')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.meridiemText,
+                        { color: active ? c.primaryForeground : c.mutedForeground },
+                      ]}
+                    >
+                      {t(pm ? 'post_sched_pm' : 'post_sched_am')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
+
+          <StepperButton
+            icon="chevron-down"
+            onStep={() => step(-1)}
+            color={c.primary}
+            label={`${t(mode === 'hour' ? 'post_sched_hour' : 'post_sched_minute')} -1`}
+          />
         </View>
 
-        {/* ── Clock face ──────────────────────────────────────────────── */}
+        {/* ── Clock face ────────────────────────────────────────────────── */}
         <View style={styles.dialWrap}>
           <View
             style={[
               styles.dial,
-              { width: DIAL, height: DIAL, borderRadius: CENTER, backgroundColor: c.input, borderColor: c.border },
+              {
+                width: DIAL,
+                height: DIAL,
+                borderRadius: DIAL / 2,
+                backgroundColor: c.input,
+                borderColor: c.border,
+              },
             ]}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={(e) => pick(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-            onResponderMove={(e) => pick(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-            onResponderRelease={(e) =>
-              onDialRelease(e.nativeEvent.locationX, e.nativeEvent.locationY)
-            }
+            onLayout={onLayout}
           >
-            {/* Hand */}
-            <Animated.View
+            {/* The hand: a plain rotated view, angle derived, never animated. */}
+            <View
               pointerEvents="none"
-              style={[styles.hand, { width: DIAL, height: DIAL }, handStyle]}
+              style={[
+                styles.hand,
+                { width: DIAL, height: DIAL, transform: [{ rotate: `${angle}deg` }] },
+              ]}
             >
-              <View style={{ height: CENTER - HAND_RADIUS - 7 }} />
+              <View style={{ height: DIAL / 2 - HAND_RADIUS - 8 }} />
               <View style={[styles.handTip, { backgroundColor: c.primary }]} />
-              <View style={[styles.handLine, { height: HAND_RADIUS - 7, backgroundColor: c.primary }]} />
-            </Animated.View>
+              <View
+                style={[
+                  styles.handLine,
+                  { height: HAND_RADIUS - 8, backgroundColor: c.primary },
+                ]}
+              />
+            </View>
 
-            {/* Dial labels for the active mode */}
-            {segments.map((seg) => {
-              const pos = labelPosition(
-                mode === 'hour'
-                  ? dialAngle(seg.value === 12 ? 0 : seg.value, 'hour')
-                  : dialAngle(seg.value, 'minute')
+            {/* Labels for the ACTIVE mode only. */}
+            {segments.map((segment) => {
+              const position = labelPosition(
+                angleForValue(segment, mode),
+                DIAL
               );
+              const active = segment === activeValue;
               return (
-                <View key={`d-${mode}-${seg.value}`} style={[styles.labelWrap, pos]} pointerEvents="none">
+                <View
+                  key={`d-${mode}-${segment}`}
+                  style={[styles.labelWrap, position]}
+                  pointerEvents="none"
+                >
                   <Text
                     style={[
                       styles.labelText,
-                      { color: seg.active ? c.primary : c.mutedForeground },
-                      seg.active && styles.labelActive,
+                      { color: active ? c.primary : c.mutedForeground },
+                      active && styles.labelActive,
                     ]}
                   >
-                    {mode === 'hour' ? seg.value : pad2(seg.value)}
+                    {mode === 'hour' ? segment : pad2(segment)}
                   </Text>
                 </View>
               );
             })}
 
-            <View style={[styles.knob, { backgroundColor: c.primary }]} pointerEvents="none" />
+            <View
+              pointerEvents="none"
+              style={[
+                styles.knob,
+                {
+                  top: DIAL / 2 - 6,
+                  left: DIAL / 2 - 6,
+                  backgroundColor: c.primary,
+                },
+              ]}
+            />
+
+            {/* ONE transparent touch layer over the whole face. Its own
+                coordinates are the dial's, so a tap is measured against the
+                measured centre and nothing else. */}
+            <View
+              style={[styles.touchLayer, { width: DIAL, height: DIAL }]}
+              onStartShouldSetResponder={() => true}
+              onMoveShouldSetResponder={() => true}
+              onResponderTerminationRequest={() => false}
+              onResponderGrant={(event) => {
+                dragging.current = false;
+                const { locationX, locationY } = event.nativeEvent;
+                if (applyTouch(locationX, locationY)) dragging.current = true;
+              }}
+              onResponderMove={(event) => {
+                const { locationX, locationY } = event.nativeEvent;
+                if (applyTouch(locationX, locationY)) dragging.current = true;
+              }}
+              onResponderRelease={(event) => {
+                const { locationX, locationY } = event.nativeEvent;
+                finishTouch(locationX, locationY);
+              }}
+              onResponderTerminate={() => {
+                dragging.current = false;
+              }}
+            />
           </View>
         </View>
 
         <Text style={[styles.modeHint, { color: c.mutedForeground }]}>
           {mode === 'hour' ? t('post_sched_hour') : t('post_sched_minute')}
         </Text>
-        <Text style={[styles.selected, { color: c.primary }]}>
-          {formatClock24(hour24, minute)}
-        </Text>
+        <Text style={[styles.selected, { color: c.primary }]}>{formatClock24(hour24, minute)}</Text>
       </View>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { flex: 1, alignItems: 'center', paddingTop: 14 },
+  body: { flex: 1, alignItems: 'center', paddingTop: 10 },
+  readoutWrap: { alignItems: 'center', gap: 2 },
   readout: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   readoutPart: { paddingHorizontal: 12, paddingVertical: 2, borderRadius: 12 },
   readoutText: { fontFamily: 'Manrope_700Bold', fontSize: 38 },
   readoutColon: { fontFamily: 'Manrope_700Bold', fontSize: 34, marginTop: -4 },
+  stepperBtn: { paddingHorizontal: 24, paddingVertical: 3 },
   meridiem: {
     flexDirection: 'row',
     borderRadius: 12,
     borderWidth: 1,
     padding: 3,
     gap: 3,
-    marginLeft: 10,
+    marginLeft: 8,
   },
-  meridiemBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9 },
+  meridiemBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9 },
   meridiemText: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
-  dialWrap: { alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  dial: {
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
+  dialWrap: { alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  dial: { alignItems: 'center', justifyContent: 'flex-start', borderWidth: 1 },
   hand: { position: 'absolute', left: 0, top: 0, alignItems: 'center' },
   handTip: { width: 14, height: 14, borderRadius: 7 },
   handLine: { width: 2, borderRadius: 1 },
+  touchLayer: { position: 'absolute', left: 0, top: 0 },
   labelWrap: {
     position: 'absolute',
     width: 32,
@@ -351,8 +478,8 @@ const styles = StyleSheet.create({
   },
   labelText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   labelActive: { fontFamily: 'Manrope_700Bold' },
-  knob: { position: 'absolute', top: CENTER - 6, left: CENTER - 6, width: 12, height: 12, borderRadius: 6 },
-  modeHint: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, marginTop: 12, letterSpacing: 0.4 },
+  knob: { position: 'absolute', width: 12, height: 12, borderRadius: 6 },
+  modeHint: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, marginTop: 10, letterSpacing: 0.4 },
   selected: { fontFamily: 'Manrope_700Bold', fontSize: 15, marginTop: 2 },
   footer: { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1 },
   footerButtons: { flexDirection: 'row', gap: 10 },

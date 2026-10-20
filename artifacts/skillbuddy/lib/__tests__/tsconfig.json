@@ -33,6 +33,7 @@
     "./appUpdate.test.ts",
     "./jobSchedule.test.ts",
     "./jobBooking.test.ts",
+    "./jobFilters.test.ts",
     "./jobCreateError.test.ts",
     "./bid.test.ts",
     "./realtimeEvents.test.ts",

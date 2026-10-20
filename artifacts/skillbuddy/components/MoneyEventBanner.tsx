@@ -3,11 +3,12 @@ import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useMoneyEvents } from '@/context/MoneyEventsContext';
 import { formatMoneyAmount, moneyBannerTarget, type MoneyBannerTone } from '@/lib/moneyEvents';
+import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '@/lib/motion';
 
 /**
  * A money event, announced app-wide.
@@ -78,8 +79,8 @@ export default function MoneyEventBanner({ topOffset = 0 }: { topOffset?: number
 
   return (
     <Animated.View
-      entering={FadeInUp.duration(220)}
-      exiting={FadeOutUp.duration(180)}
+      entering={FadeIn.duration(POPUP_FADE_IN_MS)}
+      exiting={FadeOut.duration(POPUP_FADE_OUT_MS)}
       style={[styles.wrap, { top: insets.top + 8 + topOffset }]}
       pointerEvents="box-none"
     >

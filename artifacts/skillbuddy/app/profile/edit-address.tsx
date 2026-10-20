@@ -479,7 +479,7 @@ export default function EditAddressScreen() {
     const titleKey = pickerOpen === 'country' ? 'addr_c_country' : pickerOpen === 'county' ? 'addr_c_county' : 'addr_c_city';
 
     return (
-      <Modal visible transparent animationType="slide" onRequestClose={() => setPickerOpen(null)}>
+      <Modal visible transparent animationType="fade" onRequestClose={() => setPickerOpen(null)}>
         <Pressable style={[styles.modalBackdrop, { backgroundColor: c.overlay }]} onPress={() => setPickerOpen(null)}>
           <Pressable style={[styles.modalSheet, { backgroundColor: c.background, borderColor: c.border }]}>
             <View style={[styles.modalHead, { borderBottomColor: c.border }]}>

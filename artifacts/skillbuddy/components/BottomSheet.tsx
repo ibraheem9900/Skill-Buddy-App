@@ -18,6 +18,11 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '@/lib/motion';
+
+/** The shared fade curve: ease-out in, ease-in out (see lib/motion). */
+const POPUP_EASING_IN = Easing.out(Easing.quad);
+const POPUP_EASING_OUT = Easing.in(Easing.quad);
 
 interface Props {
   visible: boolean;
@@ -48,9 +53,11 @@ const WINDOW = Dimensions.get('window');
  *  - the bottom safe-area inset is padded, so the last row is never hidden
  *    behind the Android/iOS navigation bar.
  *
- * Animation: the backdrop fades while the sheet slides up (open) and down
- * (close); the close animation finishes before the modal unmounts, so it is
- * smooth in both directions instead of snapping shut.
+ * Animation: FADE ONLY. The sheet is anchored at its final position and only
+ * its opacity (plus the backdrop's) animates — see lib/motion. There is no
+ * translateY, no spring and no scale, so the surface never slides up from the
+ * bottom; the close fade finishes before the modal unmounts instead of snapping
+ * shut.
  */
 export default function BottomSheet({
   visible,
@@ -75,13 +82,16 @@ export default function BottomSheet({
   useEffect(() => {
     if (visible) {
       setRendered(true);
-      progress.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
+      progress.value = withTiming(1, {
+        duration: POPUP_FADE_IN_MS,
+        easing: POPUP_EASING_IN,
+      });
       return;
     }
     if (!rendered) return;
     progress.value = withTiming(
       0,
-      { duration: 190, easing: Easing.in(Easing.cubic) },
+      { duration: POPUP_FADE_OUT_MS, easing: POPUP_EASING_OUT },
       (finished) => {
         'worklet';
         if (finished) runOnJS(setRendered)(false);
@@ -92,10 +102,8 @@ export default function BottomSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: (1 - progress.value) * (sheetHeight + 60) }],
-  }));
+  // The shared rule: opacity only, on the backdrop AND on the sheet.
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
 
   if (!rendered) return null;
 
@@ -108,7 +116,7 @@ export default function BottomSheet({
       onRequestClose={onClose}
     >
       <View style={styles.root}>
-        <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, fadeStyle]}>
           <Pressable
             style={[StyleSheet.absoluteFill, styles.backdrop, { backgroundColor: c.overlay }]}
             onPress={onClose}
@@ -127,7 +135,7 @@ export default function BottomSheet({
               borderColor: c.border,
               shadowColor: c.shadowMd,
             },
-            sheetStyle,
+            fadeStyle,
           ]}
         >
           <View style={[styles.handle, { backgroundColor: c.border }]} />

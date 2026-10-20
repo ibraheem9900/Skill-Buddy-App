@@ -12,6 +12,7 @@
 import type {
   JobApiStatus,
   JobListItem,
+  JobRequestType,
   ListJobsParams,
   ValidationErrorDetail,
 } from '@/types';
@@ -193,6 +194,88 @@ export const JOB_STATUS_VALUES = [
   'CANCELLED_BY_CLIENT',
   'CANCELLED_BY_PROVIDER',
 ] as const satisfies readonly JobApiStatus[];
+
+/* ── Filters: one source of truth for the query, the sheet and the chips ──── */
+
+/** The list's filters, exactly as GET /api/v1/jobs takes them. */
+export interface JobListFilters {
+  status: JobApiStatus | null;
+  requestType: JobRequestType | null;
+  onlyActivelyBidding: boolean;
+}
+
+export const EMPTY_JOB_FILTERS: JobListFilters = {
+  status: null,
+  requestType: null,
+  onlyActivelyBidding: false,
+};
+
+/** True when any filter is narrowing the list (drives the empty-state copy). */
+export function hasActiveFilters(filters: JobListFilters): boolean {
+  return filters.status !== null || filters.requestType !== null || filters.onlyActivelyBidding;
+}
+
+/** How many filters are on — the number in the Filters button's badge. */
+export function activeFilterCount(filters: JobListFilters): number {
+  let count = 0;
+  if (filters.status !== null) count += 1;
+  if (filters.requestType !== null) count += 1;
+  if (filters.onlyActivelyBidding) count += 1;
+  return count;
+}
+
+/** The removable chips, in the order they appear next to the Filters button. */
+export type JobFilterId = 'status' | 'requestType' | 'bidding';
+
+export function activeFilterIds(filters: JobListFilters): JobFilterId[] {
+  const ids: JobFilterId[] = [];
+  if (filters.status !== null) ids.push('status');
+  if (filters.requestType !== null) ids.push('requestType');
+  if (filters.onlyActivelyBidding) ids.push('bidding');
+  return ids;
+}
+
+/** Drop ONE filter (a chip's ×) and leave the rest untouched. */
+export function removeFilter(filters: JobListFilters, id: JobFilterId): JobListFilters {
+  if (id === 'status') return { ...filters, status: null };
+  if (id === 'requestType') return { ...filters, requestType: null };
+  return { ...filters, onlyActivelyBidding: false };
+}
+
+/* ── Why the list is empty, and why a load failed ─────────────────────────── */
+
+/**
+ * What the screen renders. `empty` and `empty-filtered` are SUCCESS states: the
+ * request returned an empty array, so nothing failed and no error may be shown.
+ */
+export type JobsViewState = 'loading' | 'list' | 'empty' | 'empty-filtered' | 'error';
+
+/**
+ * One decision for the whole screen. A 200 with `[]` is an EMPTY state, never an
+ * error; a failure with rows already on screen keeps the list.
+ */
+export function resolveJobsViewState(args: {
+  status: 'idle' | 'loading' | 'ready' | 'invalid' | 'unauthorized' | 'error';
+  jobCount: number;
+  hasFilters: boolean;
+}): JobsViewState {
+  const { status, jobCount, hasFilters } = args;
+  if (jobCount > 0) return 'list';
+  if (status === 'loading' || status === 'idle') return 'loading';
+  if (status === 'ready') return hasFilters ? 'empty-filtered' : 'empty';
+  return 'error';
+}
+
+/**
+ * The backend's own words for a user that has no client profile. The app cannot
+ * create one — the live OpenAPI only exposes GET and PATCH on
+ * /api/v1/clients/profile, there is no POST — so this case must be REPORTED, not
+ * worked around.
+ */
+export function isClientProfileMissing(message: string | null | undefined): boolean {
+  if (typeof message !== 'string') return false;
+  return /client profile/i.test(message) && /not found/i.test(message);
+}
 
 /** Translation keys for those statuses — labels are never shown as raw enums. */
 export type JobStatusLabelKey =

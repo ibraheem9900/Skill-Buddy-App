@@ -38,6 +38,7 @@ const TEST_FILES = [
   'appUpdate.test.js',
   'jobSchedule.test.js',
   'jobBooking.test.js',
+  'jobFilters.test.js',
   'jobCreateError.test.js',
   'bid.test.js',
   'realtimeEvents.test.js',
