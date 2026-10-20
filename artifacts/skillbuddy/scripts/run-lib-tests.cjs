@@ -53,6 +53,8 @@ const TEST_FILES = [
   'myBids.test.js',
   'bidResults.test.js',
   'moneyEvents.test.js',
+  'dataState.test.js',
+  'tabNav.test.js',
   'translations.test.js',
 ];
 

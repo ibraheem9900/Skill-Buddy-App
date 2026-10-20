@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
-import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
+import { classifyDataFailure, type DataFailure } from '@/lib/dataState';
 import type { ClientProfileResponse } from '@/types';
 
 /**
@@ -9,7 +9,11 @@ import type { ClientProfileResponse } from '@/types';
  *  - idle      not started
  *  - loading   fetch in flight
  *  - ready     profile stats loaded (data set)
- *  - error     network/5xx — retryable (the profile tab renders a fallback)
+ *  - error     the request FAILED — retryable (the profile tab renders a fallback)
+ *
+ * A profile that loads with zero counts is 'ready' (real zeros, no Retry).
+ * `failure` carries the classified cause (lib/dataState), including the
+ * 'client-profile' case for an account the backend has no client profile for.
  *
  * No documented error shape for this endpoint (no parameters); 401s flow
  * through the shared silent-refresh interceptor. The screen gates loading on
@@ -39,10 +43,9 @@ export function formatAmountSpent(raw: string | null | undefined): string {
 }
 
 export function useClientProfile() {
-  const { t } = useLanguage();
   const [status, setStatus] = useState<ClientProfileStatus>(cacheStatus);
   const [profile, setProfile] = useState<ClientProfileResponse | null>(cache);
-  const [errorMessage, setErrorMessage] = useState<TranslationKey | null>(null);
+  const [failure, setFailure] = useState<DataFailure | null>(null);
   const inFlight = useRef(false);
 
   const load = useCallback(async (force = false) => {
@@ -50,16 +53,19 @@ export function useClientProfile() {
     if (!force && cacheStatus === 'ready') return; // cached — no re-fetch
     inFlight.current = true;
     setStatus('loading');
+    setFailure(null);
     try {
       const { data } = await authApi.getClientProfile();
       cache = data;
       cacheStatus = 'ready';
       setProfile(data);
       setStatus('ready');
-    } catch {
+    } catch (err) {
+      cache = null;
       cacheStatus = 'error';
+      setProfile(null);
+      setFailure(classifyDataFailure(err));
       setStatus('error');
-      setErrorMessage('cstat_err_network');
     } finally {
       inFlight.current = false;
     }
@@ -80,7 +86,7 @@ export function useClientProfile() {
     return data;
   }, []);
 
-  return { status, profile, errorMessage, load, refresh: () => load(true), updateLanguage, t };
+  return { status, profile, failure, load, refresh: () => load(true), updateLanguage };
 }
 
 export default useClientProfile;

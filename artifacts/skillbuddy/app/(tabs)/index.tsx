@@ -22,7 +22,13 @@ import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
 import useClientDashboard from '@/hooks/useClientDashboard';
 import useClientBookings from '@/hooks/useClientBookings';
+import { useCreditWallet } from '@/hooks/useWallet';
 import { formatAmountSpent } from '@/hooks/useClientProfile';
+import {
+  failureCopyKind,
+  resolveDataViewState,
+  type FailureCopyKind,
+} from '@/lib/dataState';
 import {
   getBookingStatus,
   getBookingTitle,
@@ -112,16 +118,55 @@ export default function HomeScreen() {
   // Client bookings list (GET /api/v1/clients/bookings) — same role gating;
   // fresh fetch per entry + pull-to-refresh, no stale cache.
   const clientBookings = useClientBookings();
+  // Credit points come from the REAL wallet (GET /api/v1/wallet/credits), not a
+  // `?? 0` default on the user object — the previous zero looked hardcoded.
+  const creditWallet = useCreditWallet();
   const dashLoaded = useRef(false);
   const isDark = theme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  // Simulate a 500ms initial loading state for dashboard sections
-  React.useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(t);
-  }, []);
+  // Skeletons only while a request is genuinely in flight — the old fixed
+  // 500 ms "loading" timer made every visit look slow for no reason.
+  const servicesLoading = svcStatus === 'loading' && apiServices == null;
+
+  // ONE decision per section: a 200 with zeros/[] is empty (no Retry), and only
+  // a failed request may offer Retry.
+  const pointsState = resolveDataViewState({
+    status: creditWallet.status,
+    hasData: creditWallet.status === 'ready',
+    failure: creditWallet.failure,
+  });
+  const pointsCopy: Record<FailureCopyKind, string> = {
+    network: t('home_points_offline'),
+    timeout: t('home_points_timeout'),
+    server: t('home_points_error'),
+    session: t('home_points_error'),
+    generic: t('home_points_error'),
+  };
+  const activityState = resolveDataViewState({
+    status: clientDash.status,
+    hasData: clientDash.summary != null,
+    failure: clientDash.failure,
+  });
+  const activityCopy: Record<FailureCopyKind, string> = {
+    network: t('cd_err_network'),
+    timeout: t('cd_err_timeout'),
+    server: t('cd_err_generic'),
+    session: t('cd_err_session'),
+    generic: t('cd_err_generic'),
+  };
+  const bookingsState = resolveDataViewState({
+    status: clientBookings.status,
+    hasData: clientBookings.bookings.length > 0,
+    failure: clientBookings.failure,
+  });
+  const bookingsCopy: Record<FailureCopyKind, string> = {
+    network: t('cb_err_network'),
+    timeout: t('cb_err_timeout'),
+    server: t('cb_err_generic'),
+    session: t('cb_err_session'),
+    generic: t('cb_err_generic'),
+  };
 
   // Fetch the summary when a signed-in CLIENT enters the dashboard
   React.useEffect(() => {
@@ -129,34 +174,26 @@ export default function HomeScreen() {
       dashLoaded.current = true;
       void clientDash.load();
       void clientBookings.load();
+      void creditWallet.load();
     } else {
       dashLoaded.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeRole]);
 
+  // Pull-to-refresh waits for the REAL requests — no artificial settle timer.
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setLoading(true);
-    const tasks: Promise<unknown>[] = [];
-    // Real refresh for the client stats + bookings (spec: pull-to-refresh)
+    const tasks: Promise<unknown>[] = [refreshCategories(), refreshServices()];
     if (dashLoaded.current) {
+      // CLIENT-only endpoints are only refreshed for a client session.
       tasks.push(clientDash.refresh());
       tasks.push(clientBookings.refresh());
+      tasks.push(creditWallet.refresh());
     }
-    // Plus the original simulated settle for the rest of the sections
-    tasks.push(
-      new Promise((resolve) =>
-        setTimeout(() => {
-          setRefreshing(false);
-          setLoading(false);
-          resolve(null);
-        }, 1500),
-      ),
-    );
-    void Promise.all(tasks);
+    void Promise.all(tasks).finally(() => setRefreshing(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshCategories, refreshServices, creditWallet.refresh, clientDash.refresh, clientBookings.refresh]);
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
 
@@ -252,7 +289,10 @@ export default function HomeScreen() {
           </Text>
         </Animated.View>
 
-        {/* Credit Points Card */}
+        {/* Credit Points Card — CLIENT only: the balance is the client credit
+            wallet (GET /api/v1/wallet/credits). No wallet endpoint is relevant
+            to a Provider session, so the card is not rendered there. */}
+        {user && activeRole === 'CLIENT' && (
         <Animated.View entering={FadeInDown.delay(40).duration(380)} style={{ paddingHorizontal: 16, marginTop: 4 }}>
           <View style={[styles.creditCard, { backgroundColor: c.card, borderColor: c.border }]}>
             <View style={[styles.creditIcon, { backgroundColor: c.primaryLight }]}>
@@ -260,15 +300,37 @@ export default function HomeScreen() {
             </View>
             <View style={styles.creditBody}>
               <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
-              <Text style={[styles.creditValue, { color: c.text }]}>
-                {t('profile_pts', { n: (user?.credit_points ?? 0).toLocaleString() })}
-              </Text>
+              {pointsState === 'loading' ? (
+                <ActivityIndicator size="small" color={c.primary} style={styles.creditSpinner} />
+              ) : (
+                <Text style={[styles.creditValue, { color: c.text }]}>
+                  {pointsState === 'ready' || pointsState === 'empty'
+                    ? t('profile_pts', { n: creditWallet.balance.toLocaleString() })
+                    : '—'}
+                </Text>
+              )}
             </View>
-            <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
-              {t('home_earn_note')}
-            </Text>
+            {pointsState === 'error' ? (
+              <View style={styles.creditNoteWrap}>
+                <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
+                  {pointsCopy[failureCopyKind(creditWallet.failure)]}
+                </Text>
+                <TouchableOpacity onPress={() => void creditWallet.refresh()} hitSlop={6}>
+                  <Text style={[styles.creditRetry, { color: c.primary }]}>{t('cd_retry')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : pointsState === 'unavailable' ? (
+              <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
+                {t('home_points_not_ready')}
+              </Text>
+            ) : (
+              <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
+                {t('home_earn_note')}
+              </Text>
+            )}
           </View>
         </Animated.View>
+        )}
 
         {/* Client Activity Summary — live GET /api/v1/clients/dashboard data
             (CLIENT role + signed-in only). Fresh fetch per entry + via
@@ -277,39 +339,46 @@ export default function HomeScreen() {
         {user && activeRole === 'CLIENT' && (
           <Animated.View entering={FadeInDown.delay(50).duration(380)} style={{ paddingHorizontal: 16, marginTop: 12 }}>
             <View style={[styles.activityCard, { backgroundColor: c.card, borderColor: c.border }]}>
-              {clientDash.status === 'error' ? (
-                <TouchableOpacity style={styles.activityErrorRow} onPress={clientDash.refresh}>
-                  <MaterialCommunityIcons name="wifi-off" size={16} color={c.destructive} />
+              {activityState === 'error' ? (
+                <TouchableOpacity style={styles.activityErrorRow} onPress={() => void clientDash.refresh()}>
+                  <MaterialCommunityIcons
+                    name={failureCopyKind(clientDash.failure) === 'network' ? 'wifi-off' : 'alert-circle-outline'}
+                    size={16}
+                    color={c.destructive}
+                  />
                   <Text style={[styles.activityErrorText, { color: c.destructive }]}>
-                    {t(clientDash.errorMessage ?? 'cd_err_network')}
+                    {activityCopy[failureCopyKind(clientDash.failure)]}
                   </Text>
                   <Text style={[styles.activityRetryText, { color: c.primary }]}>{t('cd_retry')}</Text>
                 </TouchableOpacity>
               ) : (
                 <>
+                  <View style={styles.activityRow}>
                   {[
                     {
                       icon: 'calendar-check-outline' as const,
                       label: t('cd_bookings'),
-                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_bookings,
+                      value: activityState === 'loading' ? null : clientDash.summary?.total_bookings ?? 0,
                     },
                     {
                       icon: 'check-circle-outline' as const,
                       label: t('cd_completed'),
-                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_completed_jobs,
+                      value: activityState === 'loading' ? null : clientDash.summary?.total_completed_jobs ?? 0,
                     },
                     {
                       icon: 'progress-clock' as const,
                       label: t('cd_active'),
-                      value: clientDash.status === 'loading' ? null : clientDash.summary?.total_active_jobs,
+                      value: activityState === 'loading' ? null : clientDash.summary?.total_active_jobs ?? 0,
                     },
                     {
                       icon: 'cash' as const,
                       label: t('cd_spent'),
                       value:
-                        clientDash.status === 'loading'
+                        activityState === 'loading'
                           ? null
-                          : formatAmountSpent(clientDash.summary?.total_amount_spent),
+                          : clientDash.summary
+                            ? formatAmountSpent(clientDash.summary.total_amount_spent)
+                            : '€0',
                     },
                   ].map((cell, i) => (
                     <View
@@ -329,6 +398,12 @@ export default function HomeScreen() {
                       </Text>
                     </View>
                   ))}
+                  </View>
+                  {activityState === 'unavailable' && (
+                    <Text style={[styles.activityNote, { color: c.mutedForeground }]}>
+                      {t('home_activity_not_ready')}
+                    </Text>
+                  )}
                 </>
               )}
             </View>
@@ -344,14 +419,14 @@ export default function HomeScreen() {
           <Animated.View entering={FadeInDown.delay(55).duration(380)} style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_my_bookings')}</Text>
-              {clientBookings.status === 'ready' && (
+              {bookingsState !== 'loading' && bookingsState !== 'error' && (
                 <Text style={[styles.bookingsCount, { color: c.mutedForeground }]}>
                   {t('cb_count', { n: clientBookings.total })}
                 </Text>
               )}
             </View>
             <View style={[styles.bookingsCard, { backgroundColor: c.card, borderColor: c.border }]}>
-              {clientBookings.status === 'loading' ? (
+              {bookingsState === 'loading' ? (
                 [0, 1].map((i) => (
                   <View key={i} style={[styles.bookingRow, i === 0 && { borderTopWidth: 0 }, { borderBottomColor: c.border }]}>
                     <View style={[styles.bookingIconWrap, { backgroundColor: c.primaryLight }]}>
@@ -360,11 +435,15 @@ export default function HomeScreen() {
                     <ActivityIndicator size="small" color={c.primary} />
                   </View>
                 ))
-              ) : clientBookings.status === 'error' ? (
-                <TouchableOpacity style={styles.bookingErrorRow} onPress={clientBookings.refresh}>
-                  <MaterialCommunityIcons name="wifi-off" size={16} color={c.destructive} />
+              ) : bookingsState === 'error' ? (
+                <TouchableOpacity style={styles.bookingErrorRow} onPress={() => void clientBookings.refresh()}>
+                  <MaterialCommunityIcons
+                    name={failureCopyKind(clientBookings.failure) === 'network' ? 'wifi-off' : 'alert-circle-outline'}
+                    size={16}
+                    color={c.destructive}
+                  />
                   <Text style={[styles.bookingErrorText, { color: c.destructive }]}>
-                    {t(clientBookings.errorMessage ?? 'cb_err_network')}
+                    {bookingsCopy[failureCopyKind(clientBookings.failure)]}
                   </Text>
                   <Text style={[styles.bookingRetryText, { color: c.primary }]}>{t('cb_retry')}</Text>
                 </TouchableOpacity>
@@ -489,7 +568,7 @@ export default function HomeScreen() {
               <Text style={[styles.seeAll, { color: c.primary }]}>{t('see_all')}</Text>
             </TouchableOpacity>
           </View>
-          {loading ? (
+          {servicesLoading ? (
             <FlatList
               data={[1, 2, 3]}
               horizontal
@@ -717,14 +796,24 @@ const styles = StyleSheet.create({
   creditLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   creditValue: { fontFamily: 'Manrope_700Bold', fontSize: 20, marginTop: 1 },
   creditNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
+  creditNoteWrap: { alignItems: 'flex-end', gap: 2, maxWidth: 130 },
+  creditRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  creditSpinner: { height: 20, alignSelf: 'flex-start' },
 
   // ── Client activity summary strip ────────────────────────────────
   activityCard: {
-    flexDirection: 'row',
     borderWidth: 1,
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 4,
+  },
+  activityRow: { flexDirection: 'row' },
+  activityNote: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    textAlign: 'center',
   },
   activityCell: { flex: 1, alignItems: 'center', gap: 3, paddingHorizontal: 2 },
   activityValue: { fontFamily: 'Manrope_700Bold', fontSize: 15 },

@@ -48,6 +48,8 @@
     "./myBids.test.ts",
     "./bidResults.test.ts",
     "./moneyEvents.test.ts",
+    "./dataState.test.ts",
+    "./tabNav.test.ts",
     "./translations.test.ts"
   ]
 }

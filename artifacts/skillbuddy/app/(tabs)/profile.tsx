@@ -12,6 +12,8 @@ import LogoImage from '@/components/LogoImage';
 import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
 import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
 import useProviderDashboard from '@/hooks/useProviderDashboard';
+import { useCreditWallet } from '@/hooks/useWallet';
+import { failureCopyKind, resolveDataViewState } from '@/lib/dataState';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -34,6 +36,8 @@ export default function ProfileScreen() {
   // Client activity stats (GET /api/v1/clients/profile) — fetched only while
   // the CLIENT role is active so provider sessions never hit this endpoint.
   const clientStats = useClientProfile();
+  // Credit points come from the real wallet (GET /api/v1/wallet/credits).
+  const creditWallet = useCreditWallet();
   // Provider-side counts (GET /providers/dashboard) — the previous numbers
   // came from the mock user; they are real now (0 until the dashboard loads).
   const providerStats = useProviderDashboard();
@@ -53,12 +57,28 @@ export default function ProfileScreen() {
         if (statsLoadedFor.current !== 'CLIENT') {
           statsLoadedFor.current = 'CLIENT';
           void clientStats.load();
+          void creditWallet.load();
         }
       } else {
         statsLoadedFor.current = null; // re-arm for the next CLIENT entry
       }
     }, [statsRole]),
   );
+
+  // A 200 with zeros is "empty" (neutral 0s), never an error. Only a request
+  // that actually failed renders the Retry bar, with copy that names the cause.
+  const statsState = resolveDataViewState({
+    status: clientStats.status,
+    hasData: clientStats.profile != null,
+    failure: clientStats.failure,
+  });
+  const statsCopy: Record<ReturnType<typeof failureCopyKind>, string> = {
+    network: t('cstat_err_network'),
+    timeout: t('cstat_err_timeout'),
+    server: t('cstat_err_generic'),
+    session: t('cstat_err_session'),
+    generic: t('cstat_err_generic'),
+  };
 
   const toggleBtnRef = useRef<View>(null);
 
@@ -123,7 +143,16 @@ export default function ProfileScreen() {
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'heart', label: t('cf_title'), route: '/profile/favorites' },
-        { icon: 'star', label: t('profile_credit_points'), route: '/profile/credit-points', badge: t('profile_pts', { n: user?.credit_points ?? 0 }) },
+        {
+          icon: 'star',
+          label: t('profile_credit_points'),
+          route: '/profile/credit-points',
+          // Real wallet balance; '—' until it has loaded (never a fake 0).
+          badge:
+            creditWallet.status === 'ready'
+              ? t('profile_pts', { n: creditWallet.balance.toLocaleString() })
+              : '—',
+        },
       ],
     },
     {
@@ -281,22 +310,27 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Stats Row — live client activity stats from GET /api/v1/clients/profile
-          while the CLIENT role is active (loading spinner instead of fake
-          zeros; retry banner on error). The provider role keeps the mock
-          fallback until a provider-stats endpoint is wired. */}
+      {/* Stats — live client activity stats (GET /api/v1/clients/profile) while
+          the CLIENT role is active. A 200 with zeros renders real zeros and NO
+          retry; the retry bar exists only for a request that actually failed,
+          and its copy names the cause (only 'network' mentions the connection).
+          "No client profile" is a neutral zero state with an explanatory line. */}
       <Animated.View entering={FadeInDown.delay(80).duration(400)}>
-        <View style={[styles.statsRow, { backgroundColor: c.card, shadowColor: '#000' }]}>
-          {activeRole === 'CLIENT' && clientStats.status === 'error' && (
-            <TouchableOpacity style={styles.statsErrorBar} onPress={clientStats.refresh}>
+        <View style={[styles.statsCard, { backgroundColor: c.card, shadowColor: '#000' }]}>
+          {activeRole === 'CLIENT' && statsState === 'error' && (
+            <TouchableOpacity
+              style={[styles.statsErrorBar, { borderBottomColor: c.border }]}
+              onPress={() => void clientStats.refresh()}
+            >
               <Text style={[styles.statsErrorText, { color: c.destructive }]}>
-                {t(clientStats.errorMessage ?? 'cstat_err_network')}
+                {statsCopy[failureCopyKind(clientStats.failure)]}
               </Text>
               <Text style={[styles.statsRetryText, { color: c.primary }]}>{t('cstat_retry')}</Text>
             </TouchableOpacity>
           )}
+          <View style={styles.statsRow}>
           {[
-            activeRole === 'CLIENT' && clientStats.status === 'loading'
+            activeRole === 'CLIENT' && statsState === 'loading'
               ? { label: t('profile_stat_jobs_done'), loading: true }
               : activeRole === 'CLIENT'
                 ? {
@@ -304,7 +338,7 @@ export default function ProfileScreen() {
                     value: clientStats.profile?.total_completed_jobs ?? 0,
                   }
                 : { label: t('profile_stat_jobs_done'), value: providerStats.summary?.total_jobs_completed ?? 0 },
-            activeRole === 'CLIENT' && clientStats.status === 'loading'
+            activeRole === 'CLIENT' && statsState === 'loading'
               ? { label: t('profile_stat_active_jobs'), loading: true }
               : activeRole === 'CLIENT'
                 ? {
@@ -312,14 +346,16 @@ export default function ProfileScreen() {
                     value: clientStats.profile?.total_active_jobs ?? 0,
                   }
                 : { label: t('profile_stat_active_jobs'), value: providerStats.summary?.total_jobs_inprogress ?? 0 },
-            activeRole === 'CLIENT' && clientStats.status === 'loading'
+            activeRole === 'CLIENT' && statsState === 'loading'
               ? { label: t('cstat_spent'), loading: true }
               : activeRole === 'CLIENT'
                 ? {
                     label: t('cstat_spent'),
-                    value: formatAmountSpent(clientStats.profile?.total_amount_spent),
+                    value: clientStats.profile
+                      ? formatAmountSpent(clientStats.profile.total_amount_spent)
+                      : '€0',
                   }
-                : { label: t('profile_stat_credit_pts'), value: user?.credit_points ?? 0 },
+                : { label: t('profile_stat_credit_pts'), value: user?.credit_points ?? '—' },
           ].map((stat, i) => (
             <View key={i} style={[styles.statItem, i < 2 && { borderRightWidth: 1, borderRightColor: c.border }]}>
               {'loading' in stat && stat.loading ? (
@@ -330,6 +366,12 @@ export default function ProfileScreen() {
               <Text style={[styles.statLabel, { color: c.mutedForeground }]}>{stat.label}</Text>
             </View>
           ))}
+          </View>
+          {activeRole === 'CLIENT' && statsState === 'unavailable' && (
+            <Text style={[styles.statsNote, { color: c.mutedForeground }]}>
+              {t('cstat_not_ready')}
+            </Text>
+          )}
         </View>
       </Animated.View>
 
@@ -442,8 +484,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
   roleText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#FFF' },
-  statsRow: {
-    flexDirection: 'row',
+  statsCard: {
     marginHorizontal: 16,
     borderRadius: 16,
     marginTop: -20,
@@ -451,6 +492,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
+    overflow: 'hidden',
+  },
+  statsRow: { flexDirection: 'row' },
+  statsNote: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
   },
   statItem: { flex: 1, alignItems: 'center', paddingVertical: 16 },
   statValue: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
@@ -465,7 +515,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
   },
-  statsErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+  statsErrorText: { fontFamily: 'Manrope_400Regular', fontSize: 11, flexShrink: 1 },
   statsRetryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
   sectionTitle: {
     fontFamily: 'Manrope_600SemiBold',

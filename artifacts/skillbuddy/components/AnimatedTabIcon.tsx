@@ -1,44 +1,51 @@
 import React, { useEffect } from 'react';
 import { View, type ColorValue } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { TAB_ICON_DURATION } from '@/components/AnimatedTabIcons';
 
 interface Props {
   focused: boolean;
-  /** RN 0.86 / React Navigation 7 type the tab-bar tint as `ColorValue`
-   * (string | platform colour), so the prop mirrors that — the previous
-   * `string` forced an unsafe narrowing at every call site. */
+  /** RN 0.86 / React Navigation 7 type the tab-bar tint as `ColorValue`. */
   color: ColorValue;
   activeColor: string;
   children: (color: ColorValue) => React.ReactNode;
 }
 
+/** The bounce is split into the same two halves for every tab: 90 ms up, 110 ms back. */
+const BOUNCE_UP_MS = 90;
+const BOUNCE_DOWN_MS = 110;
+
 /**
- * Wraps a tab bar icon with a satisfying scale-bounce on activation and a
- * smooth sliding "pill" background behind the active icon, so switching
- * tabs feels tactile instead of an instant flat swap.
+ * Wraps a tab bar icon with the SAME selection motion for all five tabs: a
+ * short scale pop (200 ms total) plus a 180 ms fade of the active pill behind
+ * it. No spring with a variable settling time, so every tab feels identical and
+ * the interaction never outlasts a quick tap.
  */
 export default function AnimatedTabIcon({ focused, color, activeColor, children }: Props) {
-  const scale = useSharedValue(focused ? 1 : 0.94);
+  const scale = useSharedValue(1);
   const pillOpacity = useSharedValue(focused ? 1 : 0);
-  const pillScale = useSharedValue(focused ? 1 : 0.6);
 
   useEffect(() => {
-    scale.value = withSpring(focused ? 1.08 : 0.94, { damping: 12, stiffness: 180 });
-    pillOpacity.value = withTiming(focused ? 1 : 0, { duration: 200 });
-    pillScale.value = withSpring(focused ? 1 : 0.6, { damping: 14, stiffness: 200 });
+    pillOpacity.value = withTiming(focused ? 1 : 0, {
+      duration: TAB_ICON_DURATION,
+      easing: Easing.out(Easing.quad),
+    });
+
     if (focused) {
-      // settle back to 1 after the bounce
-      const t = setTimeout(() => {
-        scale.value = withSpring(1, { damping: 12, stiffness: 180 });
-      }, 120);
-      return () => clearTimeout(t);
+      scale.value = withSequence(
+        withTiming(1.1, { duration: BOUNCE_UP_MS, easing: Easing.out(Easing.quad) }),
+        withTiming(1, { duration: BOUNCE_DOWN_MS, easing: Easing.quad })
+      );
+    } else {
+      scale.value = withTiming(1, { duration: TAB_ICON_DURATION });
     }
-  }, [focused]);
+  }, [focused, pillOpacity, scale]);
 
   const iconStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -46,16 +53,15 @@ export default function AnimatedTabIcon({ focused, color, activeColor, children 
 
   const pillStyle = useAnimatedStyle(() => ({
     opacity: pillOpacity.value,
-    transform: [{ scale: pillScale.value }],
   }));
 
   return (
-    <View style={{ width: 40, height: 32, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 44, height: 30, alignItems: 'center', justifyContent: 'center' }}>
       <Animated.View
         style={[
           {
             position: 'absolute',
-            width: 40,
+            width: 44,
             height: 28,
             borderRadius: 14,
             backgroundColor: `${activeColor}1A`,

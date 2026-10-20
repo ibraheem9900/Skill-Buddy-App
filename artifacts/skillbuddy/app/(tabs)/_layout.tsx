@@ -11,7 +11,15 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import SuspensionGate from '@/components/SuspensionGate';
 import AnimatedTabIcon from '@/components/AnimatedTabIcon';
-import { DoorTabIcon, GridBlocksTabIcon, BriefcaseTabIcon, ChatPopTabIcon, EyesTabIcon } from '@/components/AnimatedTabIcons';
+import TabSwipeArea from '@/components/TabSwipeArea';
+import {
+  HomeTabIcon,
+  ServicesTabIcon,
+  JobsTabIcon,
+  InboxTabIcon,
+  ProfileTabIcon,
+} from '@/components/AnimatedTabIcons';
+import { TAB_BAR_HEIGHT } from '@/lib/tabNav';
 
 function NativeTabLayout() {
   const { t } = useLanguage();
@@ -62,9 +70,16 @@ function ClassicTabLayout() {
           borderTopWidth: isWeb ? 1 : 0.5,
           borderTopColor: c.border,
           elevation: 0,
+          // The bar is exactly TAB_BAR_HEIGHT of content PLUS the device's own
+          // bottom inset, so gesture-nav pills and 3-button nav bars sit below
+          // it instead of under the labels. Screens reserve the same padding.
           ...(isWeb
             ? { height: 84, paddingBottom: 34 }
-            : { paddingBottom: insets.bottom }),
+            : {
+                height: TAB_BAR_HEIGHT + insets.bottom,
+                paddingTop: 8,
+                paddingBottom: (insets.bottom > 0 ? insets.bottom : 0) + 6,
+              }),
         },
         tabBarBackground: () =>
           isIOS ? (
@@ -84,7 +99,7 @@ function ClassicTabLayout() {
           title: t('tab_home'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <DoorTabIcon focused={focused} color={col} size={22} />}
+              {(col) => <HomeTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -95,7 +110,7 @@ function ClassicTabLayout() {
           title: t('tab_services'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <GridBlocksTabIcon focused={focused} color={col} size={22} />}
+              {(col) => <ServicesTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -106,7 +121,7 @@ function ClassicTabLayout() {
           title: t('tab_jobs'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <BriefcaseTabIcon focused={focused} color={col} size={22} />}
+              {(col) => <JobsTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -117,7 +132,7 @@ function ClassicTabLayout() {
           title: t('tab_inbox'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <ChatPopTabIcon focused={focused} color={col} size={22} />}
+              {(col) => <InboxTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -128,7 +143,7 @@ function ClassicTabLayout() {
           title: t('tab_profile'),
           tabBarIcon: ({ color, focused }) => (
             <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <EyesTabIcon focused={focused} color={col} size={22} />}
+              {(col) => <ProfileTabIcon focused={focused} color={col} size={22} />}
             </AnimatedTabIcon>
           ),
         }}
@@ -140,7 +155,11 @@ function ClassicTabLayout() {
 export default function TabLayout() {
   return (
     <SuspensionGate>
-      {isLiquidGlassAvailable() ? <NativeTabLayout /> : <ClassicTabLayout />}
+      {/* Swipe left/right between adjacent tabs. Wraps the navigator, so it
+          only ever sees gestures on the five root tab screens. */}
+      <TabSwipeArea>
+        {isLiquidGlassAvailable() ? <NativeTabLayout /> : <ClassicTabLayout />}
+      </TabSwipeArea>
     </SuspensionGate>
   );
 }
