@@ -50,6 +50,9 @@
     "./moneyEvents.test.ts",
     "./dataState.test.ts",
     "./tabNav.test.ts",
+    "./postWizard.test.ts",
+    "./postDetails.test.ts",
+    "./postAddress.test.ts",
     "./translations.test.ts"
   ]
 }

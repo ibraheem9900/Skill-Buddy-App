@@ -36,6 +36,12 @@ interface Props {
   footer?: React.ReactNode;
   /** Scrollable content. */
   children?: React.ReactNode;
+  /**
+   * Optional fixed height. Defaults to the shared 72%-of-window clamp; a short,
+   * single-purpose sheet (the two-row time range) passes its own height so it
+   * never opens with a screenful of empty space.
+   */
+  height?: number;
 }
 
 const WINDOW = Dimensions.get('window');
@@ -67,6 +73,7 @@ export default function BottomSheet({
   body,
   footer,
   children,
+  height,
 }: Props) {
   const { colors: c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -75,9 +82,11 @@ export default function BottomSheet({
   const [rendered, setRendered] = useState(visible);
   const progress = useSharedValue(0);
 
-  const sheetHeight = Math.round(
-    Math.min(Math.max(WINDOW.height * 0.72, 340), Math.max(WINDOW.height - insets.top - 24, 340))
-  );
+  const sheetHeight =
+    height ??
+    Math.round(
+      Math.min(Math.max(WINDOW.height * 0.72, 340), Math.max(WINDOW.height - insets.top - 24, 340))
+    );
 
   useEffect(() => {
     if (visible) {

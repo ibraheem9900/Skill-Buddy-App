@@ -81,7 +81,12 @@ export interface AddressRegionResponse {
  * OpenAPI Schema tab: $ref AddressResponse, "type": "object" — NOT an array
  * and no list wrapper, despite the endpoint's plural name). Text fields are
  * nullable (required but anyOf null); latitude/longitude are numeric STRINGS
- * — never Number() them for display. is_default is always present.
+ * — never Number() them for display.
+ *
+ * 2026-10-21 re-read of the live spec: `is_default` is NOT in the AddressResponse
+ * (nor AddressCreate/AddressUpdate) schema — it is optional here and every
+ * reader treats a missing flag as false. Same for `name` / `phone`: they do not
+ * exist, so the app shows the account's own name/phone read-only instead.
  */
 export interface AddressResponse {
   id: number;
@@ -95,7 +100,7 @@ export interface AddressResponse {
   postal_code?: string | null;
   landmark?: string | null;
   formatted_address?: string | null;
-  is_default: boolean;
+  is_default?: boolean;
   country?: AddressCountryResponse | null;
   county?: AddressRegionResponse | null;
   city?: AddressRegionResponse | null;

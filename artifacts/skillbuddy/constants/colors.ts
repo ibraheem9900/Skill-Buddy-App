@@ -8,6 +8,13 @@ const palette = {
   success: '#27AE60',
   successLight: '#E8F8EE',
   warning: '#F39C12',
+  /**
+   * The web app's gold/"warning" token, verbatim: `--warning: oklch(0.78 0.16 75)`
+   * in Skillbuddy-Web/Skill-buddy/src/styles.css, converted to sRGB = #F2A618.
+   * Used ONLY by the Post-a-Job "Urgent" card (see c.gold in each theme) —
+   * everything else that means "urgent" keeps the red `urgent` token below.
+   */
+  gold: '#F2A618',
 };
 
 const colors = {
@@ -36,6 +43,11 @@ const colors = {
     rating: palette.rating,
     urgent: palette.destructive,
     urgentLight: '#FFF0EF',
+    // Gold used by the Post-a-Job Urgent card only (web token, see palette.gold).
+    gold: palette.gold,
+    goldLight: '#FFF4DC',
+    // Content that sits ON the gold fill: dark brown reads at 8:1, white does not.
+    goldForeground: '#3A2A00',
     success: palette.success,
     successLight: palette.successLight,
     warning: palette.warning,
@@ -83,6 +95,9 @@ const colors = {
     rating: palette.rating,
     urgent: palette.destructive,
     urgentLight: 'rgba(231, 76, 60, 0.14)',
+    gold: palette.gold,
+    goldLight: 'rgba(242, 166, 24, 0.16)',
+    goldForeground: '#1A1200',
     success: '#2FBF71',
     successLight: 'rgba(47, 191, 113, 0.14)',
     warning: palette.warning,

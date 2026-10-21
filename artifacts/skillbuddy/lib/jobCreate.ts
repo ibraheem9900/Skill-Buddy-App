@@ -61,10 +61,42 @@ export const DESC_WORD_MAX = 500;
 /** Exact prefix of the stored line, at the very end of the description. */
 export const PREFERRED_TIME_PREFIX = 'Preferred time:';
 
+/** The counter turns amber from here on, so the limit never arrives by surprise. */
+export const DESC_WORD_WARN = 450;
+
 /** Words, counted the way the backend counts them (whitespace separated). */
 export function countWords(text: string | null | undefined): number {
   const trimmed = typeof text === 'string' ? text.trim() : '';
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+/**
+ * Hard-enforce the word ceiling the way the task asks: typing past it is
+ * refused and a PASTE is truncated to its first `max` words. Text that already
+ * fits is returned byte-for-byte (newlines, double spaces, everything), so the
+ * field never rewrites what the user typed while they are within the limit.
+ */
+export function clampToWordLimit(
+  text: string | null | undefined,
+  max: number = DESC_WORD_MAX
+): string {
+  const value = typeof text === 'string' ? text : '';
+  if (countWords(value) <= max) return value;
+  return value.trim().split(/\s+/).slice(0, Math.max(0, max)).join(' ');
+}
+
+/**
+ * The counter's three states. A single function owns them so the colour, the
+ * warning and the hard stop can never disagree: `error` at the limit, `warn`
+ * from DESC_WORD_WARN, `normal` below it.
+ */
+export function wordCounterTone(
+  count: number,
+  max: number = DESC_WORD_MAX
+): 'normal' | 'warn' | 'error' {
+  if (count >= max) return 'error';
+  if (count >= Math.min(DESC_WORD_WARN, max)) return 'warn';
+  return 'normal';
 }
 
 /** The stored line for a `8:00 AM - 11:00 AM` window label, or null. */
@@ -228,6 +260,25 @@ export function validateJobTitle(title: string): 'post_err_title_min' | 'post_er
   return null;
 }
 
+/**
+ * The job TITLE the wizard sends now that the user no longer types one.
+ *
+ * JobCreate.title is REQUIRED (minLength 3, maxLength 150 — live OpenAPI,
+ * re-read 2026-10-21), so the selected service's own title is used and widened
+ * to a legal length only when it has to be. Nothing else about the payload
+ * changes: it is still sent as `title`.
+ */
+export function titleForService(
+  serviceTitle: string | null | undefined,
+  fallback = 'Service request'
+): string {
+  const base = typeof serviceTitle === 'string' ? serviceTitle.trim() : '';
+  if (base.length === 0) return fallback;
+  const widened = base.length >= JOB_TITLE_MIN ? base : `${base} service`.trim();
+  const legal = widened.length >= JOB_TITLE_MIN ? widened : fallback;
+  return legal.slice(0, JOB_TITLE_MAX).trim();
+}
+
 /** A usable ISO instant, or null (rejects '' and Invalid Date). */
 function isoInstant(value: string | null | undefined): string | null {
   if (typeof value !== 'string' || value.trim().length === 0) return null;
@@ -347,12 +398,19 @@ export function buildCreateJobRequest(
       ]),
   };
 
+  // The stored line is appended to the user's text, and the backend counts the
+  // WHOLE string: 500 user words + a line is 505 and gets a 422. The user's
+  // words are therefore clamped to leave room for the line, so the counter's
+  // 500 ceiling and the server's ceiling are the same ceiling.
+  const lineWords = countWords(values.preferredTimeLine);
+  const body = clampToWordLimit(values.description, Math.max(1, DESC_WORD_MAX - lineWords));
+
   return {
     service_id: values.serviceId,
     category_id: values.serviceCategoryId,
     title,
     // The user's text plus the stored `Preferred time: …` line, appended once.
-    description: withPreferredTimeLine(values.description, values.preferredTimeLine),
+    description: withPreferredTimeLine(body, values.preferredTimeLine),
     request_type: requestType,
     booking_type: bookingTypeFor(values.bookingType),
     milestones: resolveMilestones(values),
