@@ -1,31 +1,69 @@
 import { firstErrorMessage, parseExpectedHours } from '@/lib/jobList';
+import {
+  localDay,
+  selectionWindow,
+  type TimeChoice,
+} from '@/lib/jobBooking';
+import {
+  MAX_DAILY_EXPECTED_HOURS,
+  buildScheduleLine,
+  clampHours,
+  clockOf,
+  deriveSlotOf,
+  exceedsHoursCap,
+  formatDayLabel,
+  formatTimeLabel,
+  formatWindowLabel,
+  localStartOf,
+  maxHoursForStart,
+  minutesOf,
+  parseScheduleSegments,
+  segmentsForTasks,
+  stripScheduleBlock,
+} from '@/lib/timeSlots';
 import type { JobResponse, UpdateJobRequest, ValidationErrorDetail } from '@/types';
 
 /**
  * jobUpdate.ts — pure helpers behind the Edit Job screen
  * (PATCH /api/v1/jobs/{job_id}, schema JobUpdate).
  *
- * The endpoint edits EXACTLY four fields (title, description, scheduled_at,
- * expected_hours) and its schema has no required properties, so this module
- * can only ever produce a body containing those four keys. There is no path
- * here to an address, status, request_type, booking_type, category_id or
- * service_id — those are not part of the contract.
+ * ── WHAT THE ENDPOINT REALLY ACCEPTS (live OpenAPI, re-read 2026-10-22) ────
+ * `JobUpdate` has EXACTLY four optional properties: title, description,
+ * scheduled_at, expected_hours. There is NO milestones array and no milestone
+ * endpoint anywhere in the spec, so a MULTI_DAY job's per-task dates and times
+ * CANNOT be changed through this API. This screen therefore:
+ *   • edits a single-day job's day, window and expected hours;
+ *   • shows a multi-day job's tasks READ-ONLY (with the reason) and only lets
+ *     the description change;
+ *   • sends ONLY the fields that actually changed.
+ *
+ * ── WHAT WAS WRONG BEFORE ─────────────────────────────────────────────────
+ *   • the Job Title field is gone (the title stays the service name);
+ *   • the description box held the app's own "Preferred time: …" line and
+ *     counted it in "20/500 words" — the line is stripped on load, rebuilt on
+ *     save, and never counted;
+ *   • the date chips ran through 60 days and were cut off — now exactly the
+ *     same 7-day window as Post a Job (today + 6), with the job's own date kept
+ *     untouched when it lies outside it;
+ *   • the time chips were arbitrary 30-minute clock readings — now the five
+ *     client windows + Anytime, preselected from the job's own stored window;
+ *   • `scheduled_at` is a UTC instant and GET returns it WITHOUT a zone marker
+ *     (see lib/jobDetail), so the old `new Date(value)` read it as local time
+ *     and showed 5:00 AM for an 8:00 AM booking. Every read here goes through
+ *     lib/timeSlots.localStartOf, which applies the shared UTC rule.
  *
  * No React and no axios, so every rule below is unit-testable.
  */
 
-/** Server bounds on JobUpdate.title. */
+/** Server bounds on JobUpdate.title (kept for the type, not edited here). */
 export const TITLE_MIN = 3;
 export const TITLE_MAX = 150;
-/** The form's stepper range, mirroring Post a Job. */
+/** The expected-hours floor. The ceiling is per start (11 PM rule). */
 export const HOURS_MIN = 1;
-export const HOURS_MAX = 24;
-/** Picker granularity: 30-minute slots from 06:00 to 22:00 local. */
-export const SLOT_START_MINUTES = 6 * 60;
-export const SLOT_END_MINUTES = 22 * 60;
-export const SLOT_STEP_MINUTES = 30;
-/** How many future days the date picker offers. */
-export const DAY_CHOICES = 60;
+/** The largest ceiling the rule can produce (8:00 AM → 15 h). */
+export const HOURS_MAX = MAX_DAILY_EXPECTED_HOURS;
+/** The Edit screen offers the same week Post a Job does. */
+export const DAY_CHOICES = 7;
 
 export type JobEditField = 'title' | 'description' | 'scheduled_at' | 'expected_hours';
 
@@ -37,23 +75,47 @@ export type JobEditErrorKey =
   | 'post_err_desc_long'
   | 'post_err_hours'
   | 'editjob_err_future'
-  | 'post_err_schedule';
+  | 'post_err_schedule'
+  | 'post_err_time_late'
+  | 'post_err_time_window';
+
+/** What the form and the stored job looked like when it opened. */
+export interface JobEditOriginal {
+  /** The stored description WITHOUT its schedule line (the user's words). */
+  description: string;
+  /** The full stored description, line included. */
+  descriptionWithLine: string;
+  /** Local `YYYY-MM-DD` of the stored start, or null. */
+  dateKey: string | null;
+  /** Local minutes of the stored start, or null. */
+  minutes: number | null;
+  /** The window the job's start belongs to, or null. */
+  time: TimeChoice | null;
+  expectedHours: number;
+  /** The window label read from the stored line, or null. */
+  windowLabel: string | null;
+  milestones: number;
+  isMultiDay: boolean;
+}
 
 /** The Edit form's raw state. */
 export interface JobEditValues {
+  /** Display only — the title is the service's name and is not sent. */
   title: string;
+  /** The user's own words (no schedule block). */
   description: string;
-  /** Local calendar day as 'YYYY-MM-DD'. */
-  dateKey: string;
-  /** Minutes since LOCAL midnight — the day/slot the picker selected. */
-  minutes: number;
+  /** The chosen local day, or null = keep the stored date. */
+  dateKey: string | null;
+  /** The chosen window, or null = nothing chosen yet. */
+  time: TimeChoice | null;
   expectedHours: number;
+  original: JobEditOriginal;
 }
 
 /**
  * A message under one input is EITHER a translated rule key the app owns, or
- * the backend's own free text from a 422 — they are kept apart so neither is
- * ever passed to t() as if it were a key.
+ * the backend's own free text from a 422 — kept apart so neither is ever passed
+ * to t() as if it were a key.
  */
 export type JobEditFieldError =
   | { kind: 'key'; key: JobEditErrorKey }
@@ -66,7 +128,7 @@ export interface MappedEditErrors {
 }
 
 /* ------------------------------------------------------------------ *
- * Local date / time <-> picker values
+ * Local date helpers (the form works in DEVICE-LOCAL terms)
  * ------------------------------------------------------------------ */
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
@@ -77,7 +139,7 @@ export function localDateKey(date: Date): string {
 }
 
 /**
- * 'YYYY-MM-DD' -> LOCAL midnight. Returns null for anything malformed, and
+ * 'YYYY-MM-DD' -> LOCAL midnight. Returns null for anything malformed and
  * rejects overflowed days (2026-02-31) rather than silently rolling over.
  */
 export function parseLocalDateKey(key: string | null | undefined): Date | null {
@@ -88,41 +150,238 @@ export function parseLocalDateKey(key: string | null | undefined): Date | null {
   const month = Number(match[2]);
   const day = Number(match[3]);
   const date = new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
     return null;
   }
   return date;
 }
 
-/** Minutes since local midnight -> '2:30 PM' (the app's slot label format). */
-export function minutesToLabel(minutes: number): string {
+/** `2:30 PM` from local minutes (translated meridiem labels). */
+export function minutesToLabel(
+  minutes: number,
+  meridiem: { am: string; pm: string } = { am: 'AM', pm: 'PM' }
+): string {
   if (!Number.isFinite(minutes)) return '';
-  const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
-  const h24 = Math.floor(total / 60);
-  const m = total % 60;
-  const suffix = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  return `${h12}:${pad2(m)} ${suffix}`;
-}/** The selectable 30-minute slots (local minutes since midnight). */
-export function slotMinutes(): number[] {
-  const out: number[] = [];
-  for (let m = SLOT_START_MINUTES; m <= SLOT_END_MINUTES; m += SLOT_STEP_MINUTES) out.push(m);
-  return out;
-}/**
- * LOCAL day + local minutes -> ISO 8601 UTC ('...Z').
+  return formatTimeLabel(clockOf(minutes), meridiem);
+}
+
+/** Today and the six days after it — the only dates Edit Job offers. */
+export function editDayChoices(now: Date = new Date()): Date[] {
+  const today = localDay(now);
+  return Array.from({ length: DAY_CHOICES }, (_, index) =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() + index)
+  );
+}
+
+/** Is the job's stored day outside the seven offered ones? */
+export function isOutsideEditWindow(dateKey: string | null, now: Date = new Date()): boolean {
+  const day = parseLocalDateKey(dateKey);
+  if (!day) return false;
+  return !editDayChoices(now).some((candidate) => candidate.getTime() === day.getTime());
+}
+
+/* ------------------------------------------------------------------ *
+ * Pre-filling the form from the loaded job
+ * ------------------------------------------------------------------ */
+
+/**
+ * Pre-fill from the job as the server returned it.
  *
- * The picker works in device-local terms, so the value is assembled as a local
- * Date and only then serialised; toISOString() performs the UTC conversion.
- * Returns null for an unreadable day so the caller never sends a bad string.
+ * scheduled_at is a UTC string (naive from GET), so it is read back through
+ * `localStartOf`; the stored schedule line is PREFERRED for the window, because
+ * an Anytime booking only exists as a start instant there. The description is
+ * stripped of the line so the counter counts the user's words alone.
  */
-export function buildScheduledAtIso(
-  dateKey: string,
-  minutes: number
+export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEditValues {
+  const milestones = [...(job.milestones ?? [])].sort(
+    (a, b) => a.sequence - b.sequence || a.id - b.id
+  );
+  const isMultiDay = job.booking_type === 'MULTI_DAY' || milestones.length > 1;
+
+  const storedDescription = typeof job.description === 'string' ? job.description : '';
+  const userDescription = stripScheduleBlock(storedDescription);
+  const segments = parseScheduleSegments(storedDescription);
+
+  // Single day: the job's own instant, or the first milestone's.
+  const scheduledAt =
+    job.scheduled_at ?? (milestones.length > 0 ? milestones[0].scheduled_at : null);
+  const local = localStartOf(scheduledAt);
+  const paired = segmentsForTasks(segments, Math.max(1, milestones.length));
+  const segment = paired.length > 0 ? paired[0] : segments[0] ?? null;
+  // DerivedTime is structurally the TimeChoice the form holds (slot | anytime).
+  const time = deriveSlotOf({ scheduledAt, segment }) as TimeChoice | null;
+
+  const parsedHours = parseExpectedHours(job.expected_hours);
+  const fallbackHours = parsedHours !== null ? parsedHours : 1;
+  const cap = time ? maxHoursForStart(minutesOf(selectionWindow(time)?.start ?? null)) : null;
+
+  return {
+    title: typeof job.title === 'string' ? job.title : '',
+    description: userDescription,
+    // A multi-day job has no single day to edit, so nothing is preselected.
+    dateKey: isMultiDay ? null : local ? localDateKey(local.day) : null,
+    time: isMultiDay ? null : time,
+    // The 11 PM rule caps the value for a single day; a multi-day job keeps the
+    // stored number untouched (the screen never edits it).
+    expectedHours:
+      isMultiDay || cap === null
+        ? Math.min(Math.max(fallbackHours, HOURS_MIN), HOURS_MAX)
+        : clampHours(fallbackHours, cap),
+    original: {
+      description: userDescription,
+      descriptionWithLine: storedDescription,
+      dateKey: local ? localDateKey(local.day) : null,
+      minutes: local ? local.minutes : null,
+      time: isMultiDay ? null : time,
+      expectedHours: fallbackHours,
+      windowLabel: selectionWindow(time)
+        ? formatWindowLabel(
+            selectionWindow(time)!.start,
+            selectionWindow(time)!.end,
+            { am: 'AM', pm: 'PM' }
+          )
+        : null,
+      milestones: milestones.length,
+      isMultiDay,
+    },
+  };
+}
+
+/** The 11 PM ceiling for the form's chosen window (null while none is chosen). */
+export function editHoursCap(values: JobEditValues): number | null {
+  const win = values.time ? selectionWindow(values.time) : null;
+  if (!win) return null;
+  return maxHoursForStart(minutesOf(win.start));
+}
+
+/* ------------------------------------------------------------------ *
+ * The stored description: strip, rebuild, never duplicate
+ * ------------------------------------------------------------------ */
+
+/**
+ * The description the PATCH should carry: the user's own words plus ONE
+ * schedule line built from the final window.
+ *
+ * A MULTI_DAY job keeps the line it already had (its tasks are not editable
+ * through this endpoint), so an unrelated description edit can never erase or
+ * rewrite the task windows.
+ */
+export function composeEditDescription(
+  values: JobEditValues,
+  meridiem: { am: string; pm: string } = { am: 'AM', pm: 'PM' }
 ): string | null {
+  const body = stripScheduleBlock(values.description).trim();
+  if (values.original.isMultiDay) {
+    return values.original.descriptionWithLine.trim().length > 0
+      ? values.original.descriptionWithLine
+      : body.length > 0
+        ? body
+        : null;
+  }
+  const win = values.time ? selectionWindow(values.time) : null;
+  const line =
+    win && minutesOf(win.start) !== null && minutesOf(win.end) !== null
+      ? buildScheduleLine([
+          {
+            startMinutes: minutesOf(win.start) as number,
+            endMinutes: minutesOf(win.end) as number,
+            meridiem,
+          },
+        ])
+      : null;
+  if (body.length === 0) return line;
+  return line ? `${body}\n${line}` : body;
+}
+
+/** Words in the USER's text only — the schedule line is never counted. */
+export function userWordCount(description: string | null | undefined): number {
+  const trimmed = typeof description === 'string' ? stripScheduleBlock(description).trim() : '';
+  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+/** Words the WHOLE description will contain (user text + the line). */
+export function composedWordCount(
+  values: JobEditValues,
+  meridiem: { am: string; pm: string } = { am: 'AM', pm: 'PM' }
+): number {
+  const composed = composeEditDescription(values, meridiem);
+  return composed === null ? 0 : composed.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/* ------------------------------------------------------------------ *
+ * Validation
+ * ------------------------------------------------------------------ */
+
+const MAX_DESCRIPTION_WORDS = 500;
+
+/**
+ * On-device rules, checked before the request:
+ *   - description non-empty and the COMBINED text within 500 words;
+ *   - expected hours 1 … the 11 PM ceiling of the chosen start;
+ *   - a chosen day/window must be (and stay) in the future.
+ */
+export function validateJobEdit(
+  values: JobEditValues,
+  now: Date = new Date()
+): { ok: boolean; fieldErrors: Partial<Record<JobEditField, JobEditErrorKey>> } {
+  const fieldErrors: Partial<Record<JobEditField, JobEditErrorKey>> = {};
+
+  if (values.description.trim().length === 0) fieldErrors.description = 'post_err_desc';
+  else if (composedWordCount(values) > MAX_DESCRIPTION_WORDS) {
+    fieldErrors.description = 'post_err_desc_long';
+  }
+
+  const cap = editHoursCap(values);
+  if (values.original.isMultiDay) {
+    // Untouched here: no cap applies to a task list this endpoint cannot edit.
+  } else if (!Number.isFinite(values.expectedHours) || values.expectedHours < HOURS_MIN) {
+    fieldErrors.expected_hours = 'post_err_hours';
+  } else if (cap !== null && exceedsHoursCap(values.expectedHours, cap)) {
+    fieldErrors.expected_hours = 'post_err_hours';
+  }
+
+  if (!values.original.isMultiDay) {
+    const win = values.time ? selectionWindow(values.time) : null;
+    if (!win) fieldErrors.scheduled_at = 'post_err_schedule';
+    else {
+      const startMinutes = minutesOf(win.start);
+      const endMinutes = minutesOf(win.end);
+      if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+        fieldErrors.scheduled_at = 'post_err_time_window';
+      } else if (maxHoursForStart(startMinutes) < HOURS_MIN) {
+        fieldErrors.scheduled_at = 'post_err_time_late';
+      } else {
+        const day = parseLocalDateKey(values.dateKey);
+        if (day) {
+          const at = new Date(
+            day.getFullYear(),
+            day.getMonth(),
+            day.getDate(),
+            Math.floor(startMinutes / 60),
+            startMinutes % 60,
+            0,
+            0
+          );
+          if (at.getTime() <= now.getTime() && minutesOf(win.start) !== null) {
+            // Only the day that is actually being changed is judged: an
+            // untouched past job may keep its date.
+            const changed = localDateKey(day) !== values.original.dateKey;
+            if (changed) fieldErrors.scheduled_at = 'editjob_err_future';
+          }
+        }
+      }
+    }
+  }
+
+  return { ok: Object.keys(fieldErrors).length === 0, fieldErrors };
+}
+
+/* ------------------------------------------------------------------ *
+ * Request body — ONLY what really changed
+ * ------------------------------------------------------------------ */
+
+/** LOCAL day + local minutes -> ISO 8601 UTC ('...Z'), or null. */
+export function buildScheduledAtIso(dateKey: string | null, minutes: number): string | null {
   const day = parseLocalDateKey(dateKey);
   if (!day || !Number.isFinite(minutes)) return null;
   const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
@@ -138,139 +397,69 @@ export function buildScheduledAtIso(
   return target.toISOString();
 }
 
-/**
- * Pre-fill the form from the currently loaded job.
- *
- * scheduled_at is a UTC string, so it is read back in LOCAL terms (day +
- * slot); when it is null — or its time is off the 30-minute grid, e.g. 2:15 PM
- * — the exact time is preserved by returning it as one of the choices, so an
- * untouched form re-sends the value the server already had instead of
- * silently shifting the appointment. expected_hours arrives as a numeric
- * STRING and is parsed to a number for the stepper.
- */
-export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEditValues {
-  const parsedHours = parseExpectedHours(job.expected_hours);
-  const scheduled = job.scheduled_at ? new Date(job.scheduled_at) : null;
+/** The local day the schedule will be sent for (the original when untouched). */
+export function effectiveDateKey(values: JobEditValues): string | null {
+  return values.dateKey ?? values.original.dateKey;
+}
 
-  let dateKey: string;
-  let minutes: number;
-
-  if (scheduled && !Number.isNaN(scheduled.getTime())) {
-    dateKey = localDateKey(scheduled);
-    minutes = scheduled.getHours() * 60 + scheduled.getMinutes();
-  } else {
-    const fallback = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
-    dateKey = localDateKey(fallback);
-    minutes = 9 * 60;
-  }
-
-  return {
-    title: typeof job.title === 'string' ? job.title : '',
-    description: typeof job.description === 'string' ? job.description : '',
-    dateKey,
-    minutes,
-    // NOT rounded: the server may hold a fractional value (2.5), and rounding
-    // here would silently rewrite the job for a user who never touched the
-    // field. The stepper steps by 1 from exactly what the server held.
-    expectedHours:
-      parsedHours !== null
-        ? Math.min(Math.max(parsedHours, HOURS_MIN), HOURS_MAX)
-        : 2,
-  };
+/** The window that will be sent (the original when the user changed nothing). */
+export function effectiveTime(values: JobEditValues): TimeChoice | null {
+  return values.time ?? values.original.time;
 }
 
 /**
- * The date choices offered by the picker: the job's own day (even if it is in
- * the past or beyond the window, so it stays selectable and visible) followed
- * by the next `DAY_CHOICES` days.
+ * The PATCH body. Only the fields that changed are included, so an untouched
+ * form (or a form where only the description was edited) can never rewrite the
+ * schedule, and the title is never sent at all.
  */
-export function dayChoices(
-  currentDateKey: string,
-  now: Date = new Date(),
-  count: number = DAY_CHOICES
-): string[] {
-  const keys: string[] = [];
-  const current = parseLocalDateKey(currentDateKey);
-  if (current) keys.push(localDateKey(current));
-  for (let i = 0; i <= count; i += 1) {
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-    const key = localDateKey(day);
-    if (!keys.includes(key)) keys.push(key);
-  }
-  return keys;
-}
-
-/* ------------------------------------------------------------------ *
- * Validation (client-side, before the request)
- * ------------------------------------------------------------------ */
-
-/**
- * On-device rules. Swagger documents only `title` 3..150; the rest mirror the
- * Post-a-Job form and the endpoint's own semantics:
- *   - title      3..150 (server-documented)
- *   - description non-empty, <= 500 words (same cap as the create form)
- *   - hours      at least 1
- *   - schedule    must be strictly in the FUTURE (a past slot is meaningless)
- */
-export function validateJobEdit(
+export function buildUpdateJobRequest(
   values: JobEditValues,
-  now: Date = new Date()
-): { ok: boolean; fieldErrors: Partial<Record<JobEditField, JobEditErrorKey>> } {
-  const fieldErrors: Partial<Record<JobEditField, JobEditErrorKey>> = {};
+  meridiem: { am: string; pm: string } = { am: 'AM', pm: 'PM' }
+): UpdateJobRequest {
+  const body: UpdateJobRequest = {};
 
-  const title = values.title.trim();
-  if (title.length < TITLE_MIN) fieldErrors.title = 'post_err_title_min';
-  else if (title.length > TITLE_MAX) fieldErrors.title = 'editjob_err_title_max';
-
-  const description = values.description.trim();
-  if (description.length === 0) fieldErrors.description = 'post_err_desc';
-  else if (description.split(/\s+/).filter(Boolean).length > 500) {
-    fieldErrors.description = 'post_err_desc_long';
+  const description = composeEditDescription(values, meridiem);
+  const originalDescription = values.original.descriptionWithLine.trim();
+  if ((description ?? '').trim() !== originalDescription) {
+    body.description = description;
   }
 
-  if (!Number.isFinite(values.expectedHours) || values.expectedHours < HOURS_MIN) {
-    fieldErrors.expected_hours = 'post_err_hours';
+  if (!values.original.isMultiDay) {
+    const time = effectiveTime(values);
+    const win = time ? selectionWindow(time) : null;
+    const dateKey = effectiveDateKey(values);
+    const startMinutes = win ? minutesOf(win.start) : null;
+    const scheduledAt =
+      dateKey !== null && startMinutes !== null ? buildScheduledAtIso(dateKey, startMinutes) : null;
+
+    // A window that maps back to the same LOCAL day + start sends nothing: the
+    // instant would be identical anyway, and an untouched form must not rewrite
+    // a schedule it never touched.
+    const unchanged =
+      values.original.minutes !== null &&
+      values.original.dateKey !== null &&
+      startMinutes === values.original.minutes &&
+      dateKey === values.original.dateKey;
+    if (!unchanged && scheduledAt) body.scheduled_at = scheduledAt;
+
+    if (values.expectedHours !== values.original.expectedHours) {
+      body.expected_hours = values.expectedHours;
+    }
   }
 
-  const iso = buildScheduledAtIso(values.dateKey, values.minutes);
-  if (!iso) fieldErrors.scheduled_at = 'post_err_schedule';
-  else if (new Date(iso).getTime() <= now.getTime()) {
-    fieldErrors.scheduled_at = 'editjob_err_future';
-  }
-
-  return { ok: Object.keys(fieldErrors).length === 0, fieldErrors };
+  return body;
 }
 
 /* ------------------------------------------------------------------ *
- * Request body
+ * Errors
  * ------------------------------------------------------------------ */
-
-/**
- * Build the PATCH body: exactly the four editable fields and nothing else.
- *
- * `expected_hours` goes out as a NUMBER (the API accepts number | numeric
- * string, and the form holds a number), while `scheduled_at` is the ISO UTC
- * string from the local picker. The caller must have validated first.
- */
-export function buildUpdateJobRequest(values: JobEditValues): UpdateJobRequest {
-  const title = values.title.trim();
-  const description = values.description.trim();
-  return {
-    title,
-    description,
-    scheduled_at: buildScheduledAtIso(values.dateKey, values.minutes),
-    expected_hours: values.expectedHours,
-  };
-}
 
 const EDIT_FIELDS: JobEditField[] = ['title', 'description', 'scheduled_at', 'expected_hours'];
 
 /**
- * Map a FastAPI 422 body onto the four editable inputs.
- *
- * loc is normally ["body", "<field>"], so the location prefix is stripped.
- * Anything that does not name one of the four fields is surfaced as a form
- * error instead of being dropped. First message per field wins.
+ * Map a FastAPI 422 body onto the editable inputs. loc is normally
+ * ["body", "<field>"], so the prefix is stripped; anything else becomes a form
+ * error. The first message per field wins.
  */
 export function mapUpdateJobErrors(
   detail: ValidationErrorDetail[] | null | undefined
@@ -303,10 +492,7 @@ export function mapUpdateJobErrors(
   return { fieldErrors, formErrors };
 }
 
-/**
- * Resolve a field error to display text. `fallback` is the translated copy for
- * the field's current client-side rule (if any).
- */
+/** Resolve a field error to display text. */
 export function fieldErrorText(
   error: JobEditFieldError | undefined,
   fallback: (key: JobEditErrorKey) => string
@@ -318,3 +504,13 @@ export function fieldErrorText(
 /** The backend's readable text for a failed update, or null (shared reader). */
 export const updateJobErrorMessage = (body: unknown): string | null =>
   firstErrorMessage(body);
+
+/** `Thu 22 Oct` for a local day key, with the translated tables. */
+export function editDayLabel(
+  dateKey: string | null,
+  months: string[],
+  weekdays: string[]
+): string {
+  const day = parseLocalDateKey(dateKey);
+  return day ? formatDayLabel(day, months, weekdays) : '';
+}

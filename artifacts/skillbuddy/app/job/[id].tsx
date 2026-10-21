@@ -115,6 +115,18 @@ import {
   type JobActionId,
 } from '@/lib/jobDetail';
 import { sanitizeRichText } from '@/lib/sanitizeRichText';
+import { splitTable } from '@/lib/jobSchedule';
+import {
+  clockOf,
+  formatDayLabel,
+  formatLocalDateTime,
+  formatTimeLabel,
+  formatWindowLabel,
+  localStartOf,
+  parseScheduleSegments,
+  segmentsForTasks,
+  stripScheduleBlock,
+} from '@/lib/timeSlots';
 import type { Bid, BidProvider } from '@/types';
 
 type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
@@ -131,6 +143,13 @@ export default function BiddingDashboardScreen() {
   const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  // Translated tables for the LOCAL schedule labels (never Intl, never UTC).
+  const scheduleMonths = useMemo(() => splitTable(t('post_sched_months')), [t]);
+  const scheduleWeekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
+  const scheduleMeridiem = useMemo(
+    () => ({ am: t('post_sched_am'), pm: t('post_sched_pm') }),
+    [t]
+  );
   const showAlert = useAppAlert();
 
   // A NUMERIC id is a server job (navigated to as `/job/<id>`); the mock
@@ -1127,10 +1146,24 @@ export default function BiddingDashboardScreen() {
     const cancelledOn = cancelled ? formatDateTime(serverJob.cancelled_at) : null;
     // Countdown anchor from the backend's own bidding window (null = no timer).
     const deadline = biddingDeadline(serverJob, Date.now());
-    const description = sanitizeRichText(serverJob.description);
+    // The stored "Preferred time:" line is DATA, not prose: it is removed from
+    // the description and rendered as the task windows below.
+    const description = stripScheduleBlock(sanitizeRichText(serverJob.description));
     const addr = serverJob.address ?? null;
     const milestones = [...(serverJob.milestones ?? [])].sort(
       (a, b) => a.sequence - b.sequence || a.id - b.id
+    );
+    // Each task's window, read from the stored line and matched by task number.
+    const taskSegments = segmentsForTasks(
+      parseScheduleSegments(serverJob.description),
+      milestones.length
+    );
+    const scheduledLocal = localStartOf(serverJob.scheduled_at);
+    const scheduledLabel = formatLocalDateTime(
+      serverJob.scheduled_at,
+      scheduleMonths,
+      scheduleWeekdays,
+      scheduleMeridiem
     );
     const history = [...(serverJob.status_history ?? [])].sort(
       (a, b) =>
@@ -1698,7 +1731,7 @@ export default function BiddingDashboardScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Feather name="calendar" size={13} color={c.mutedForeground} />
                 <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {formatDateTime(serverJob.scheduled_at)}
+                  {scheduledLabel || formatDateTime(serverJob.scheduled_at)}
                 </Text>
               </View>
             ) : null}
@@ -1846,7 +1879,26 @@ export default function BiddingDashboardScreen() {
               </View>
               {milestones.map((m, i) => {
                 const mHours = parseExpectedHours(m.expected_hours);
-                const mDate = formatDateTime(m.scheduled_at);
+                // LOCAL day + the stored window: "Thu 22 Oct · 8:00 AM - 11:00 AM"
+                // instead of the raw UTC stamp and the raw "Preferred time" text.
+                const local = localStartOf(m.scheduled_at);
+                const segment = taskSegments[i] ?? null;
+                const mDayLabel = formatDayLabel(
+                  local?.day ?? null,
+                  scheduleMonths,
+                  scheduleWeekdays
+                );
+                const mWindow =
+                  segment && local
+                    ? formatWindowLabel(
+                        clockOf(segment.startMinutes),
+                        segment.endMinutes !== null ? clockOf(segment.endMinutes) : local.clock,
+                        scheduleMeridiem
+                      )
+                    : local
+                      ? formatTimeLabel(local.clock, scheduleMeridiem)
+                      : '';
+                const mDate = [mDayLabel, mWindow].filter((part) => part.length > 0).join(' · ');
                 const mStatusKey = milestoneStatusLabelKey(m.status);
                 const mHoursText =
                   mHours === null

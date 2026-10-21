@@ -94,13 +94,17 @@ export function parseApiIsoUtc(value: string | null | undefined): Date | null {
  * the string "Invalid Date" when there is nothing to show.
  */
 export function formatDateTime(value: string | null | undefined): string | null {
-  const date = parseIsoDate(value);
+  // `scheduled_at`, `created_at`, `bidding_ends_at` … all come from GET as
+  // marker-less UTC digits (see parseApiIsoUtc), so they MUST be read with the
+  // UTC rule — `new Date(naive)` reads them as device-local and shifted every
+  // appointment by the device's whole offset (8:00 AM showed as 5:00 AM).
+  const date = parseApiIsoUtc(value);
   return date ? date.toLocaleString() : null;
 }
 
 /** Date only, local timezone. Null when there is nothing usable. */
 export function formatDate(value: string | null | undefined): string | null {
-  const date = parseIsoDate(value);
+  const date = parseApiIsoUtc(value);
   return date ? date.toLocaleDateString() : null;
 }
 

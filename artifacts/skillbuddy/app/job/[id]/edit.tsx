@@ -16,23 +16,40 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
+import DateStrip from '@/components/DateStrip';
+import TimeChoices from '@/components/TimeChoices';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { invalidateJobList } from '@/hooks/useJobList';
 import { authApi } from '@/services/api';
+import { splitTable } from '@/lib/jobSchedule';
+import { selectionWindow } from '@/lib/jobBooking';
 import {
-  HOURS_MAX,
+  DAY_END_MINUTES,
+  clampHours,
+  clockOf,
+  exceedsHoursCap,
+  formatLocalDateTime,
+  formatTimeLabel,
+  formatWindowLabel,
+  maxHoursForStart,
+  minutesOf,
+  parseScheduleSegments,
+  segmentsForTasks,
+} from '@/lib/timeSlots';
+import {
   HOURS_MIN,
-  TITLE_MAX,
-  TITLE_MIN,
   buildUpdateJobRequest,
-  dayChoices,
+  editDayChoices,
+  editDayLabel,
+  editHoursCap,
   fieldErrorText,
+  isOutsideEditWindow,
   jobToEditValues,
+  localDateKey,
   mapUpdateJobErrors,
-  minutesToLabel,
   parseLocalDateKey,
-  slotMinutes,
   updateJobErrorMessage,
+  userWordCount,
   validateJobEdit,
   type JobEditErrorKey,
   type JobEditField,
@@ -43,18 +60,22 @@ import {
 /**
  * Edit Job — PATCH /api/v1/jobs/{job_id} (schema JobUpdate).
  *
- * Only the four fields the endpoint actually accepts are editable: title,
- * description, scheduled_at and expected_hours. The address is NOT editable
- * here (that is the Job Address endpoints) and neither are status, request_type
- * or booking_type.
+ * Only the four fields the endpoint accepts are ever sent: description,
+ * scheduled_at and expected_hours here; the title is NOT editable and is never
+ * included. The address has its own endpoints and status/type are out of scope.
  *
- * Routing: /job/{id}/edit, matching the existing app/job/[id]/* screens.
+ * What this screen deliberately does NOT do
+ *   • no Job Title field (the title stays the service name);
+ *   • no 60-day chip row: the same 7-day window as Post a Job, with the job's
+ *     own date left untouched when it falls outside it;
+ *   • no arbitrary clock chips: the five client windows + Anytime, preselected
+ *     from the job's stored window courtesy of lib/timeSlots.deriveSlotOf;
+ *   • no per-task editing: JobUpdate has no milestones field and the live spec
+ *     has no milestone endpoint, so a MULTI_DAY job's tasks are shown READ-ONLY
+ *     with the reason, and only its description can change.
  *
- * Gating: the whole form is replaced by an explanation whenever the loaded job
- * reports is_editable false, so the user can never fill in a form the server
- * will reject. Nothing is written optimistically — the cached job is replaced
- * by the PATCH response itself, which is the source of truth for the
- * recalculated fields (is_editable, status, remaining_bidding_seconds, ...).
+ * Gating: is_editable false replaces the form entirely, so nobody fills in a
+ * form the server will reject. The PATCH response is adopted whole.
  */
 export default function EditJobScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -64,34 +85,28 @@ export default function EditJobScreen() {
   const { t } = useLanguage();
   const showAlert = useAppAlert();
 
-  // Server jobs only: a numeric id is a real job. The mock 'j1'/'j2' catalogue
-  // has no server counterpart, so it gets no edit screen.
   const numericId = /^\d+$/.test(id ?? '') ? Number(id) : null;
 
-  const {
-    status: detailStatus,
-    job,
-    serverMessage,
-    retry,
-    refetch,
-    applyJob,
-  } = useJobDetail(numericId);
+  const { status: detailStatus, job, serverMessage, retry, refetch, applyJob } =
+    useJobDetail(numericId);
 
-  const [form, setForm] = useState<JobEditValues>({
-    title: '',
-    description: '',
-    dateKey: '',
-    minutes: 9 * 60,
-    expectedHours: 2,
-  });
+  const [form, setForm] = useState<JobEditValues | null>(null);
   const [clientErrors, setClientErrors] = useState<
     Partial<Record<JobEditField, JobEditErrorKey>>
   >({});
   const [serverErrors, setServerErrors] = useState<
     Partial<Record<JobEditField, JobEditFieldError>>
   >({});
+  const [hoursNotice, setHoursNotice] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const prefilled = useRef(false);
+
+  const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
+  const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
+  const meridiem = useMemo(
+    () => ({ am: t('post_sched_am'), pm: t('post_sched_pm') }),
+    [t]
+  );
 
   // Pre-fill ONCE from the loaded job so a background refetch can never wipe
   // what the user is typing.
@@ -101,8 +116,27 @@ export default function EditJobScreen() {
     prefilled.current = true;
   }, [job]);
 
-  const setField = <K extends keyof JobEditValues>(key: K, value: JobEditValues[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    if (hoursNotice === null) return;
+    const timer = setTimeout(() => setHoursNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [hoursNotice]);
+
+  const setTime = (next: JobEditValues['time']) => {
+    setForm((prev) => {
+      if (!prev) return prev;
+      const cap = next
+        ? maxHoursForStart(minutesOf(selectionWindow(next)?.start ?? null))
+        : null;
+      if (cap === null) return { ...prev, time: next };
+      if (exceedsHoursCap(prev.expectedHours, cap)) {
+        setHoursNotice(cap);
+        return { ...prev, time: next, expectedHours: clampHours(prev.expectedHours, cap) };
+      }
+      return { ...prev, time: next };
+    });
+    clearError('scheduled_at');
+    clearError('expected_hours');
   };
 
   const clearError = (field: JobEditField) => {
@@ -124,42 +158,29 @@ export default function EditJobScreen() {
     fieldErrorText(serverErrors[field], (key) => t(key)) ??
     (clientErrors[field] ? t(clientErrors[field]!) : null);
 
-  const wordCount = useMemo(
-    () => form.description.trim().split(/\s+/).filter(Boolean).length,
-    [form.description]
-  );
-
-  const dateOptions = useMemo(
-    () => dayChoices(form.dateKey || ''),
-    // Recomputed only when the selected day changes: the list already spans the
-    // next 60 days, so it must not be rebuilt on every keystroke.
-    [form.dateKey]
-  );
-
-  /**
-   * 30-minute slots, plus the job's own time when it sits off the grid (e.g.
-   * 2:15 PM) so an untouched form re-sends exactly what the server had.
-   */
-  const timeOptions = useMemo(() => {
-    const base = slotMinutes();
-    return base.includes(form.minutes) ? base : [...base, form.minutes].sort((a, b) => a - b);
-  }, [form.minutes]);
-
   const submit = useCallback(async () => {
-    if (!job || submitting) return;
-
+    if (!form || submitting) return;
     // The flag is the gate — never a client guess about the status.
-    if (job.is_editable !== true) return;
+    if (job?.is_editable !== true) return;
 
     const validation = validateJobEdit(form);
     setClientErrors(validation.fieldErrors);
     if (!validation.ok) return;
 
+    const body = buildUpdateJobRequest(form, meridiem);
+    if (Object.keys(body).length === 0) {
+      showAlert({
+        title: t('editjob_no_changes_title'),
+        message: t('editjob_no_changes_msg'),
+        icon: 'info',
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const { data } = await authApi.updateJob(job.id, buildUpdateJobRequest(form));
-      // The response is the source of truth: adopt it whole instead of patching
-      // in the values we sent.
+      const { data } = await authApi.updateJob(job.id, body);
+      // The response is the source of truth: adopt it whole.
       applyJob(data);
       invalidateJobList();
       setSubmitting(false);
@@ -173,8 +194,6 @@ export default function EditJobScreen() {
       setSubmitting(false);
       const status: number | undefined = err?.response?.status;
 
-      // The shared client already refreshed + replayed once; getting here means
-      // the session is over, so hand the user to login rather than a dead form.
       if (status === 401) {
         showAlert({
           title: t('post_err_session_title'),
@@ -198,19 +217,14 @@ export default function EditJobScreen() {
       } else {
         showAlert({
           title: t('editjob_err_title'),
-          // The backend's own text wins when it sent one.
           message: updateJobErrorMessage(err?.response?.data) ?? t('editjob_err_msg'),
           icon: 'alert-triangle',
         });
       }
 
-      // The job may have been assigned, cancelled or completed since this screen
-      // opened, in which case the server will keep refusing. Re-read it: if
-      // is_editable has flipped to false the screen re-renders as non-editable
-      // instead of letting the user retry a form that cannot ever succeed.
       await refetch();
     }
-  }, [job, submitting, form, applyJob, showAlert, t, router, refetch]);
+  }, [form, submitting, job, meridiem, applyJob, showAlert, t, router, refetch]);
 
   const header = (title: string) => (
     <View style={[styles.header, { backgroundColor: c.background, borderBottomColor: c.border }]}>
@@ -237,7 +251,7 @@ export default function EditJobScreen() {
     );
   }
 
-  if (detailStatus === 'idle' || detailStatus === 'loading') {
+  if (detailStatus === 'idle' || detailStatus === 'loading' || !form) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
         <BrandedLoader size={44} />
@@ -258,10 +272,7 @@ export default function EditJobScreen() {
           <Text style={[styles.stateSub, { color: c.mutedForeground }]}>
             {unavailable ? serverMessage ?? t('jobd_unavailable_msg') : t('jobd_load_error_sub')}
           </Text>
-          <TouchableOpacity
-            style={[styles.stateBtn, { backgroundColor: c.primary }]}
-            onPress={retry}
-          >
+          <TouchableOpacity style={[styles.stateBtn, { backgroundColor: c.primary }]} onPress={retry}>
             <Text style={[styles.stateBtnText, { color: c.primaryForeground }]}>
               {t('jobs_retry')}
             </Text>
@@ -277,8 +288,6 @@ export default function EditJobScreen() {
     );
   }
 
-  // is_editable false -> no form at all. The user cannot fill in something the
-  // server will reject.
   if (job.is_editable !== true) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
@@ -304,6 +313,22 @@ export default function EditJobScreen() {
     );
   }
 
+  const multiDay = form.original.isMultiDay;
+  const words = userWordCount(form.description);
+  const cap = editHoursCap(form);
+  const chosenDay = parseLocalDateKey(form.dateKey);
+  const outsideWindow = isOutsideEditWindow(form.dateKey);
+  const dayChoices = editDayChoices();
+
+  // Multi-day tasks: read-only rows built from the milestones + stored line.
+  const storedMilestones = [...(job.milestones ?? [])].sort(
+    (a, b) => a.sequence - b.sequence || a.id - b.id
+  );
+  const segments = segmentsForTasks(
+    parseScheduleSegments(job.description),
+    storedMilestones.length
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('job_edit'))}
@@ -313,40 +338,13 @@ export default function EditJobScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Title */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_job_title')}</Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: c.input,
-              color: c.text,
-              borderColor: errorText('title') ? c.destructive : c.border,
-            },
-          ]}
-          placeholder={t('post_title_placeholder')}
-          placeholderTextColor={c.mutedForeground}
-          value={form.title}
-          onChangeText={(v) => {
-            setField('title', v);
-            clearError('title');
-          }}
-          maxLength={TITLE_MAX}
-        />
-        {errorText('title') ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errorText('title')}</Text>
-        ) : null}
-
-        {/* Description */}
+        {/* Description — the schedule line is stripped and never counted. */}
         <View style={styles.labelRow}>
           <Text style={[styles.label, { color: c.text }]}>{t('post_description')}</Text>
           <Text
-            style={[
-              styles.counter,
-              { color: wordCount > 500 ? c.destructive : c.mutedForeground },
-            ]}
+            style={[styles.counter, { color: words > 500 ? c.destructive : c.mutedForeground }]}
           >
-            {t('post_words', { n: wordCount })}
+            {t('post_words', { n: words })}
           </Text>
         </View>
         <TextInput
@@ -362,7 +360,7 @@ export default function EditJobScreen() {
           placeholderTextColor={c.mutedForeground}
           value={form.description}
           onChangeText={(v) => {
-            setField('description', v);
+            setForm((prev) => (prev ? { ...prev, description: v } : prev));
             clearError('description');
           }}
           multiline
@@ -373,128 +371,193 @@ export default function EditJobScreen() {
           <Text style={[styles.error, { color: c.destructive }]}>{errorText('description')}</Text>
         ) : null}
 
-        {/* Scheduled day (local). The selected day is always offered first, so a
-            job scheduled outside the window stays visible and selectable. */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          {dateOptions.map((key) => {
-            const date = parseLocalDateKey(key);
-            const active = form.dateKey === key;
-            return (
+        {multiDay ? (
+          <>
+            {/* MULTI_DAY: JobUpdate has no milestones field, so the tasks are
+                shown with their real local times and cannot be edited here. */}
+            <Text style={[styles.label, { color: c.text }]}>{t('post_tasks')}</Text>
+            {storedMilestones.map((m, index) => {
+              const segment = segments[index] ?? null;
+              const when = formatLocalDateTime(m.scheduled_at, months, weekdays, meridiem);
+              const window =
+                segment && segment.endMinutes !== null
+                  ? formatWindowLabel(
+                      clockOf(segment.startMinutes),
+                      clockOf(segment.endMinutes),
+                      meridiem
+                    )
+                  : null;
+              return (
+                <View
+                  key={m.id}
+                  style={[styles.taskRow, { backgroundColor: c.card, borderColor: c.border }]}
+                >
+                  <View style={[styles.taskBadge, { backgroundColor: c.primary }]}>
+                    <Text style={[styles.taskBadgeText, { color: c.primaryForeground }]}>
+                      {index + 1}
+                    </Text>
+                  </View>
+                  <View style={styles.taskBody}>
+                    <Text style={[styles.taskTitle, { color: c.text }]}>
+                      {t('post_task_n', { n: index + 1 })}
+                    </Text>
+                    <Text style={[styles.taskMeta, { color: c.mutedForeground }]}>
+                      {window ? `${when} · ${window}` : when}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            <View style={[styles.notice, { backgroundColor: c.muted, borderColor: c.border }]}>
+              <Feather name="info" size={13} color={c.mutedForeground} />
+              <Text style={[styles.noticeText, { color: c.mutedForeground }]}>
+                {t('editjob_tasks_locked')}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <>
+            {/* Date — the SAME seven days as Post a Job. */}
+            <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
+            {outsideWindow ? (
               <TouchableOpacity
-                key={key}
-                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                style={[
+                  styles.keepChip,
+                  {
+                    backgroundColor: form.dateKey === null ? c.muted : c.primaryLight,
+                    borderColor: form.dateKey === null ? c.border : c.primary,
+                  },
+                ]}
                 onPress={() => {
-                  setField('dateKey', key);
+                  setForm((prev) =>
+                    prev ? { ...prev, dateKey: prev.original.dateKey } : prev
+                  );
                   clearError('scheduled_at');
                 }}
               >
-                <Text
-                  style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}
-                >
-                  {date
-                    ? date.toLocaleDateString(undefined, {
-                        weekday: 'short',
-                        day: 'numeric',
-                        month: 'short',
-                      })
-                    : key}
+                <Feather name="calendar" size={13} color={c.primary} />
+                <Text style={[styles.keepChipText, { color: c.text }]}>
+                  {t('editjob_keep_date', {
+                    date: editDayLabel(form.original.dateKey, months, weekdays),
+                  })}
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+            ) : null}
+            <DateStrip
+              selected={chosenDay ? [chosenDay] : []}
+              activeKey={form.dateKey}
+              onToggle={(day) => {
+                const key = localDateKey(day);
+                setForm((prev) =>
+                  prev ? { ...prev, dateKey: prev.dateKey === key ? prev.original.dateKey : key } : prev
+                );
+                clearError('scheduled_at');
+              }}
+              weekdays={weekdays}
+              months={months}
+              disabled={() => false}
+              status={() => null}
+            />
 
-        {/* Time slot (local) */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          {timeOptions.map((minutes) => {
-            const active = form.minutes === minutes;
-            return (
+            {/* Time — the five client windows + Anytime, preselected from the job. */}
+            <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+            <TimeChoices
+              choice={form.time}
+              day={chosenDay ?? dayChoices[0]}
+              onChange={setTime}
+            />
+            {errorText('scheduled_at') ? (
+              <Text style={[styles.error, { color: c.destructive }]}>
+                {errorText('scheduled_at')}
+              </Text>
+            ) : null}
+
+            {/* Expected hours, capped by the 11 PM rule for this start. */}
+            <Text style={[styles.label, { color: c.text }]}>{t('post_hours')}</Text>
+            <View
+              style={[
+                styles.stepper,
+                {
+                  backgroundColor: c.input,
+                  borderColor: errorText('expected_hours') ? c.destructive : c.border,
+                  opacity: cap === null ? 0.55 : 1,
+                },
+              ]}
+            >
               <TouchableOpacity
-                key={minutes}
-                style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
+                style={[styles.stepperBtn, { backgroundColor: c.muted }]}
                 onPress={() => {
-                  setField('minutes', minutes);
-                  clearError('scheduled_at');
+                  setForm((prev) =>
+                    prev
+                      ? { ...prev, expectedHours: Math.max(HOURS_MIN, prev.expectedHours - 1) }
+                      : prev
+                  );
+                  clearError('expected_hours');
                 }}
+                disabled={cap === null || form.expectedHours <= HOURS_MIN}
               >
-                <Text
-                  style={[styles.chipText, { color: active ? c.primaryForeground : c.text }]}
-                >
-                  {minutesToLabel(minutes)}
-                </Text>
+                <Feather name="minus" size={16} color={c.text} />
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-        {errorText('scheduled_at') ? (
-          <Text style={[styles.error, { color: c.destructive }]}>{errorText('scheduled_at')}</Text>
-        ) : null}
+              <Text style={[styles.stepperValue, { color: c.text }]}>
+                {form.expectedHours === 1
+                  ? t('post_hours_value', { n: form.expectedHours })
+                  : t('post_hours_value_plural', { n: form.expectedHours })}
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.stepperBtn,
+                  { backgroundColor: c.muted, opacity: cap !== null && form.expectedHours >= cap ? 0.4 : 1 },
+                ]}
+                onPress={() => {
+                  setForm((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          expectedHours: clampHours(prev.expectedHours + 1, cap ?? HOURS_MIN),
+                        }
+                      : prev
+                  );
+                  clearError('expected_hours');
+                }}
+                disabled={cap === null || form.expectedHours >= cap}
+              >
+                <Feather name="plus" size={16} color={c.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.hint, { color: c.mutedForeground }]}>
+              {cap === null
+                ? t('post_hours_pick_time')
+                : t('post_hours_cap', {
+                    n: cap,
+                    time: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+                  })}
+            </Text>
+            {hoursNotice !== null ? (
+              <View style={[styles.notice, { backgroundColor: c.muted, borderColor: c.border }]}>
+                <Feather name="info" size={13} color={c.mutedForeground} />
+                <Text style={[styles.noticeText, { color: c.mutedForeground }]}>
+                  {t('post_hours_lowered', {
+                    n: form.expectedHours,
+                    time: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+                  })}
+                </Text>
+              </View>
+            ) : null}
+            {errorText('expected_hours') ? (
+              <Text style={[styles.error, { color: c.destructive }]}>
+                {errorText('expected_hours')}
+              </Text>
+            ) : null}
+          </>
+        )}
 
-        {/* Expected hours — sent as a NUMBER */}
-        <Text style={[styles.label, { color: c.text }]}>{t('post_hours')}</Text>
-        <View
-          style={[
-            styles.stepper,
-            {
-              backgroundColor: c.input,
-              borderColor: errorText('expected_hours') ? c.destructive : c.border,
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-            onPress={() => {
-              setField('expectedHours', Math.max(HOURS_MIN, form.expectedHours - 1));
-              clearError('expected_hours');
-            }}
-          >
-            <Feather name="minus" size={16} color={c.text} />
-          </TouchableOpacity>
-          <Text style={[styles.stepperValue, { color: c.text }]}>
-            {form.expectedHours === 1
-              ? t('post_hours_value', { n: form.expectedHours })
-              : t('post_hours_value_plural', { n: form.expectedHours })}
-          </Text>
-          <TouchableOpacity
-            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-            onPress={() => {
-              setField('expectedHours', Math.min(HOURS_MAX, form.expectedHours + 1));
-              clearError('expected_hours');
-            }}
-          >
-            <Feather name="plus" size={16} color={c.text} />
-          </TouchableOpacity>
-        </View>
-        {errorText('expected_hours') ? (
-          <Text style={[styles.error, { color: c.destructive }]}>
-            {errorText('expected_hours')}
-          </Text>
-        ) : null}
-
-        {/* Save */}
         <TouchableOpacity
-          style={[
-            styles.submitBtn,
-            { backgroundColor: c.primary },
-            submitting && styles.submitBtnBusy,
-          ]}
+          style={[styles.submitBtn, { backgroundColor: c.primary }, submitting && styles.submitBtnBusy]}
           onPress={() => void submit()}
           disabled={submitting}
           activeOpacity={0.85}
         >
-          {submitting ? (
-            <ActivityIndicator size="small" color={c.primaryForeground} />
-          ) : null}
+          {submitting ? <ActivityIndicator size="small" color={c.primaryForeground} /> : null}
           <Text style={[styles.submitText, { color: c.primaryForeground }]}>
             {submitting ? t('editjob_saving') : t('editjob_submit')}
           </Text>
@@ -525,14 +588,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   counter: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 14,
-  },
   textArea: {
     borderWidth: 1,
     borderRadius: 12,
@@ -543,9 +598,44 @@ const styles = StyleSheet.create({
     minHeight: 110,
   },
   error: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 4 },
-  chipRow: { gap: 8, paddingRight: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
-  chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 8, lineHeight: 16 },
+  keepChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  keepChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  taskBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  taskBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
+  taskBody: { flex: 1, minWidth: 0 },
+  taskTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  taskMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  noticeText: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, flex: 1 },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
