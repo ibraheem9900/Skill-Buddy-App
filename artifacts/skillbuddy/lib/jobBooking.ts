@@ -34,6 +34,17 @@
  */
 
 import type { JobBookingType } from '@/types';
+import {
+  CLIENT_SLOTS,
+  MAX_DAILY_EXPECTED_HOURS,
+  canStartBeforeDayEnd,
+  formatTimeLabel as formatClockLabel,
+  formatWindowLabel as formatClockWindow,
+  maxHoursForStart,
+  minutesOf,
+  selectionWindowOf,
+  slotContaining,
+} from '@/lib/timeSlots';
 
 /** The wizard's form-level booking choice (the API value is derived from it). */
 export type BookingKind = 'one_time' | 'multi_day';
@@ -46,7 +57,11 @@ export const TIME_MINUTE_STEP = 5;
 
 /** Expected-hours bounds shown by the stepper (product limits, see header). */
 export const MIN_EXPECTED_HOURS = 1;
-export const MAX_EXPECTED_HOURS = 24;
+/**
+ * The largest ceiling the 11 PM rule can produce (8:00 AM → 15 h). The real cap
+ * of a task is always `maxHoursForStart(task start)`, never this bound.
+ */
+export const MAX_EXPECTED_HOURS = MAX_DAILY_EXPECTED_HOURS;
 
 /** The two one-time day choices. */
 export type OneTimeDay = 'today' | 'tomorrow';
@@ -58,7 +73,11 @@ export type BookingErrorKey =
   | 'post_err_dates_pick'
   | 'post_err_dates_past'
   | 'post_err_dates_max'
-  | 'post_err_time_window';
+  | 'post_err_time_window'
+  /** An Anytime start that leaves no whole hour before 11:00 PM. */
+  | 'post_err_time_late'
+  /** A selected day without a usable time (the Tasks step's gate). */
+  | 'post_err_day_time';
 
 /** A 12-hour clock reading, as the dial produces it. */
 export interface ClockTime {
@@ -83,14 +102,15 @@ export interface FixedSlot {
   end: ClockTime;
 }
 
-/** 8–11, 11–14, 14–17, 17–20, 20–23 — the same five chips, in order. */
-export const FIXED_SLOTS: FixedSlot[] = [
-  { key: 'slot_8_11', start: { hour: 8, minute: 0 }, end: { hour: 11, minute: 0 } },
-  { key: 'slot_11_14', start: { hour: 11, minute: 0 }, end: { hour: 14, minute: 0 } },
-  { key: 'slot_14_17', start: { hour: 14, minute: 0 }, end: { hour: 17, minute: 0 } },
-  { key: 'slot_17_20', start: { hour: 17, minute: 0 }, end: { hour: 20, minute: 0 } },
-  { key: 'slot_20_23', start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
-];
+/**
+ * 8–11, 11–14, 14–17, 17–20, 20–23 — the SAME five windows, in the same order,
+ * read from lib/timeSlots (the single source of truth for every slot time).
+ */
+export const FIXED_SLOTS: FixedSlot[] = CLIENT_SLOTS.map((entry) => ({
+  key: entry.key,
+  start: { hour: entry.start.hour, minute: entry.start.minute },
+  end: { hour: entry.end.hour, minute: entry.end.minute },
+}));
 
 /** What the wizard's Time section holds. */
 export type TimeChoice =
@@ -102,16 +122,9 @@ export function slotByKey(key: string): FixedSlot | null {
   return FIXED_SLOTS.find((slot) => slot.key === key) ?? null;
 }
 
-/** The start/end window a choice describes (null when the choice is unusable). */
+/** The start/end window a choice describes (delegates to lib/timeSlots). */
 export function selectionWindow(choice: TimeChoice | null | undefined): { start: ClockTime; end: ClockTime } | null {
-  if (!choice) return null;
-  if (choice.kind === 'slot') {
-    const slot = slotByKey(choice.key);
-    return slot ? { start: slot.start, end: slot.end } : null;
-  }
-  if (minutesOfDay(choice.start.hour, choice.start.minute) === null) return null;
-  if (minutesOfDay(choice.end.hour, choice.end.minute) === null) return null;
-  return { start: choice.start, end: choice.end };
+  return selectionWindowOf(choice);
 }
 
 /** Minutes between two readings of the same day (negative when out of order). */
@@ -135,6 +148,7 @@ export function windowShorterThanHours(choice: TimeChoice | null | undefined, ho
  * The wizard's gate for the Time section.
  *  - a slot must be chosen;
  *  - Anytime's end must be strictly after its start (same day — no overnight);
+ *  - the start must leave at least one whole hour before 11:00 PM;
  *  - a time that has already started cannot be booked for TODAY.
  */
 export function validateTimeChoice(
@@ -148,6 +162,7 @@ export function validateTimeChoice(
   const endMinutes = minutesOfDay(win.end.hour, win.end.minute);
   if (startMinutes === null || endMinutes === null) return 'post_err_time';
   if (endMinutes <= startMinutes) return 'post_err_time_window';
+  if (!canStartBeforeDayEnd(startMinutes)) return 'post_err_time_late';
   if (isValidDate(day) && isSameLocalDay(day, now)) {
     const at = composeInstant(day, win.start.hour, win.start.minute);
     if (at.getTime() <= now.getTime()) return 'post_err_time_past';
@@ -311,28 +326,34 @@ export function formatClock24(hour24: number, minute: number): string {
   return `${pad2(hour24)}:${pad2(minute)}`;
 }
 
-/** `9:30 AM` — the field label, with translated meridiem. */
+/** `9:30 AM` — the field label, with translated meridiem (lib/timeSlots). */
 export function formatTimeLabel(
   hour24: number,
   minute: number,
   meridiem: { am: string; pm: string }
 ): string {
-  const { hour12, isPm } = to12Hour(hour24);
-  return `${hour12}:${pad2(minute)} ${isPm ? meridiem.pm : meridiem.am}`;
+  return formatClockLabel({ hour: hour24, minute }, meridiem);
 }
 
-/** `8:00 AM - 11:00 AM` for a clock window, with translated meridiem labels. */
+/** `8:00 AM - 11:00 AM` for a clock window (lib/timeSlots formatting). */
 export function formatWindowLabel(
   choice: TimeChoice | null,
   meridiem: { am: string; pm: string }
 ): string {
   const win = selectionWindow(choice);
   if (!win) return '';
-  return `${formatTimeLabel(win.start.hour, win.start.minute, meridiem)} - ${formatTimeLabel(
-    win.end.hour,
-    win.end.minute,
-    meridiem
-  )}`;
+  return formatClockWindow(win.start, win.end, meridiem);
+}
+
+/**
+ * The 11 PM ceiling for a choice's START (`null` when no time is chosen). The
+ * end of an Anytime window is deliberately ignored: the boss's rule counts from
+ * the start of work until 11 PM.
+ */
+export function hoursCapForChoice(choice: TimeChoice | null | undefined): number | null {
+  const win = selectionWindow(choice);
+  if (!win) return null;
+  return maxHoursForStart(minutesOf(win.start));
 }
 
 /** `Mon 12 Oct` from the translated month/weekday tables. */
@@ -370,11 +391,20 @@ export function formatDayButton(day: Date, weekdays: string[]): string {
   return `${weekday} ${day.getDate()}`.trim();
 }
 
-/** Minutes-of-day for a clock reading, or null when the reading is impossible. */
+/** Minutes-of-day for a clock reading, or null (delegates to lib/timeSlots). */
 export function minutesOfDay(hour24: number, minute: number): number | null {
-  if (!Number.isInteger(hour24) || hour24 < 0 || hour24 > 23) return null;
-  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
-  return hour24 * 60 + minute;
+  return minutesOf({ hour: hour24, minute });
+}
+
+/**
+ * The window a clock reading falls inside, if any. A pilot's 9:30 AM mark and a
+ * client's 8:00 AM start are both the 8–11 AM window.
+ */
+export function slotWindowContaining(choice: TimeChoice | null | undefined): FixedSlot | null {
+  const win = selectionWindow(choice);
+  if (!win) return null;
+  const containing = slotContaining(minutesOf(win.start));
+  return containing ? slotByKey(containing.key) : null;
 }
 
 /* ── Validation ──────────────────────────────────────────────────────────── */

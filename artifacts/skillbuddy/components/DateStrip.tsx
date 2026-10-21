@@ -2,40 +2,48 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
-import { isSameLocalDay } from '@/lib/jobBooking';
-import { agendaWindow, monthSpanLabel } from '@/lib/postWizard';
+import { useLanguage } from '@/context/LanguageContext';
+import { agendaWindow, dayKey, monthSpanLabel } from '@/lib/postWizard';
 
 /**
- * The inline seven-day strip that replaced the calendar sheet.
+ * The inline seven-day strip on the Date & Time step.
  *
  * Contract (see lib/postWizard for the rules):
- *  • exactly the seven days starting TODAY, in one row — no month grid, no
- *    start-date lock, no "change start date";
- *  • any day toggles on and off, in any order;
- *  • the month label above spans both months when the week crosses one;
- *  • a day with no remaining slots (today, late in the day) is visibly disabled;
- *  • seven EQUAL columns that fit a 360dp screen without scrolling; the
- *    ScrollView only moves if the platform genuinely cannot fit them.
+ *  • exactly the seven days starting TODAY, in one row — no month grid;
+ *  • ONE ACTIVE day at a time: tapping an unselected day selects AND activates
+ *    it, tapping a selected-but-inactive day only activates it, tapping the
+ *    active day again removes it (its time goes with it);
+ *  • states are visually distinct: a filled circle means selected, an extra
+ *    ring means active, and a marker under the number says whether that day
+ *    already has a time (solid dot) or still needs one (hollow dot);
+ *  • a day with no remaining windows (today, late in the day) is visibly
+ *    disabled and cannot be picked.
  */
 export default function DateStrip({
   selected,
+  activeKey,
   onToggle,
   weekdays,
   months,
   disabled,
+  status,
 }: {
   selected: Date[];
+  /** `YYYY-MM-DD` of the day whose time grid is shown, or null. */
+  activeKey: string | null;
   onToggle: (day: Date) => void;
   /** Mon → Sun, from the translated `post_sched_weekdays` table. */
   weekdays: string[];
   /** Jan → Dec, from the translated `post_sched_months` table. */
   months: string[];
-  /** True when the day cannot be picked (today with no slots left). */
+  /** True when the day cannot be picked (today with no windows left). */
   disabled: (day: Date) => boolean;
+  /** 'timed' when the day's task has a time, 'untimed' when it still needs one. */
+  status: (day: Date) => 'timed' | 'untimed' | null;
 }) {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const days = agendaWindow(new Date());
-  const isSelected = (day: Date) => selected.some((picked) => isSameLocalDay(picked, day));
 
   return (
     <View style={styles.wrap}>
@@ -49,28 +57,31 @@ export default function DateStrip({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        // `flexGrow` keeps the row full-width on tablets; on a 360dp phone the
-        // seven 40dp-minimum columns fit inside it and no scrolling happens.
+        // `flexGrow` keeps the row full-width on tablets; the seven columns fit a
+        // 360dp phone, so nothing scrolls unless the platform genuinely cannot.
         contentContainerStyle={styles.scrollContent}
       >
         {days.map((day) => {
-          const active = isSelected(day);
-          const off = disabled(day) && !active;
+          const key = dayKey(day);
+          const isSelected = selected.some((picked) => dayKey(picked) === key);
+          const isActive = activeKey === key;
+          const off = disabled(day) && !isSelected;
+          const dayStatus = status(day);
           const weekday = weekdays[(day.getDay() + 6) % 7] ?? '';
           return (
             <TouchableOpacity
-              key={day.toISOString()}
+              key={key}
               style={styles.col}
               onPress={() => onToggle(day)}
               disabled={off}
               accessibilityRole="button"
-              accessibilityState={{ selected: active, disabled: off }}
+              accessibilityState={{ selected: isSelected, disabled: off }}
               accessibilityLabel={`${weekday} ${day.getDate()}`}
             >
               <Text
                 style={[
                   styles.weekday,
-                  { color: active ? c.primary : off ? c.mutedForeground : c.text },
+                  { color: isSelected ? c.primary : off ? c.mutedForeground : c.text },
                   off && styles.off,
                 ]}
                 numberOfLines={1}
@@ -81,20 +92,38 @@ export default function DateStrip({
                 style={[
                   styles.pill,
                   {
-                    backgroundColor: active ? c.primary : 'transparent',
-                    borderColor: active ? c.primary : 'transparent',
+                    backgroundColor: isSelected ? c.primary : 'transparent',
+                    borderColor: isSelected ? c.primary : c.border,
+                    // The ACTIVE day gets a second ring outside the fill.
+                    borderWidth: isActive ? 2 : 1,
                   },
+                  isActive && styles.pillActive,
                 ]}
               >
                 <Text
                   style={[
                     styles.date,
-                    { color: active ? c.primaryForeground : off ? c.mutedForeground : c.text },
+                    {
+                      color: isSelected ? c.primaryForeground : off ? c.mutedForeground : c.text,
+                    },
                     off && styles.off,
                   ]}
                 >
                   {day.getDate()}
                 </Text>
+              </View>
+              <View style={styles.markerSlot}>
+                {dayStatus === 'timed' ? (
+                  <View
+                    style={[styles.marker, { backgroundColor: isSelected ? c.primary : c.success }]}
+                    accessibilityLabel={t('post_day_time_set')}
+                  />
+                ) : dayStatus === 'untimed' ? (
+                  <View
+                    style={[styles.markerEmpty, { borderColor: c.destructive }]}
+                    accessibilityLabel={t('post_day_need_time')}
+                  />
+                ) : null}
               </View>
             </TouchableOpacity>
           );
@@ -120,5 +149,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  pillActive: { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, elevation: 2 },
   date: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  markerSlot: { height: 8, alignItems: 'center', justifyContent: 'center' },
+  marker: { width: 4, height: 4, borderRadius: 2 },
+  markerEmpty: { width: 6, height: 6, borderRadius: 3, borderWidth: 1.2 },
 });

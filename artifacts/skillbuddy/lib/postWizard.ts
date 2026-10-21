@@ -1,24 +1,30 @@
 /**
  * postWizard.ts
  *
- * Pure rules behind the REBUILT Post-a-Job wizard's Date & Time step:
+ * Pure rules behind the REBUILT Post-a-Job wizard's Date & Time step and the
+ * new Tasks step:
  *
- *   • the inline 7-day date strip (today .. today+6) — no calendar sheet;
- *   • one TASK per selected day (the API's `milestones`, max 7), each with its
- *     OWN time, kept in sync with the strip in both directions;
- *   • deselecting a preset slot or a custom window.
+ *   • ONE active day at a time on the 7-day strip: selecting a day makes it
+ *     active, tapping it again removes it, tapping another selected day just
+ *     makes it active;
+ *   • ONE time choice per selected day (the five client windows or Anytime),
+ *     edited for the ACTIVE day only;
+ *   • one task per selected day (the API's `milestones`, max 7), each with its
+ *     OWN time and its OWN expected hours, capped by the 11 PM rule for that
+ *     task's start (lib/timeSlots);
+ *   • renumbering after a delete, and a payload with one milestone per task.
  *
  * Everything here is a plain function over plain values (no React, no Intl), so
  * the screen only renders what these helpers decide and every rule below is
  * covered by lib/__tests__/postWizard.test.ts.
  *
- * ── WHAT THE API STILL SAYS (live OpenAPI, re-read 2026-10-21) ─────────────
+ * ── WHAT THE API STILL SAYS (live OpenAPI, re-read 2026-10-22) ─────────────
  *   JobMilestoneCreate: { scheduled_at (date-time, required), expected_hours }
  *   JobCreate.milestones: max 7 entries, all within one week of the first.
  * There is still NO per-milestone title and NO end-of-window field, so a task's
- * custom NAME and its END time never reach the API as their own fields: the
- * start of each task is its `scheduled_at`, and the window end rides in the
- * description (lib/jobCreate.buildPreferredTimeLine), exactly as before.
+ * window end never reaches the API as its own field: the start of each task is
+ * its `scheduled_at`, and the window rides in the description
+ * (lib/timeSlots.buildScheduleLine), exactly as before.
  */
 
 import {
@@ -36,6 +42,14 @@ import {
   validateTimeChoice,
   type BookingErrorKey,
 } from '@/lib/jobBooking';
+import {
+  MIN_EXPECTED_HOURS,
+  canStartBeforeDayEnd,
+  clampHours,
+  exceedsHoursCap,
+  maxHoursForStart,
+  minutesOf,
+} from '@/lib/timeSlots';
 
 /** The strip is always one week — the only span MULTI_DAY accepts. */
 export const AGENDA_DAYS = MAX_MILESTONE_DAYS;
@@ -50,8 +64,8 @@ export function agendaWindow(now: Date = new Date()): Date[] {
 
 /**
  * Is there still a time to book on `day`? For today that means at least one of
- * the five presets has not started yet; every later day is always open. This is
- * what disables today's column on the strip.
+ * the five windows has not started yet; every later day is always open. This is
+ * what draws today's "Already started" state on the strip.
  */
 export function hasBookableTime(day: Date, now: Date = new Date()): boolean {
   if (!isValidDate(day)) return false;
@@ -59,25 +73,6 @@ export function hasBookableTime(day: Date, now: Date = new Date()): boolean {
   if (day.getTime() !== today.getTime()) return day.getTime() > today.getTime();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   return FIXED_SLOTS.some((slot) => slot.start.hour * 60 + slot.start.minute > nowMinutes);
-}
-
-/**
- * Toggle one strip day. Any of the seven can be picked, in any order, and a
- * second tap removes it — no start-date lock, no minimum. Today is refused once
- * it has no remaining slots.
- */
-export function toggleAgendaDay(selected: Date[], day: Date, now: Date = new Date()): Date[] {
-  if (!isValidDate(day)) return selected;
-  const window = agendaWindow(now);
-  const inWindow = window.some((candidate) => candidate.getTime() === localDay(day).getTime());
-  if (!inWindow) return selected;
-  if (!hasBookableTime(day, now)) return selected;
-
-  const exists = selected.some((picked) => isSameLocalDay(picked, day));
-  const next = exists
-    ? selected.filter((picked) => !isSameLocalDay(picked, day))
-    : [...selected, localDay(day)];
-  return sortDays(next);
 }
 
 /* ── Month label above the strip ─────────────────────────────────────────── */
@@ -102,16 +97,19 @@ export function monthSpanLabel(days: Date[], months: string[]): string {
 
 /* ── Tasks (the wire's `milestones`) ─────────────────────────────────────── */
 
-/** A task, remembered by LOCAL DAY so the strip and the list stay in sync. */
+/**
+ * A task, remembered by LOCAL DAY so the strip and the list stay in sync.
+ * There is no custom name any more: a task is "Task N", numbered by position.
+ */
 export interface TaskDraft {
   /** `YYYY-MM-DD` in local time — stable identity for one day. */
   key: string;
   /** Local midnight of the task's day. */
   day: Date;
-  /** Custom name; null means the numbered default ("Task N"). */
-  name: string | null;
   /** This task's own window — one per day, never shared. */
   time: TimeChoice | null;
+  /** This task's own expected hours (default 1). */
+  hours: number;
 }
 
 /** `2026-10-21` for a local day (date parts only, never `toISOString`). */
@@ -123,15 +121,15 @@ export function dayKey(day: Date): string {
 }
 
 /** A fresh, untimed task for a day. */
-export function buildTask(day: Date): TaskDraft {
-  return { key: dayKey(day), day: localDay(day), name: null, time: null };
+export function buildTask(day: Date, hours: number = MIN_EXPECTED_HOURS): TaskDraft {
+  return { key: dayKey(day), day: localDay(day), time: null, hours };
 }
 
 /**
  * Reconcile the task list with the selected days, in BOTH directions:
  *   • a newly selected day gets a new task card;
  *   • a deselected day's task is dropped;
- *   • every surviving task keeps its own name and time and its position is the
+ *   • every surviving task keeps its own time and hours and its position is the
  *     chronological one of its day.
  */
 export function syncTasks(tasks: TaskDraft[], days: Date[]): TaskDraft[] {
@@ -148,13 +146,127 @@ export function setTaskTime(tasks: TaskDraft[], key: string, time: TimeChoice | 
   return tasks.map((task) => (task.key === key ? { ...task, time } : task));
 }
 
-/** Replace one task's custom name ('' clears it back to the numbered default). */
-export function setTaskName(tasks: TaskDraft[], key: string, name: string | null): TaskDraft[] {
-  const trimmed = typeof name === 'string' ? name.trim() : '';
-  return tasks.map((task) =>
-    task.key === key ? { ...task, name: trimmed.length > 0 ? trimmed : null } : task
+/** The 11 PM ceiling for one task, or null while it has no time yet. */
+export function taskHoursCap(task: TaskDraft | null | undefined): number | null {
+  if (!task) return null;
+  const win = selectionWindow(task.time);
+  if (!win) return null;
+  return maxHoursForStart(minutesOf(win.start));
+}
+
+/** Set one task's hours, clamped to its own 11 PM ceiling. */
+export function setTaskHours(tasks: TaskDraft[], key: string, hours: number): TaskDraft[] {
+  return tasks.map((task) => {
+    if (task.key !== key) return task;
+    const cap = taskHoursCap(task);
+    return { ...task, hours: clampHours(hours, cap ?? MIN_EXPECTED_HOURS) };
+  });
+}
+
+/**
+ * Apply a new time to one task AND re-clamp its hours to the new ceiling.
+ * Returns the clamped-away value (null when nothing had to change) so the
+ * screen can show its short "hours adjusted" notice.
+ */
+export function applyTaskTime(
+  tasks: TaskDraft[],
+  key: string,
+  time: TimeChoice | null
+): { tasks: TaskDraft[]; loweredFrom: number | null } {
+  return tasks.reduce<{ tasks: TaskDraft[]; loweredFrom: number | null }>(
+    (acc, task) => {
+      if (task.key !== key) {
+        acc.tasks.push(task);
+        return acc;
+      }
+      const withTime: TaskDraft = { ...task, time };
+      const cap = taskHoursCap(withTime);
+      if (cap === null) {
+        acc.tasks.push({ ...withTime, hours: Math.max(MIN_EXPECTED_HOURS, task.hours) });
+        return acc;
+      }
+      if (exceedsHoursCap(task.hours, cap)) {
+        acc.loweredFrom = task.hours;
+        acc.tasks.push({ ...withTime, hours: clampHours(task.hours, cap) });
+        return acc;
+      }
+      acc.tasks.push({ ...withTime, hours: Math.max(MIN_EXPECTED_HOURS, task.hours) });
+      return acc;
+    },
+    { tasks: [], loweredFrom: null }
   );
 }
+
+/* ── The strip's selection state machine ─────────────────────────────────── */
+
+/** What the Date & Time step remembers about the strip. */
+export interface DaySelection {
+  /** Selected local days, chronological and de-duplicated. */
+  days: Date[];
+  /** The day whose time grid is on screen (`YYYY-MM-DD`), or null. */
+  activeKey: string | null;
+}
+
+/** The task key of the active day, or null. */
+export function activeDayOf(selection: DaySelection, tasks: TaskDraft[]): TaskDraft | null {
+  if (!selection.activeKey) return null;
+  return tasks.find((task) => task.key === selection.activeKey) ?? null;
+}
+
+/**
+ * One tap on the strip:
+ *   • an unselected, bookable day → SELECTED and ACTIVE;
+ *   • a selected but inactive day → just ACTIVE (its time stays);
+ *   • the ACTIVE selected day → DESELECTED (its time goes with it) and the
+ *     next selected day becomes active, or none.
+ * Today is refused once every window has started.
+ *
+ * `removedKey` tells the caller which task to drop, so the task list and the
+ * strip can never disagree.
+ */
+export function applyDayTap(
+  selection: DaySelection,
+  day: Date,
+  tasks: TaskDraft[],
+  now: Date = new Date()
+): { selection: DaySelection; removedKey: string | null } {
+  if (!isValidDate(day)) return { selection, removedKey: null };
+  const window = agendaWindow(now);
+  const inWindow = window.some((candidate) => candidate.getTime() === localDay(day).getTime());
+  if (!inWindow) return { selection, removedKey: null };
+
+  const key = dayKey(day);
+  const selected = selection.days.some((picked) => isSameLocalDay(picked, day));
+
+  if (!selected) {
+    if (!hasBookableTime(day, now)) return { selection, removedKey: null };
+    return {
+      selection: { days: sortDays([...selection.days, localDay(day)]), activeKey: key },
+      removedKey: null,
+    };
+  }
+
+  if (selection.activeKey !== key) {
+    return { selection: { ...selection, activeKey: key }, removedKey: null };
+  }
+
+  const remaining = selection.days.filter((picked) => !isSameLocalDay(picked, day));
+  return {
+    selection: { days: remaining, activeKey: remaining.length > 0 ? dayKey(remaining[0]) : null },
+    removedKey: key,
+  };
+}
+
+/**
+ * Make a day active WITHOUT touching its selected state — the caller uses it
+ * after a delete, where the day is already gone from the list.
+ */
+export function activeAfterDelete(days: Date[], removedKey: string): DaySelection {
+  const first = sortDays(days.filter(isValidDate))[0];
+  return { days: sortDays(days.filter(isValidDate)), activeKey: first ? dayKey(first) : null };
+}
+
+/* ── Validation ──────────────────────────────────────────────────────────── */
 
 /** Index of the first task that still has no valid time, or -1 when all have one. */
 export function firstUntimedTask(tasks: TaskDraft[], now: Date = new Date()): number {
@@ -162,9 +274,8 @@ export function firstUntimedTask(tasks: TaskDraft[], now: Date = new Date()): nu
 }
 
 /**
- * The MULTI_DAY gate: at least one task, and EVERY task must carry a time that
- * is valid for its own day (so a task whose slot has already started today is
- * caught here, not by the backend).
+ * The MULTI_DAY gate for the DATE & TIME step: at least one day, and EVERY
+ * selected day must carry a time that is valid for its own day.
  */
 export function validateTasks(
   tasks: TaskDraft[],
@@ -174,24 +285,33 @@ export function validateTasks(
   if (tasks.length > MAX_MILESTONE_DAYS) return 'post_err_dates_max';
   const index = firstUntimedTask(tasks, now);
   if (index < 0) return null;
-  return validateTimeChoice(tasks[index].time, tasks[index].day, now) ?? 'post_err_time';
+  return validateTimeChoice(tasks[index].time, tasks[index].day, now) ?? 'post_err_day_time';
 }
 
+/** An Anytime start that leaves no hour before 11 PM cannot be booked. */
+export function anytimeLeavesNoHour(task: TaskDraft): boolean {
+  const win = selectionWindow(task.time);
+  if (!win) return false;
+  return !canStartBeforeDayEnd(minutesOf(win.start));
+}
+
+/* ── Payload ─────────────────────────────────────────────────────────────── */
+
 /**
- * One milestone per task, at that task's OWN window start. This is what makes
- * "each task has its own specific date and time" real on the wire; the days are
- * already inside the 7-day window by construction.
+ * One milestone per task, at that task's OWN window start, carrying that
+ * task's OWN expected hours. This is what makes "each task has its own specific
+ * date, time and hours" real on the wire.
  */
-export function buildTaskMilestones(tasks: TaskDraft[], expectedHours: number): MilestoneDraft[] {
-  const hours = Number.isFinite(expectedHours) ? expectedHours : 1;
+export function buildTaskMilestones(tasks: TaskDraft[]): MilestoneDraft[] {
   return tasks
     .slice(0, MAX_MILESTONE_DAYS)
     .map((task) => {
       const win = selectionWindow(task.time);
       if (!win) return null;
+      const cap = maxHoursForStart(minutesOf(win.start));
       return {
         scheduled_at: composeInstant(task.day, win.start.hour, win.start.minute).toISOString(),
-        expected_hours: hours,
+        expected_hours: clampHours(task.hours, cap),
       };
     })
     .filter((entry): entry is MilestoneDraft => entry !== null);

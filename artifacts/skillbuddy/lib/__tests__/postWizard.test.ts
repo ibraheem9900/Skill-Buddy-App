@@ -1,29 +1,35 @@
 /**
- * The rebuilt Date & Time step, as pure rules.
+ * The rebuilt Date & Time step and the new Tasks step, as pure rules.
  *
  *   • the inline 7-day strip (today .. today+6) and its month label;
- *   • select / deselect, including "today has no slots left";
- *   • tasks kept in sync with the strip in both directions;
- *   • per-task times, per-task milestones and the Next gate;
- *   • deselecting a preset slot.
+ *   • ONE active day: select + activate, activate only, deselect;
+ *   • one time per selected day, kept in sync with the task list;
+ *   • per-task hours with the 11 PM ceiling, re-clamped when the time changes;
+ *   • delete → renumbering and the empty state's gate;
+ *   • per-task milestones and the Next gate.
  *
  * Run through the same harness as the other lib tests: `pnpm run test`.
  */
-import { composeInstant, type TimeChoice } from '../jobBooking';
+import type { TimeChoice } from '../jobBooking';
 import {
+  activeAfterDelete,
+  activeDayOf,
   agendaWindow,
+  applyDayTap,
+  applyTaskTime,
   buildTask,
   buildTaskMilestones,
   dayKey,
   firstUntimedTask,
   hasBookableTime,
   monthSpanLabel,
-  setTaskName,
+  setTaskHours,
   setTaskTime,
   syncTasks,
-  toggleAgendaDay,
+  taskHoursCap,
   toggleSlot,
   validateTasks,
+  type DaySelection,
   type TaskDraft,
 } from '../postWizard';
 
@@ -51,6 +57,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const NOW = new Date(2026, 9, 20, 14, 0, 0, 0);
 const SLOT_8_11: TimeChoice = { kind: 'slot', key: 'slot_8_11' };
 const SLOT_17_20: TimeChoice = { kind: 'slot', key: 'slot_17_20' };
+const SLOT_20_23: TimeChoice = { kind: 'slot', key: 'slot_20_23' };
 const ANYTIME_9_12: TimeChoice = {
   kind: 'anytime',
   start: { hour: 9, minute: 0 },
@@ -59,131 +66,167 @@ const ANYTIME_9_12: TimeChoice = {
 
 const day = (dayOfMonth: number, month = 9, year = 2026) => new Date(year, month, dayOfMonth);
 
-// ── The strip ──────────────────────────────────────────────────────────────
-const strip = agendaWindow(NOW);
-eq('the strip holds seven days', strip.length, 7);
-eq('it starts today', dayKey(strip[0]), '2026-10-20');
-eq('it ends today + 6', dayKey(strip[6]), '2026-10-26');
-eq('there is no week before today', strip.some((d) => d.getTime() < day(20).getTime()), false);
+/* ── The window ──────────────────────────────────────────────────────────── */
+
+const window = agendaWindow(NOW);
+eq('the strip is seven days', window.length, 7);
+eq('the strip starts today', dayKey(window[0]), '2026-10-20');
+eq('the strip ends on day seven', dayKey(window[6]), '2026-10-26');
+eq('month label', monthSpanLabel(window, MONTHS), 'Oct 2026');
+check('today still has a window at 2 PM', hasBookableTime(window[0], NOW));
 check(
-  'every strip day is a local midnight',
-  strip.every((d) => d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0)
+  'today has no window at 11:30 PM',
+  !hasBookableTime(window[0], new Date(2026, 9, 20, 23, 30))
 );
 
-eq('one month reads as month + year', monthSpanLabel(strip, MONTHS), 'Oct 2026');
+/* ── The selection state machine ─────────────────────────────────────────── */
+
+const empty: DaySelection = { days: [], activeKey: null };
+
+// Unselected day → selected AND active, with its task created by the caller.
+const firstTap = applyDayTap(empty, day(22), [], NOW);
+eq('selecting a day activates it', firstTap.selection.activeKey, '2026-10-22');
+eq('one day selected', firstTap.selection.days.length, 1);
+eq('nothing removed when selecting', firstTap.removedKey, null);
+
+// A second, different day becomes active while the first stays selected.
+let tasks: TaskDraft[] = syncTasks([], firstTap.selection.days).map((task) =>
+  setTaskTime([task], task.key, SLOT_8_11)[0]
+);
+const secondTap = applyDayTap(firstTap.selection, day(25), tasks, NOW);
+eq('second day becomes active', secondTap.selection.activeKey, '2026-10-25');
+eq('both days stay selected', secondTap.selection.days.length, 2);
+tasks = syncTasks(tasks, secondTap.selection.days);
+
+// Tapping a selected-but-inactive day only activates it.
+const activateOnly = applyDayTap(secondTap.selection, day(22), tasks, NOW);
+eq('tapping a selected day activates it', activateOnly.selection.activeKey, '2026-10-22');
+eq('activating removes nothing', activateOnly.removedKey, null);
+eq('activating keeps both days', activateOnly.selection.days.length, 2);
+
+// Tapping the ACTIVE day deselects it and hands back the key to drop.
+const deselect = applyDayTap(activateOnly.selection, day(22), tasks, NOW);
+eq('the active day is removed', deselect.selection.days.length, 1);
+eq('the removed key is reported', deselect.removedKey, '2026-10-22');
+eq('another selected day becomes active', deselect.selection.activeKey, '2026-10-25');
+const afterDeselect = deselect.selection.days;
+tasks = tasks.filter((task) => task.key !== deselect.removedKey);
+
+// Removing the last selected day leaves no active day.
+const last = applyDayTap(deselect.selection, day(25), tasks, NOW);
+eq('removing the last day leaves none', last.selection.days.length, 0);
+eq('and no active day', last.selection.activeKey, null);
+
+// Today with no windows left cannot be added.
+const lateNow = new Date(2026, 9, 20, 23, 30);
+const refused = applyDayTap(empty, day(20), [], lateNow);
+eq('a spent today cannot be selected', refused.selection.days.length, 0);
+
+/* ── One time per day, tasks kept in sync ────────────────────────────────── */
+
+let list = syncTasks([], [day(20), day(22)]);
+eq('one task per selected day', list.length, 2);
+eq('tasks are chronological', dayKey(list[0].day), '2026-10-20');
+eq('a new task starts untimed', list[0].time, null);
+eq('a new task starts at one hour', list[0].hours, 1);
+check('untimed tasks block Next', firstUntimedTask(list, NOW) >= 0);
+
+list = setTaskTime(list, '2026-10-22', SLOT_17_20);
+eq('the chosen day gets its time', list[1].time?.kind, 'slot');
+eq('the other day stays untimed', list[0].time, null);
+eq('firstUntimedTask names the untimed one', firstUntimedTask(list, NOW), 0);
+
+// TODAY at 2 PM can no longer book 8-11 (it has started), so its own evening
+// window is used — the per-day validity rule, not a shared time.
+list = setTaskTime(list, '2026-10-20', SLOT_17_20);
+eq('every task can be timed independently', firstUntimedTask(list, NOW), -1);
+eq('the Next gate opens', validateTasks(list, NOW), null);
+
+// Deselecting a day drops its task; selecting it again starts untimed.
+const kept = syncTasks(list, [day(20)]);
+eq('deselecting drops the task', kept.length, 1);
+eq('and its time', kept[0].key, '2026-10-20');
+
+// A newly selected day gets a fresh card.
+const regrown = syncTasks(kept, [day(20), day(24)]);
+eq('a re-selected day gets a new card', regrown.length, 2);
+eq('without the old time', regrown[1].time, null);
+
+/* ── Per-task hours and the 11 PM ceiling ────────────────────────────────── */
+
+let hours: TaskDraft[] = [buildTask(day(22))];
+eq('no time means no ceiling', taskHoursCap(hours[0]), null);
+hours = setTaskTime(hours, '2026-10-22', SLOT_8_11);
+eq('an 8-11 window allows 15 h', taskHoursCap(hours[0]), 15);
+hours = setTaskTime(hours, '2026-10-22', SLOT_20_23);
+eq('an 8-11 PM window allows 3 h', taskHoursCap(hours[0]), 3);
+
+hours = setTaskHours(hours, '2026-10-22', 12);
+eq('hours are clamped to the ceiling', hours[0].hours, 3);
+hours = setTaskHours(hours, '2026-10-22', 0);
+eq('hours never fall below one', hours[0].hours, 1);
+
+// Moving the time later lowers the hours and reports it.
+const atEight = [{ key: '2026-10-22', day: day(22), time: SLOT_8_11, hours: 12 }];
+const moved = applyTaskTime(atEight, '2026-10-22', SLOT_17_20);
+eq('the new ceiling is applied', moved.tasks[0].hours, 6);
+eq('the lowering is reported', moved.loweredFrom, 12);
+
+// Moving earlier keeps the value and reports nothing.
+const earlier = applyTaskTime(moved.tasks, '2026-10-22', SLOT_8_11);
+eq('hours survive an earlier start', earlier.tasks[0].hours, 6);
+eq('nothing is reported', earlier.loweredFrom, null);
+
+/* ── Deselecting a time and the Anytime window ───────────────────────────── */
+
+eq('a second tap clears the slot', toggleSlot(SLOT_8_11, 'slot_8_11'), null);
+eq('another slot replaces it', toggleSlot(SLOT_8_11, 'slot_17_20')?.kind, 'slot');
 eq(
-  'a month boundary names both months',
-  monthSpanLabel([day(30), day(31), day(1, 10), day(5, 10)], MONTHS),
-  'Oct - Nov 2026'
-);
-eq(
-  'a year boundary keeps both years',
-  monthSpanLabel([day(29, 11, 2026), day(4, 0, 2027)], MONTHS),
-  'Dec 2026 - Jan 2027'
-);
-eq('an empty strip has no label', monthSpanLabel([], MONTHS), '');
-
-// ── Today runs out of slots ────────────────────────────────────────────────
-eq('today at 14:00 still has 17:00 and 20:00', hasBookableTime(day(20), NOW), true);
-eq(
-  'today at 21:30 has no slot left',
-  hasBookableTime(day(20), new Date(2026, 9, 20, 21, 30)),
-  false
-);
-eq('tomorrow is always open', hasBookableTime(day(21), NOW), true);
-eq('yesterday is never open', hasBookableTime(day(19), NOW), false);
-
-// ── Select / deselect ──────────────────────────────────────────────────────
-let picked: Date[] = [];
-picked = toggleAgendaDay(picked, day(20), NOW);
-picked = toggleAgendaDay(picked, day(22), NOW);
-eq('two days are selected', picked.length, 2);
-eq('the selection is chronological', dayKey(picked[0]), '2026-10-20');
-eq('any of the seven can be picked', dayKey(picked[1]), '2026-10-22');
-
-picked = toggleAgendaDay(picked, day(22), NOW);
-eq('tapping the same day deselects it', picked.length, 1);
-eq('the remaining day is 20 Oct', dayKey(picked[0]), '2026-10-20');
-
-const outside = toggleAgendaDay(picked, day(28), NOW);
-eq('a day outside the window is ignored', outside.length, 1);
-const exhausted = toggleAgendaDay([], day(20), new Date(2026, 9, 20, 21, 30));
-eq('today cannot be picked once it has no slots', exhausted.length, 0);
-eq(
-  'the non-consecutive case (20 + 25) is allowed',
-  toggleAgendaDay(toggleAgendaDay([], day(20), NOW), day(25), NOW).length,
-  2
+  'an Anytime window becomes the choice',
+  toggleSlot(ANYTIME_9_12, 'slot_8_11')?.kind,
+  'slot'
 );
 
-// ── Tasks follow the strip both ways ──────────────────────────────────────
-const initial = syncTasks([], [day(20), day(22)]);
-eq('one task per selected day', initial.length, 2);
-eq('the task key is its local day', initial[0].key, '2026-10-20');
-eq('a new task starts untimed', initial[0].time, null);
-eq('a new task has no custom name', initial[0].name, null);
+/* ── Payload: one milestone per task, with its own hours ─────────────────── */
 
-const edited = setTaskName(setTaskTime(initial, '2026-10-20', SLOT_8_11), '2026-10-20', 'Fix the tap');
-const grown = syncTasks(edited, [day(20), day(21), day(22)]);
-eq('selecting a day adds exactly one task', grown.length, 3);
-eq('an existing task keeps its time', grown[0].time, SLOT_8_11);
-eq('an existing task keeps its name', grown[0].name, 'Fix the tap');
-eq('the new middle task is untimed', grown[1].time, null);
-
-const shrunk = syncTasks(grown, [day(20), day(22)]);
-eq('deselecting a day removes its task', shrunk.length, 2);
-eq('the surviving task is untouched', shrunk[0].name, 'Fix the tap');
-eq('the later task survives', shrunk[1].key, '2026-10-22');
-
-eq('a blank name clears back to the default', setTaskName(edited, '2026-10-20', '   ')[0].name, null);
-
-// ── The Next gate ─────────────────────────────────────────────────────────
-const untimed: TaskDraft[] = [buildTask(day(20)), buildTask(day(21))];
-eq('the first untimed task is reported', firstUntimedTask(untimed, NOW), 0);
-eq('a missing time is a time error', validateTasks(untimed, NOW), 'post_err_time');
-
-const pastTask: TaskDraft[] = [{ ...buildTask(day(20)), time: SLOT_8_11 }];
-eq('a slot that already started today is refused', validateTasks(pastTask, NOW), 'post_err_time_past');
-
-const tomorrowTask: TaskDraft[] = [{ ...buildTask(day(21)), time: SLOT_8_11 }];
-eq('a valid time tomorrow passes', validateTasks(tomorrowTask, NOW), null);
-eq('no task at all is a date error', validateTasks([], NOW), 'post_err_dates_pick');
-
-const mixed: TaskDraft[] = [
-  { ...buildTask(day(21)), time: SLOT_8_11 },
-  { ...buildTask(day(22)), time: null },
+const payloadTasks: TaskDraft[] = [
+  { key: '2026-10-20', day: day(20), time: SLOT_8_11, hours: 2 },
+  { key: '2026-10-22', day: day(22), time: SLOT_17_20, hours: 3 },
+  { key: '2026-10-24', day: day(24), time: null, hours: 1 },
 ];
-eq('one untimed task is enough to block Next', validateTasks(mixed, NOW), 'post_err_time');
-eq('that task is the second one', firstUntimedTask(mixed, NOW), 1);
-eq('all timed tasks pass', firstUntimedTask([tomorrowTask[0]], NOW), -1);
-
-// ── Per-task milestones ───────────────────────────────────────────────────
-const tasks: TaskDraft[] = [
-  { key: dayKey(day(21)), day: day(21), name: null, time: SLOT_8_11 },
-  { key: dayKey(day(23)), day: day(23), name: 'Second visit', time: ANYTIME_9_12 },
-];
-const milestones = buildTaskMilestones(tasks, 2);
-eq('one milestone per task', milestones.length, 2);
+const milestones = buildTaskMilestones(payloadTasks);
+eq('a task without a time is not sent', milestones.length, 2);
 eq(
-  'the first task starts at its own slot',
+  'each task uses its own window start',
   milestones[0].scheduled_at,
-  composeInstant(day(21), 8, 0).toISOString()
+  new Date(2026, 9, 20, 8, 0, 0, 0).toISOString()
 );
 eq(
-  'the second task keeps its OWN custom window',
+  'the second task keeps its own start',
   milestones[1].scheduled_at,
-  composeInstant(day(23), 9, 0).toISOString()
+  new Date(2026, 9, 22, 17, 0, 0, 0).toISOString()
 );
-eq('expected hours are carried per task', milestones[1].expected_hours, 2);
-eq('an untimed task produces no milestone', buildTaskMilestones([buildTask(day(21))], 1).length, 0);
+eq('each task carries its own hours', milestones[0].expected_hours, 2);
+eq('the second task its own too', milestones[1].expected_hours, 3);
 
-// ── Deselecting a preset slot ─────────────────────────────────────────────
-const isSlot = (choice: TimeChoice | null, key: string) =>
-  choice !== null && choice.kind === 'slot' && choice.key === key;
+/* ── Delete → renumbering and the empty state ───────────────────────────── */
 
-check('picking a slot selects it', isSlot(toggleSlot(null, 'slot_8_11'), 'slot_8_11'));
-eq('tapping it again clears it', toggleSlot(SLOT_8_11, 'slot_8_11'), null);
-check('a different slot replaces it', isSlot(toggleSlot(SLOT_8_11, 'slot_17_20'), 'slot_17_20'));
-check('a custom window is replaced by a slot tap', isSlot(toggleSlot(ANYTIME_9_12, 'slot_8_11'), 'slot_8_11'));
+const three: TaskDraft[] = syncTasks([], [day(20), day(22), day(24)]);
+const afterDelete = syncTasks(
+  three,
+  three.filter((task) => task.key !== dayKey(day(22))).map((task) => task.day)
+);
+eq('deleting a task drops it from the list', afterDelete.length, 2);
+eq('and the strip closes up', dayKey(afterDelete[0].day), '2026-10-20');
+eq('numbering follows the new order', dayKey(afterDelete[1].day), '2026-10-24');
+
+const emptyState = activeAfterDelete([], '2026-10-22');
+eq('deleting the last task leaves no active day', emptyState.activeKey, null);
+eq('and no days', emptyState.days.length, 0);
+eq('no task means Next stays blocked', validateTasks([], NOW), 'post_err_dates_pick');
+eq('empty tasks have no active task', activeDayOf(emptyState, []), null);
 
 console.log(`postWizard: ${passed} checks, ${failures.length} failure(s)`);
-if (failures.length > 0) throw new Error(`${failures.length} postWizard check(s) failed`);
+if (failures.length > 0) {
+  throw new Error(`${failures.length} postWizard checks failed`);
+}

@@ -1,29 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet from '@/components/BottomSheet';
 import TimeRangeFields, { type ClockRange } from '@/components/TimeRangeFields';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { splitTable } from '@/lib/jobSchedule';
 import {
   FIXED_SLOTS,
-  formatDayLabel,
   formatWindowLabel,
   hasSlotStarted,
   validateTimeChoice,
   type TimeChoice,
 } from '@/lib/jobBooking';
+import { maxHoursForStart, minutesOf, selectionWindowOf } from '@/lib/timeSlots';
 import type { TaskDraft } from '@/lib/postWizard';
 
 /**
- * One task's editor: its NAME and its OWN time.
+ * One task's editor: its TIME, and nothing else.
  *
- * The shared time grid that used to sit under the list is gone — every task now
- * carries its own window, chosen here, so there is never a question of which
- * task a time belongs to. The presets are the same five slots (a slot that has
- * already started today is disabled), and "Anytime" reveals the same two-row
- * hours/minutes stepper the single-day flow uses.
+ * Task names were removed from the product (a task is "Task N") and the day is
+ * owned by the strip on the previous step, so this sheet offers exactly the five
+ * client windows plus Anytime with the same inline hours/minutes arrows the
+ * Single-day flow uses. Save is refused until a valid time is chosen, and a
+ * window that leaves no hour before 11 PM is refused with its own message.
+ *
+ * The expected-hours stepper is NOT here on purpose: it lives on the task card
+ * (Part C), and the card re-clamps the value when this sheet returns a time with
+ * a lower ceiling.
  */
 export default function TaskEditSheet({
   visible,
@@ -35,42 +38,42 @@ export default function TaskEditSheet({
   visible: boolean;
   onClose: () => void;
   task: TaskDraft | null;
-  /** 0-based position in the list, for the "Task N" default name. */
+  /** 0-based position in the list, for the "Task N" title. */
   index: number;
-  onSave: (name: string | null, time: TimeChoice | null) => void;
+  onSave: (time: TimeChoice | null) => void;
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
-  const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
-  const meridiem = useMemo(
-    () => ({ am: t('post_sched_am'), pm: t('post_sched_pm') }),
-    [t]
-  );
+  const meridiem = { am: t('post_sched_am'), pm: t('post_sched_pm') };
 
-  const [name, setName] = useState('');
   const [time, setTime] = useState<TimeChoice | null>(null);
 
   // Re-seed on every open so Cancel never leaves a half-edit behind.
   useEffect(() => {
     if (!visible || !task) return;
-    setName(task.name ?? '');
     setTime(task.time);
   }, [visible, task]);
 
-  const errorKey = task ? validateTimeChoice(time, task.day, new Date()) : 'post_err_time';
-  const year = task?.day.getFullYear();
+  const seeded: ClockRange =
+    task?.time?.kind === 'anytime'
+      ? { start: task.time.start, end: task.time.end }
+      : { start: { hour: 9, minute: 0 }, end: { hour: 12, minute: 0 } };
+  const [custom, setCustom] = useState<ClockRange>(seeded);
 
-  const custom: ClockRange =
-    time?.kind === 'anytime' ? { start: time.start, end: time.end } : {
-      start: { hour: 9, minute: 0 },
-      end: { hour: 12, minute: 0 },
-    };
+  useEffect(() => {
+    if (!visible || !task) return;
+    if (task.time?.kind === 'anytime') setCustom({ start: task.time.start, end: task.time.end });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, task?.key]);
+
+  const errorKey = task ? validateTimeChoice(time, task.day, new Date()) : 'post_err_time';
+  const label = formatWindowLabel(time, meridiem);
+  const window = selectionWindowOf(time);
+  const cap = window ? maxHoursForStart(minutesOf(window.start)) : null;
 
   const preset = (key: string) => {
-    const choice: TimeChoice = { kind: 'slot', key };
     setTime((current) =>
-      current?.kind === 'slot' && current.key === key ? null : choice
+      current?.kind === 'slot' && current.key === key ? null : { kind: 'slot', key }
     );
   };
 
@@ -78,7 +81,7 @@ export default function TaskEditSheet({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title={t('post_task_edit_title')}
+      title={t('post_task_edit_title', { n: index + 1 })}
       footer={
         <View style={[styles.footer, { borderTopColor: c.border }]}>
           {errorKey ? (
@@ -86,7 +89,12 @@ export default function TaskEditSheet({
               <Feather name="alert-circle" size={13} color={c.destructive} />
               <Text style={[styles.errorText, { color: c.destructive }]}>{t(errorKey)}</Text>
             </View>
-          ) : null}
+          ) : (
+            <Text style={[styles.summary, { color: c.primary }]}>
+              {label}
+              {cap !== null ? ` · ${t('post_hours_cap_short', { n: cap })}` : ''}
+            </Text>
+          )}
           <View style={styles.buttons}>
             <TouchableOpacity
               style={[styles.cancel, { borderColor: c.border }]}
@@ -97,7 +105,7 @@ export default function TaskEditSheet({
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.save, { backgroundColor: c.primary, opacity: errorKey ? 0.5 : 1 }]}
-              onPress={() => onSave(name.trim().length > 0 ? name.trim() : null, time)}
+              onPress={() => onSave(time)}
               disabled={!!errorKey}
               accessibilityRole="button"
             >
@@ -110,30 +118,6 @@ export default function TaskEditSheet({
       }
     >
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        <View style={styles.fieldWrap}>
-          <Text style={[styles.label, { color: c.mutedForeground }]}>{t('post_task_name')}</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: c.input, color: c.text, borderColor: c.border }]}
-            value={name}
-            onChangeText={setName}
-            placeholder={t('post_task_n', { n: index + 1 })}
-            placeholderTextColor={c.mutedForeground}
-            maxLength={40}
-          />
-        </View>
-
-        <View style={styles.fieldWrap}>
-          <Text style={[styles.label, { color: c.mutedForeground }]}>{t('post_task_date')}</Text>
-          <View style={[styles.readonly, { backgroundColor: c.muted, borderColor: c.border }]}>
-            <Feather name="calendar" size={14} color={c.mutedForeground} />
-            <Text style={[styles.readonlyText, { color: c.text }]}>
-              {task
-                ? `${formatDayLabel(task.day, months, weekdays)}${year ? ` ${year}` : ''}`
-                : ''}
-            </Text>
-          </View>
-        </View>
-
         <Text style={[styles.label, { color: c.mutedForeground }]}>{t('post_time')}</Text>
         <View style={styles.grid}>
           {FIXED_SLOTS.map((slot) => {
@@ -184,13 +168,13 @@ export default function TaskEditSheet({
                 borderColor: time?.kind === 'anytime' ? c.primary : c.border,
               },
             ]}
-            onPress={() =>
-              setTime(
-                time?.kind === 'anytime'
+            onPress={() => {
+              setTime((current) =>
+                current?.kind === 'anytime'
                   ? null
                   : { kind: 'anytime', start: custom.start, end: custom.end }
-              )
-            }
+              );
+            }}
             accessibilityRole="button"
             accessibilityState={{ selected: time?.kind === 'anytime' }}
           >
@@ -214,16 +198,17 @@ export default function TaskEditSheet({
           <View style={styles.customWrap}>
             <TimeRangeFields
               value={custom}
-              onChange={(range) =>
-                setTime({ kind: 'anytime', start: range.start, end: range.end })
-              }
+              onChange={(range) => {
+                setCustom(range);
+                setTime({ kind: 'anytime', start: range.start, end: range.end });
+              }}
             />
           </View>
         ) : null}
 
         {time ? (
-          <Text style={[styles.summary, { color: c.primary }]}>
-            {formatWindowLabel(time, meridiem)}
+          <Text style={[styles.hint, { color: c.mutedForeground }]}>
+            {t('post_task_time_hint')}
           </Text>
         ) : null}
       </ScrollView>
@@ -233,26 +218,7 @@ export default function TaskEditSheet({
 
 const styles = StyleSheet.create({
   body: { padding: 20, paddingBottom: 24, gap: 10 },
-  fieldWrap: { gap: 6 },
   label: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 14,
-  },
-  readonly: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  readonlyText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
   slot: {
     width: '47.5%',
@@ -269,7 +235,8 @@ const styles = StyleSheet.create({
   slotText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, flexShrink: 1 },
   slotNote: { fontFamily: 'Manrope_400Regular', fontSize: 9 },
   customWrap: { marginTop: 6 },
-  summary: { fontFamily: 'Manrope_700Bold', fontSize: 12, textAlign: 'center', marginTop: 4 },
+  hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: 4 },
+  summary: { fontFamily: 'Manrope_700Bold', fontSize: 12, textAlign: 'center', marginBottom: 10 },
   footer: { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1 },
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   errorText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 15 },

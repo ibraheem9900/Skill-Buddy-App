@@ -29,12 +29,12 @@ import ServicePickerSheet from '@/components/ServicePickerSheet';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import DotsLoader from '@/components/DotsLoader';
 import DateStrip from '@/components/DateStrip';
-import TimeRangeSheet from '@/components/TimeRangeSheet';
+import TimeChoices from '@/components/TimeChoices';
 import TaskEditSheet from '@/components/TaskEditSheet';
 import AttachmentSection from '@/components/AttachmentSection';
 import AddressFormModal from '@/components/AddressFormModal';
 import {
-  type ClockRange,
+
 } from '@/components/TimeRangeFields';
 import { authApi } from '@/services/api';
 import useCategories from '@/hooks/useCategories';
@@ -46,7 +46,6 @@ import { isClientProfileMissing, jobStatusLabelKey } from '@/lib/jobList';
 import { splitTable } from '@/lib/jobSchedule';
 import {
   FIXED_SLOTS,
-  MAX_EXPECTED_HOURS,
   MIN_EXPECTED_HOURS,
   type BookingChoice,
   type BookingErrorKey,
@@ -63,24 +62,41 @@ import {
   isBookingKindAllowed,
   isRequestTypeAllowed,
   oneTimeDay,
+  selectionWindow,
   validateOneTime,
   validateTimeChoice,
   windowMinutes,
   windowShorterThanHours,
 } from '@/lib/jobBooking';
 import {
+  activeAfterDelete,
+  activeDayOf,
+  applyDayTap,
+  applyTaskTime,
+  buildTaskMilestones,
   dayKey,
   firstUntimedTask,
   hasBookableTime as dayHasBookableTime,
-  setTaskName,
-  setTaskTime,
   syncTasks,
-  toggleAgendaDay,
+  taskHoursCap,
   toggleSlot,
   validateTasks,
-  buildTaskMilestones,
+  type DaySelection,
   type TaskDraft,
 } from '@/lib/postWizard';
+import {
+  MIN_EXPECTED_HOURS as MIN_HOURS_BEFORE_DAY_END,
+  DAY_END_MINUTES,
+  buildScheduleLine,
+  clampHours,
+  clockOf,
+  exceedsHoursCap,
+  formatDayLabel,
+  formatLocalDateTime,
+  formatTimeLabel,
+  maxHoursForStart,
+  minutesOf,
+} from '@/lib/timeSlots';
 import {
   addressFormFrom,
   addressLine,
@@ -141,13 +157,22 @@ import type { AddressResponse, JobResponse, ServiceListItem } from '@/types';
  * POST /api/v1/jobs/{id}/attachments, and a failed file never re-creates the job.
  */
 
-const STEP_KEYS: TranslationKey[] = [
-  'post_step_details',
-  'post_step_booking',
-  'post_step_schedule',
-  'post_step_address',
-];
-const STEP_COUNT = STEP_KEYS.length;
+/* ── The wizard's steps ───────────────────────────────────────────────────────
+ * Single day keeps four steps. Multiple days inserts the Tasks step (one card
+ * per selected day), so the progress bar and "Step x of N" are derived from the
+ * CURRENT booking type and always agree with each other.
+ */
+const STEP_DETAILS: TranslationKey = 'post_step_details';
+const STEP_BOOKING: TranslationKey = 'post_step_booking';
+const STEP_SCHEDULE: TranslationKey = 'post_step_schedule';
+const STEP_TASKS: TranslationKey = 'post_step_tasks';
+const STEP_ADDRESS: TranslationKey = 'post_step_address';
+
+function stepKeysFor(bookingKind: BookingKind): TranslationKey[] {
+  return bookingKind === 'multi_day'
+    ? [STEP_DETAILS, STEP_BOOKING, STEP_SCHEDULE, STEP_TASKS, STEP_ADDRESS]
+    : [STEP_DETAILS, STEP_BOOKING, STEP_SCHEDULE, STEP_ADDRESS];
+}
 
 /** Which field each step's validation can flag, so errors render in place. */
 type StepErrors = Partial<Record<JobFormField, BookingErrorKey | string>>;
@@ -476,17 +501,27 @@ export default function PostJobScreen() {
 
   /** Single day: one preset slot OR one custom window (null = nothing chosen). */
   const [timeChoice, setTimeChoice] = useState<TimeChoice | null>(null);
-  const [customSheetOpen, setCustomSheetOpen] = useState(false);
 
-  /** Multiple days: the strip's selection and one task per selected day. */
-  const [selectedDays, setSelectedDays] = useState<Date[]>([]);
+  /**
+   * Multiple days: the strip's selected days + which one is ACTIVE, and one
+   * task per selected day (that task's own time and hours live on the task).
+   */
+  const [daySelection, setDaySelection] = useState<DaySelection>({ days: [], activeKey: null });
   const [tasks, setTasks] = useState<TaskDraft[]>([]);
   const [taskEditorKey, setTaskEditorKey] = useState<string | null>(null);
-  /** The last removed task, so its snackbar can put it back. */
-  const [undo, setUndo] = useState<{ days: Date[]; tasks: TaskDraft[] } | null>(null);
 
-  /** Expected hours — ONE global control, default 1 (was 2). */
+  /**
+   * The Single-day expected hours (default 1). The ceiling is NOT a constant:
+   * it is computed from the chosen start until 11 PM (lib/timeSlots), so 8 AM
+   * allows 15 h and 8 PM only 3 h.
+   */
   const [hours, setHours] = useState(MIN_EXPECTED_HOURS);
+  /** Transient "hours lowered" notice after a time change or an edit. */
+  const [hoursNotice, setHoursNotice] = useState<number | null>(null);
+  const [taskHoursNotice, setTaskHoursNotice] = useState<{
+    n: number;
+    hours: number;
+  } | null>(null);
 
   // ── Address (step 4) ──────────────────────────────────────────────────────
   const [addresses, setAddresses] = useState<AddressResponse[]>([]);
@@ -541,9 +576,17 @@ export default function PostJobScreen() {
 
   // ── The two-way Request Type ↔ Booking Type lock ─────────────────────────
   const clearDates = useCallback(() => {
-    setSelectedDays([]);
+    setDaySelection({ days: [], activeKey: null });
     setTasks([]);
+    setTaskEditorKey(null);
+    setTaskHoursNotice(null);
   }, []);
+
+  /** The current step list — 4 steps, or 5 with the Tasks step for several days. */
+  const steps = useMemo(() => stepKeysFor(bookingKind), [bookingKind]);
+  const stepCount = steps.length;
+  const safeStep = Math.min(step, stepCount - 1);
+  const stepKey = steps[safeStep];
 
   const selectRequestType = useCallback(
     (requestType: FormRequestType) => {
@@ -552,6 +595,7 @@ export default function PostJobScreen() {
       setUrgency(next.requestType);
       setBookingKind(next.kind);
       if (next.datesReset) clearDates();
+      setStep((prev) => Math.min(prev, stepKeysFor(next.kind).length - 1));
       setStepErrors((prev) => {
         const { date, time, ...rest } = prev;
         return rest;
@@ -568,6 +612,7 @@ export default function PostJobScreen() {
       setBookingKind(next.kind);
       if (next.datesReset) clearDates();
       if (next.switched) setBookingSwitchNotice('multi_regular');
+      setStep((prev) => Math.min(prev, stepKeysFor(next.kind).length - 1));
       setStepErrors((prev) => {
         const { date, time, ...rest } = prev;
         return rest;
@@ -607,38 +652,46 @@ export default function PostJobScreen() {
   }, [clearAllErrors, step, submitting]);
 
   const goNext = () => {
-    const errors = validateStep(step);
+    const errors = validateStepKey(stepKey);
     setStepErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    setStep((prev) => Math.min(STEP_COUNT - 1, prev + 1));
+    setStep((prev) => Math.min(stepCount - 1, prev + 1));
   };
 
-  // ── Per-step validation ───────────────────────────────────────────────────
-  function validateStep(target: number): StepErrors {
+  // ── Per-step validation (by STEP, not by index: the list is 4 or 5 long) ──
+  function validateStepKey(key: TranslationKey): StepErrors {
     const next: StepErrors = {};
-    if (target === 0) {
+    if (key === STEP_DETAILS) {
       if (serviceId == null) next.service = t('post_err_service');
       if (!description.trim()) next.description = t('post_err_desc');
     }
-    if (target === 2) {
+    if (key === STEP_SCHEDULE) {
       const now = new Date();
       if (bookingKind === 'one_time') {
         const error = validateOneTime(oneTimeDayKind, timeChoice, now);
         if (error) next.time = t(error);
+        if (hours < MIN_EXPECTED_HOURS) next.hours = t('post_err_hours');
       } else {
+        // Every SELECTED day needs its own valid time; the offending days are
+        // marked on the strip and the message names the rule, not a number.
         if (tasks.length === 0) next.date = t('post_err_dates_pick');
         else {
-          const error = validateTasks(tasks, now);
-          if (error) next.time = t(error);
           const badIndex = firstUntimedTask(tasks, now);
-          if (badIndex >= 0) {
-            next.time = t('post_err_task_time', { n: badIndex + 1 });
+          if (badIndex >= 0) next.time = t('post_err_day_time');
+          else {
+            const error = validateTasks(tasks, now);
+            if (error) next.time = t(error);
           }
         }
       }
-      if (hours < MIN_EXPECTED_HOURS) next.hours = t('post_err_hours');
     }
-    if (target === 3) {
+    if (key === STEP_TASKS) {
+      // Re-checked here too: a day added on the previous step must never reach
+      // the address step without a time.
+      if (tasks.length === 0) next.date = t('post_err_tasks_empty');
+      else if (firstUntimedTask(tasks, new Date()) >= 0) next.time = t('post_err_day_time');
+    }
+    if (key === STEP_ADDRESS) {
       const chosen = addresses.find((row) => row.id === selectedAddressId) ?? null;
       if (!chosen) next.address = t('post_err_address');
       else if (!isAddressPostable(chosen)) next.address = t('post_addr_incomplete');
@@ -646,48 +699,105 @@ export default function PostJobScreen() {
     return next;
   }
 
+  const validateStep = (index: number) => validateStepKey(steps[index] ?? STEP_DETAILS);
+
   /** Live schedule problems for the visible step, without pressing Next. */
   const scheduleError = useMemo(() => {
-    if (step !== 2) return null;
+    if (stepKey !== STEP_SCHEDULE) return null;
     const now = new Date();
     if (bookingKind === 'one_time') {
       const error = validateOneTime(oneTimeDayKind, timeChoice, now);
       return error ? t(error) : null;
     }
     if (tasks.length === 0) return t('post_err_dates_pick');
+    if (firstUntimedTask(tasks, now) >= 0) return t('post_err_day_time');
     const error = validateTasks(tasks, now);
-    if (!error) return null;
-    const badIndex = firstUntimedTask(tasks, now);
-    return badIndex >= 0 ? t('post_err_task_time', { n: badIndex + 1 }) : t(error);
-  }, [step, bookingKind, oneTimeDayKind, timeChoice, tasks, t]);
+    return error ? t(error) : null;
+  }, [stepKey, bookingKind, oneTimeDayKind, timeChoice, tasks, t]);
+
+  /** Live problems on the Tasks step (empty list is the only blocker there). */
+  const tasksError = useMemo(() => {
+    if (stepKey !== STEP_TASKS) return null;
+    if (tasks.length === 0) return t('post_err_tasks_empty');
+    if (firstUntimedTask(tasks, new Date()) >= 0) return t('post_err_day_time');
+    return null;
+  }, [stepKey, tasks, t]);
+
+  /** Next is blocked exactly when the visible step still has a problem. */
+  const nextBlocked =
+    (stepKey === STEP_SCHEDULE && scheduleError !== null) ||
+    (stepKey === STEP_TASKS && tasksError !== null);
 
   // ── Picker wiring ─────────────────────────────────────────────────────────
-  const activeDay = bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : null;
+  const singleDay = bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : null;
+  const activeTask = activeDayOf(daySelection, tasks);
+  const activeDay = activeTask?.day ?? null;
   const windowLabel = formatWindowLabel(timeChoice, meridiem);
   const shortWindow = !!timeChoice && windowShorterThanHours(timeChoice, hours);
-  const range: ClockRange | null =
-    timeChoice?.kind === 'anytime'
-      ? { start: timeChoice.start, end: timeChoice.end }
-      : null;
+  /** The Single-day hours ceiling for the chosen start (null = no time yet). */
+  const singleHoursCap = useMemo(() => {
+    const win = selectionWindow(timeChoice);
+    if (!win) return null;
+    return maxHoursForStart(minutesOf(win.start));
+  }, [timeChoice]);
+
+  // A new start can lower the ceiling. Lower the value with it and say so — the
+  // payload can never carry more hours than the 11 PM rule allows.
+  useEffect(() => {
+    if (singleHoursCap === null) return;
+    setHours((current) => {
+      if (!exceedsHoursCap(current, singleHoursCap)) return current;
+      setHoursNotice(singleHoursCap);
+      return clampHours(current, singleHoursCap);
+    });
+  }, [singleHoursCap]);
+
+  useEffect(() => {
+    if (hoursNotice === null) return;
+    const timer = setTimeout(() => setHoursNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [hoursNotice]);
+
+  useEffect(() => {
+    if (!taskHoursNotice) return;
+    const timer = setTimeout(() => setTaskHoursNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [taskHoursNotice]);
 
   /**
    * The "Preferred time" line the API has no field for (JobMilestoneCreate is
-   * only scheduled_at + expected_hours). For one day it is that window; for
-   * several days with DIFFERENT windows it names each task so no end time is
-   * silently lost.
+   * only scheduled_at + expected_hours). Rebuilt from the FINAL task list every
+   * render, in the fixed English format earlier versions wrote: one window for a
+   * single day, `Task N …` segments when several days carry their own windows.
    */
   const preferredLine = useMemo(() => {
-    if (bookingKind === 'one_time') return buildPreferredTimeLine(windowLabel);
+    if (bookingKind === 'one_time') {
+      const win = selectionWindow(timeChoice);
+      if (!win) return null;
+      return buildScheduleLine([
+        {
+          startMinutes: minutesOf(win.start) ?? 0,
+          endMinutes: minutesOf(win.end) ?? 0,
+          meridiem,
+        },
+      ]);
+    }
     if (tasks.length === 0) return null;
-    const labels = tasks.map((task, index) => {
-      const label = formatWindowLabel(task.time, meridiem);
-      const name = task.name ?? t('post_task_n', { n: index + 1 });
-      return label ? `${name} ${label}` : '';
-    });
-    const distinct = new Set(labels.filter((label) => label.length > 0));
-    if (distinct.size <= 1) return buildPreferredTimeLine(labels[0] ?? '');
-    return buildPreferredTimeLine(labels.filter((label) => label.length > 0).join('; '));
-  }, [bookingKind, windowLabel, tasks, meridiem, t]);
+    return buildScheduleLine(
+      tasks
+        .map((task, index) => {
+          const win = selectionWindow(task.time);
+          if (!win) return null;
+          return {
+            taskNumber: index + 1,
+            startMinutes: minutesOf(win.start) ?? 0,
+            endMinutes: minutesOf(win.end) ?? 0,
+            meridiem,
+          };
+        })
+        .filter((part): part is NonNullable<typeof part> => part !== null)
+    );
+  }, [bookingKind, timeChoice, tasks, meridiem]);
 
   // ── Addresses ─────────────────────────────────────────────────────────────
   const loadAddresses = useCallback(async () => {
@@ -801,36 +911,42 @@ export default function PostJobScreen() {
   };
 
   // ── Multiple days: strip ↔ tasks ──────────────────────────────────────────
-  const toggleDay = (day: Date) => {
-    const nextDays = toggleAgendaDay(selectedDays, day);
-    setSelectedDays(nextDays);
-    setTasks((prev) => syncTasks(prev, nextDays));
+  /** One strip tap: select + activate, activate only, or deselect. */
+  const selectDay = (day: Date) => {
+    const outcome = applyDayTap(daySelection, day, tasks);
+    setDaySelection(outcome.selection);
+    setTasks((prev) =>
+      outcome.removedKey
+        ? prev.filter((task) => task.key !== outcome.removedKey)
+        : syncTasks(prev, outcome.selection.days)
+    );
     clearError('date');
     clearError('time');
   };
 
+  /** Replace the ACTIVE day's time, re-clamping that task's hours with it. */
+  const applyActiveTime = (time: TimeChoice | null) => {
+    if (!activeTask) return;
+    const index = tasks.findIndex((task) => task.key === activeTask.key);
+    const { tasks: next, loweredFrom } = applyTaskTime(tasks, activeTask.key, time);
+    setTasks(next);
+    if (loweredFrom !== null) {
+      const updated = next.find((task) => task.key === activeTask.key);
+      if (updated) setTaskHoursNotice({ n: index + 1, hours: updated.hours });
+    }
+    clearError('time');
+    clearError('date');
+  };
+
+  /** Delete one task: its day leaves the strip too, and numbering closes up. */
   const removeTask = (task: TaskDraft) => {
-    const nextDays = selectedDays.filter((day) => dayKey(day) !== task.key);
-    setUndo({ days: selectedDays, tasks });
-    setSelectedDays(nextDays);
-    setTasks(syncTasks(tasks, nextDays));
+    const remainingDays = daySelection.days.filter((day) => dayKey(day) !== task.key);
+    setDaySelection(activeAfterDelete(remainingDays, task.key));
+    setTasks(syncTasks(tasks, remainingDays));
+    setTaskEditorKey((current) => (current === task.key ? null : current));
     clearError('time');
     clearError('date');
   };
-
-  const undoRemove = () => {
-    if (!undo) return;
-    setSelectedDays(undo.days);
-    setTasks(undo.tasks);
-    setUndo(null);
-  };
-
-  // The snackbar fades itself out; it is informational, never a dialog.
-  useEffect(() => {
-    if (!undo) return;
-    const timer = setTimeout(() => setUndo(null), 6000);
-    return () => clearTimeout(timer);
-  }, [undo]);
 
   const editingTask = taskEditorKey
     ? tasks.find((task) => task.key === taskEditorKey) ?? null
@@ -992,11 +1108,17 @@ export default function PostJobScreen() {
     }
 
     const now = new Date();
-    const chosenHours = clampExpectedHours(hours);
+    // Single day: the chosen value, never above the 11 PM ceiling of its start.
+    // Multiple days: each task carries its OWN hours (Part C), so there is no
+    // global value to send.
+    const chosenHours =
+      bookingKind === 'one_time'
+        ? clampHours(hours, singleHoursCap ?? MIN_HOURS_BEFORE_DAY_END)
+        : MIN_HOURS_BEFORE_DAY_END;
     const milestones =
       bookingKind === 'one_time'
         ? buildOneTimeMilestones(oneTimeDay(oneTimeDayKind, now), timeChoice as TimeChoice, chosenHours)
-        : buildTaskMilestones(tasks, chosenHours);
+        : buildTaskMilestones(tasks);
 
     const payload = buildCreateJobRequest({
       serviceId,
@@ -1293,147 +1415,69 @@ export default function PostJobScreen() {
     </>
   );
 
-  /** The five presets — a second tap on the selected one clears the choice. */
-  const renderPresetGrid = (day: Date | null) => (
-    <View style={styles.slotGrid}>
-      {FIXED_SLOTS.map((slot) => {
-        const choice: TimeChoice = { kind: 'slot', key: slot.key };
-        const active = timeChoice?.kind === 'slot' && timeChoice.key === slot.key;
-        const started = hasSlotStarted(choice, day);
-        return (
-          <TouchableOpacity
-            key={slot.key}
-            style={[
-              styles.slot,
-              {
-                backgroundColor: active ? c.primary : c.input,
-                borderColor: active ? c.primary : c.border,
-                opacity: started ? 0.45 : 1,
-              },
-            ]}
-            onPress={() => {
-              if (started) return;
-              setTimeChoice(toggleSlot(timeChoice, slot.key));
-              clearError('time');
-              clearError('date');
-            }}
-            disabled={started}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active, disabled: started }}
-          >
-            <Text
-              style={[styles.slotText, { color: active ? c.primaryForeground : c.text }]}
-              numberOfLines={1}
-            >
-              {formatWindowLabel(choice, meridiem)}
-            </Text>
-            {started ? (
-              <Text
-                style={[
-                  styles.slotNote,
-                  { color: active ? c.primaryForeground : c.mutedForeground },
-                ]}
-              >
-                {t('post_time_slot_started')}
-              </Text>
-            ) : null}
-          </TouchableOpacity>
-        );
-      })}
-
-      <TouchableOpacity
-        style={[
-          styles.slot,
-          {
-            backgroundColor: timeChoice?.kind === 'anytime' ? c.primary : c.input,
-            borderColor: timeChoice?.kind === 'anytime' ? c.primary : c.border,
-          },
-        ]}
-        onPress={() => setCustomSheetOpen(true)}
-        accessibilityRole="button"
-        accessibilityState={{ selected: timeChoice?.kind === 'anytime' }}
-      >
-        <Feather
-          name="clock"
-          size={13}
-          color={timeChoice?.kind === 'anytime' ? c.primaryForeground : c.mutedForeground}
-        />
-        <Text
+  /**
+   * Expected hours for a SINGLE day: 1 … the 11 PM ceiling of the chosen start.
+   * "+" is disabled AT the ceiling, the value is clamped when the start changes
+   * and a short translated notice says why. Until a time exists the stepper is
+   * disabled and asks for one.
+   */
+  const renderHours = () => {
+    const cap = singleHoursCap;
+    const atCap = cap !== null && hours >= cap;
+    const endLabel = formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem);
+    return (
+      <>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_hours')}</Text>
+        <View
           style={[
-            styles.slotText,
-            { color: timeChoice?.kind === 'anytime' ? c.primaryForeground : c.text },
+            styles.stepper,
+            { backgroundColor: c.input, borderColor: c.border, opacity: cap === null ? 0.55 : 1 },
           ]}
         >
-          {t('post_time_anytime')}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  /** The custom window, shown on its own chip with a clear (x). */
-  const renderCustomChip = () => {
-    if (timeChoice?.kind !== 'anytime') return null;
-    return (
-      <View style={styles.customRow}>
-        <View style={[styles.customChip, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
-          <Feather name="clock" size={13} color={c.primary} />
-          <Text style={[styles.customChipText, { color: c.primary }]}>{windowLabel}</Text>
           <TouchableOpacity
-            onPress={() => {
-              setTimeChoice(null);
-              clearError('time');
-            }}
-            hitSlop={10}
+            style={[styles.stepperBtn, { backgroundColor: c.muted }]}
+            onPress={() => setHours((h) => Math.max(MIN_EXPECTED_HOURS, h - 1))}
+            disabled={cap === null || hours <= MIN_EXPECTED_HOURS}
             accessibilityRole="button"
-            accessibilityLabel={t('post_time_clear')}
+            accessibilityLabel={`${t('post_hours')} -1`}
           >
-            <Feather name="x" size={13} color={c.primary} />
+            <Feather name="minus" size={16} color={c.text} />
+          </TouchableOpacity>
+          <Text style={[styles.stepperValue, { color: c.text }]}>
+            {hours === 1
+              ? t('post_hours_value', { n: hours })
+              : t('post_hours_value_plural', { n: hours })}
+          </Text>
+          <TouchableOpacity
+            style={[styles.stepperBtn, { backgroundColor: c.muted, opacity: atCap ? 0.4 : 1 }]}
+            onPress={() => setHours((h) => clampHours(h + 1, cap ?? MIN_EXPECTED_HOURS))}
+            disabled={cap === null || atCap}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('post_hours')} +1`}
+            accessibilityState={{ disabled: cap === null || atCap }}
+          >
+            <Feather name="plus" size={16} color={c.text} />
           </TouchableOpacity>
         </View>
-        {windowMinutes(timeChoice) <= 0 ? (
-          <View style={styles.inlineError}>
-            <Feather name="alert-circle" size={13} color={c.destructive} />
-            <Text style={[styles.error, { color: c.destructive, marginTop: 0, flex: 1 }]}>
-              {t('post_err_time_window')}
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>
+          {cap === null
+            ? t('post_hours_pick_time')
+            : t('post_hours_cap', { n: cap, time: endLabel })}
+        </Text>
+        {hoursNotice !== null ? (
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            style={[styles.switchNotice, { backgroundColor: c.muted, borderColor: c.border }]}
+          >
+            <Feather name="info" size={13} color={c.mutedForeground} />
+            <Text style={[styles.switchNoticeText, { color: c.mutedForeground }]}>
+              {t('post_hours_lowered', { n: hoursNotice, time: endLabel })}
             </Text>
-          </View>
-        ) : shortWindow ? (
-          <Text style={[styles.hint, { color: c.mutedForeground }]}>
-            {t('post_time_short_hint', { h: hours })}
-          </Text>
+          </Animated.View>
         ) : null}
-      </View>
+      </>
     );
   };
-
-  const renderHours = () => (
-    <>
-      <Text style={[styles.label, { color: c.text }]}>
-        {bookingKind === 'one_time' ? t('post_hours') : t('post_hours_per_day')}
-      </Text>
-      <View style={[styles.stepper, { backgroundColor: c.input, borderColor: c.border }]}>
-        <TouchableOpacity
-          style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-          onPress={() => setHours((h) => Math.max(MIN_EXPECTED_HOURS, h - 1))}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('post_hours')} -1`}
-        >
-          <Feather name="minus" size={16} color={c.text} />
-        </TouchableOpacity>
-        <Text style={[styles.stepperValue, { color: c.text }]}>
-          {hours === 1 ? t('post_hours_value', { n: hours }) : t('post_hours_value_plural', { n: hours })}
-        </Text>
-        <TouchableOpacity
-          style={[styles.stepperBtn, { backgroundColor: c.muted }]}
-          onPress={() => setHours((h) => Math.min(MAX_EXPECTED_HOURS, h + 1))}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('post_hours')} +1`}
-        >
-          <Feather name="plus" size={16} color={c.text} />
-        </TouchableOpacity>
-      </View>
-    </>
-  );
 
   const renderSingleDay = () => (
     <>
@@ -1462,8 +1506,20 @@ export default function PostJobScreen() {
       </View>
 
       <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
-      {renderPresetGrid(activeDay)}
-      {renderCustomChip()}
+      <TimeChoices
+        choice={timeChoice}
+        day={singleDay}
+        onChange={(next) => {
+          setTimeChoice(next);
+          clearError('time');
+          clearError('date');
+        }}
+      />
+      {shortWindow ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>
+          {t('post_time_short_hint', { h: hours })}
+        </Text>
+      ) : null}
 
       {stepErrors.date || stepErrors.time ? (
         <Animated.View entering={FadeIn.duration(180)} style={styles.inlineError}>
@@ -1480,91 +1536,48 @@ export default function PostJobScreen() {
     </>
   );
 
+  /**
+   * MULTIPLE DAYS — the strip, then the ACTIVE day's time grid directly below
+   * it (the reference layout: "Select Day" then "Select Time"). Only the active
+   * day is edited here; its own hours and the per-task list live on the Tasks
+   * step, so this screen has no global hours control and no task list.
+   */
   const renderMultiDay = () => (
     <>
       <Text style={[styles.label, { color: c.text }]}>{t('post_dates_title')}</Text>
       <DateStrip
-        selected={selectedDays}
-        onToggle={toggleDay}
+        selected={daySelection.days}
+        activeKey={daySelection.activeKey}
+        onToggle={selectDay}
         weekdays={weekdays}
         months={months}
         disabled={(day) => !dayHasBookableTime(day)}
+        status={(day) => {
+          const key = dayKey(day);
+          const task = tasks.find((entry) => entry.key === key);
+          if (!task) return null;
+          return validateTimeChoice(task.time, task.day, new Date()) === null ? 'timed' : 'untimed';
+        }}
       />
       <Text style={[styles.hint, { color: c.mutedForeground, marginTop: 10 }]}>
-        {selectedDays.length === 0
+        {daySelection.days.length === 0
           ? t('post_dates_hint')
-          : t('post_days_selected_of', { n: selectedDays.length, total: 7 })}
+          : t('post_days_selected_of', { n: daySelection.days.length, total: 7 })}
       </Text>
 
-      <View style={styles.labelRow}>
-        <Text style={[styles.label, { color: c.text }]}>{t('post_tasks')}</Text>
-        {tasks.length > 0 ? (
-          <Text style={[styles.counter, { color: c.mutedForeground }]}>
-            {t('post_tasks_count', { n: tasks.length })}
+      {activeTask ? (
+        <>
+          <Text style={[styles.label, { color: c.text }]}>
+            {t('post_time_for_day', { day: formatDayLabel(activeTask.day, months, weekdays) })}
           </Text>
-        ) : null}
-      </View>
-
-      {tasks.length === 0 ? (
-        <View style={[styles.taskEmpty, { backgroundColor: c.muted, borderColor: c.border }]}>
-          <Feather name="list" size={18} color={c.mutedForeground} />
-          <Text style={[styles.taskEmptyText, { color: c.mutedForeground }]}>
-            {t('post_tasks_empty')}
-          </Text>
-        </View>
+          <TimeChoices
+            choice={activeTask.time}
+            day={activeTask.day}
+            onChange={(next) => applyActiveTime(next)}
+          />
+        </>
       ) : (
-        tasks.map((task, index) => {
-          const taskLabel = task.name ?? t('post_task_n', { n: index + 1 });
-          const taskWindow = formatWindowLabel(task.time, meridiem);
-          const untimed = validateTimeChoice(task.time, task.day, new Date()) !== null;
-          return (
-            <Animated.View
-              key={task.key}
-              entering={FadeInUp.delay(index * 40).duration(240)}
-              style={[
-                styles.taskCard,
-                {
-                  backgroundColor: c.card,
-                  borderColor: untimed ? c.destructive : c.primary,
-                },
-              ]}
-            >
-              <View style={[styles.taskBadge, { backgroundColor: c.primary }]}>
-                <Text style={[styles.taskBadgeText, { color: c.primaryForeground }]}>
-                  {index + 1}
-                </Text>
-              </View>
-              <View style={styles.taskBody}>
-                <Text style={[styles.taskName, { color: c.text }]} numberOfLines={1}>
-                  {taskLabel}
-                </Text>
-                <Text style={[styles.taskMeta, { color: c.mutedForeground }]} numberOfLines={1}>
-                  {`${t('post_task_short_day', { day: task.day.getDate(), month: months[task.day.getMonth()] ?? '' })} · ${
-                    taskWindow || t('post_task_time_missing')
-                  }`}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setTaskEditorKey(task.key)}
-                hitSlop={8}
-                style={styles.taskAction}
-                accessibilityRole="button"
-                accessibilityLabel={t('post_task_edit')}
-              >
-                <Feather name="edit-2" size={15} color={c.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => removeTask(task)}
-                hitSlop={8}
-                style={styles.taskAction}
-                accessibilityRole="button"
-                accessibilityLabel={t('post_task_remove')}
-              >
-                <Feather name="trash-2" size={15} color={c.destructive} />
-              </TouchableOpacity>
-            </Animated.View>
-          );
-        })
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_time_pick_day')}</Text>
       )}
 
       {stepErrors.date || stepErrors.time ? (
@@ -1577,8 +1590,186 @@ export default function PostJobScreen() {
       ) : scheduleError ? (
         <Text style={[styles.hint, { color: c.mutedForeground }]}>{scheduleError}</Text>
       ) : null}
+    </>
+  );
 
-      {renderHours()}
+  /**
+   * STEP 4 (several days only) — "Your tasks": one card per selected day, in
+   * date order, always renumbered Task 1..N after a deletion. Each card owns its
+   * expected hours (1 … the 11 PM ceiling for ITS start), Edit (time-only) and
+   * Delete (which also removes the day from the strip, in sync).
+   */
+  const renderTasksStep = () => (
+    <>
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, { color: c.text }]}>{t('post_tasks')}</Text>
+        {tasks.length > 0 ? (
+          <Text style={[styles.counter, { color: c.mutedForeground }]}>
+            {t('post_tasks_count', { n: tasks.length })}
+          </Text>
+        ) : null}
+      </View>
+
+      {taskHoursNotice ? (
+        <Animated.View
+          entering={FadeIn.duration(180)}
+          style={[styles.switchNotice, { backgroundColor: c.muted, borderColor: c.border }]}
+        >
+          <Feather name="info" size={13} color={c.mutedForeground} />
+          <Text style={[styles.switchNoticeText, { color: c.mutedForeground }]}>
+            {t('post_task_hours_lowered', {
+              n: taskHoursNotice.n,
+              h: taskHoursNotice.hours,
+              time: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+            })}
+          </Text>
+        </Animated.View>
+      ) : null}
+
+      {tasks.length === 0 ? (
+        <View style={[styles.taskEmpty, { backgroundColor: c.muted, borderColor: c.border }]}>
+          <Feather name="list" size={18} color={c.mutedForeground} />
+          <Text style={[styles.taskEmptyText, { color: c.mutedForeground }]}>
+            {t('post_tasks_none')}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setStep((prev) => Math.max(0, prev - 1))}
+            style={[styles.taskEmptyBtn, { borderColor: c.primary }]}
+            accessibilityRole="button"
+          >
+            <Feather name="calendar" size={14} color={c.primary} />
+            <Text style={[styles.taskEmptyBtnText, { color: c.primary }]}>
+              {t('post_tasks_back_to_dates')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        tasks.map((task, index) => {
+          const taskWindow = formatWindowLabel(task.time, meridiem);
+          const untimed = validateTimeChoice(task.time, task.day, new Date()) !== null;
+          const cap = taskHoursCap(task);
+          const atCap = cap !== null && task.hours >= cap;
+          return (
+            <Animated.View
+              key={task.key}
+              entering={FadeInUp.delay(index * 40).duration(240)}
+              style={[
+                styles.taskCardFull,
+                {
+                  backgroundColor: c.card,
+                  borderColor: untimed ? c.destructive : c.border,
+                },
+              ]}
+            >
+              <View style={styles.taskCardHead}>
+                <View style={[styles.taskBadge, { backgroundColor: c.primary }]}>
+                  <Text style={[styles.taskBadgeText, { color: c.primaryForeground }]}>
+                    {index + 1}
+                  </Text>
+                </View>
+                <View style={styles.taskBody}>
+                  <Text style={[styles.taskName, { color: c.text }]} numberOfLines={1}>
+                    {t('post_task_n', { n: index + 1 })}
+                  </Text>
+                  <Text style={[styles.taskMeta, { color: c.mutedForeground }]} numberOfLines={1}>
+                    {`${formatDayLabel(task.day, months, weekdays)} · ${
+                      taskWindow || t('post_task_time_missing')
+                    }`}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setTaskEditorKey(task.key)}
+                  hitSlop={8}
+                  style={styles.taskAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('post_task_edit')}
+                >
+                  <Feather name="edit-2" size={15} color={c.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => removeTask(task)}
+                  hitSlop={8}
+                  style={styles.taskAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('post_task_remove')}
+                >
+                  <Feather name="trash-2" size={15} color={c.destructive} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.taskCardFoot}>
+                <Text style={[styles.smallLabel, { color: c.mutedForeground, marginBottom: 0 }]}>
+                  {t('post_task_hours')}
+                </Text>
+                <View style={[styles.taskStepper, { backgroundColor: c.input, borderColor: c.border }]}>
+                  <TouchableOpacity
+                    style={[styles.taskStepperBtn, { backgroundColor: c.muted }]}
+                    onPress={() =>
+                      setTasks((prev) =>
+                        prev.map((entry) =>
+                          entry.key === task.key
+                            ? { ...entry, hours: Math.max(MIN_EXPECTED_HOURS, entry.hours - 1) }
+                            : entry
+                        )
+                      )
+                    }
+                    disabled={task.hours <= MIN_EXPECTED_HOURS}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('post_task_hours')} -1`}
+                  >
+                    <Feather name="minus" size={14} color={c.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.taskStepperValue, { color: c.text }]}>
+                    {task.hours === 1
+                      ? t('post_hours_value', { n: task.hours })
+                      : t('post_hours_value_plural', { n: task.hours })}
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.taskStepperBtn,
+                      { backgroundColor: c.muted, opacity: atCap ? 0.4 : 1 },
+                    ]}
+                    onPress={() =>
+                      setTasks((prev) =>
+                        prev.map((entry) =>
+                          entry.key === task.key
+                            ? { ...entry, hours: clampHours(entry.hours + 1, cap ?? MIN_EXPECTED_HOURS) }
+                            : entry
+                        )
+                      )
+                    }
+                    disabled={cap === null || atCap}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('post_task_hours')} +1`}
+                    accessibilityState={{ disabled: cap === null || atCap }}
+                  >
+                    <Feather name="plus" size={14} color={c.text} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={[styles.taskHoursHint, { color: c.mutedForeground }]}>
+                {cap === null
+                  ? t('post_hours_pick_time')
+                  : t('post_hours_cap', {
+                      n: cap,
+                      time: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+                    })}
+              </Text>
+            </Animated.View>
+          );
+        })
+      )}
+
+      {stepErrors.date || stepErrors.time ? (
+        <Animated.View entering={FadeIn.duration(180)} style={styles.inlineError}>
+          <Feather name="alert-circle" size={13} color={c.destructive} />
+          <Text style={[styles.error, { color: c.destructive, marginTop: 0, flex: 1 }]}>
+            {stepErrors.time ?? stepErrors.date}
+          </Text>
+        </Animated.View>
+      ) : tasksError ? (
+        <Text style={[styles.hint, { color: c.mutedForeground }]}>{tasksError}</Text>
+      ) : null}
     </>
   );
 
@@ -1657,25 +1848,25 @@ export default function PostJobScreen() {
       <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <BackButton onPress={goBack} />
         <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>
-          {t(STEP_KEYS[step])}
+          {t(stepKey)}
         </Text>
         <View style={{ width: 40 }} />
       </View>
 
       <View style={[styles.progressWrap, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <View style={styles.progressTrack}>
-          {STEP_KEYS.map((key, index) => (
+          {steps.map((key, index) => (
             <View
               key={key}
               style={[
                 styles.progressSegment,
-                { backgroundColor: index <= step ? c.primary : c.muted },
+                { backgroundColor: index <= safeStep ? c.primary : c.muted },
               ]}
             />
           ))}
         </View>
         <Text style={[styles.progressLabel, { color: c.mutedForeground }]}>
-          {t('post_step_of', { n: step + 1, total: STEP_COUNT })}
+          {t('post_step_of', { n: safeStep + 1, total: stepCount })}
         </Text>
       </View>
 
@@ -1684,34 +1875,14 @@ export default function PostJobScreen() {
         showsVerticalScrollIndicator={false}
         bottomOffset={110}
       >
-        <Animated.View key={`step-${step}`} entering={FadeInUp.duration(260)} style={styles.stepBody}>
-          {step === 0 ? renderDetailsStep() : null}
-          {step === 1 ? renderBookingStep() : null}
-          {step === 2 ? renderScheduleStep() : null}
-          {step === 3 ? renderAddressStep() : null}
+        <Animated.View key={stepKey} entering={FadeInUp.duration(260)} style={styles.stepBody}>
+          {stepKey === STEP_DETAILS ? renderDetailsStep() : null}
+          {stepKey === STEP_BOOKING ? renderBookingStep() : null}
+          {stepKey === STEP_SCHEDULE ? renderScheduleStep() : null}
+          {stepKey === STEP_TASKS ? renderTasksStep() : null}
+          {stepKey === STEP_ADDRESS ? renderAddressStep() : null}
         </Animated.View>
       </KeyboardAwareScrollViewCompat>
-
-      {/* Undo snackbar — above the action bar, never over the system buttons. */}
-      {undo ? (
-        <Animated.View
-          entering={FadeInUp.duration(180)}
-          style={[
-            styles.snackbar,
-            {
-              backgroundColor: c.text,
-              bottom: insets.bottom + 150,
-            },
-          ]}
-        >
-          <Text style={[styles.snackbarText, { color: c.background }]} numberOfLines={1}>
-            {t('post_task_removed')}
-          </Text>
-          <TouchableOpacity onPress={undoRemove} hitSlop={8} accessibilityRole="button">
-            <Text style={[styles.snackbarAction, { color: c.background }]}>{t('post_undo')}</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      ) : null}
 
       <View
         style={[
@@ -1723,7 +1894,7 @@ export default function PostJobScreen() {
           },
         ]}
       >
-        {step === STEP_COUNT - 1 ? (
+        {safeStep === stepCount - 1 ? (
           <>
             <TouchableOpacity
               style={[
@@ -1778,14 +1949,14 @@ export default function PostJobScreen() {
             <TouchableOpacity
               style={[
                 styles.barNext,
-                { backgroundColor: c.primary, opacity: step === 2 && scheduleError ? 0.55 : 1 },
+                { backgroundColor: c.primary, opacity: nextBlocked ? 0.55 : 1 },
               ]}
               onPress={goNext}
-              // The time step may only advance once its schedule is valid:
-              // a preset is chosen, or EVERY task has a valid time of its own.
-              disabled={step === 2 && scheduleError !== null}
+              // Date & Time may only advance with a valid schedule for EVERY
+              // selected day; the Tasks step needs at least one task left.
+              disabled={nextBlocked}
               accessibilityRole="button"
-              accessibilityState={{ disabled: step === 2 && scheduleError !== null }}
+              accessibilityState={{ disabled: nextBlocked }}
             >
               <Text style={[styles.barNextText, { color: c.primaryForeground }]}>
                 {t('post_next')}
@@ -1809,32 +1980,22 @@ export default function PostJobScreen() {
         }}
       />
 
-      {/* Anytime — ONE sheet, two rows, hours/minutes arrows. No clock face. */}
-      <TimeRangeSheet
-        visible={customSheetOpen}
-        onClose={() => setCustomSheetOpen(false)}
-        title={t('post_time_custom_title')}
-        value={range}
-        day={activeDay}
-        onApply={(next) => {
-          setTimeChoice({ kind: 'anytime', start: next.start, end: next.end });
-          clearError('time');
-          clearError('date');
-          setCustomSheetOpen(false);
-        }}
-      />
-
-      {/* One task's own name + time. */}
+      {/* One task's TIME only — the date belongs to the strip, the hours to the
+          card, and the name was removed from the product. */}
       <TaskEditSheet
         visible={editingTask !== null}
         onClose={() => setTaskEditorKey(null)}
         task={editingTask}
         index={editingTaskIndex < 0 ? 0 : editingTaskIndex}
-        onSave={(name, time) => {
-          if (!taskEditorKey) return;
-          setTasks((prev) =>
-            setTaskName(setTaskTime(prev, taskEditorKey, time), taskEditorKey, name)
-          );
+        onSave={(time) => {
+          if (!editingTask) return;
+          const index = tasks.findIndex((entry) => entry.key === editingTask.key);
+          const { tasks: next, loweredFrom } = applyTaskTime(tasks, editingTask.key, time);
+          setTasks(next);
+          if (loweredFrom !== null) {
+            const updated = next.find((entry) => entry.key === editingTask.key);
+            if (updated) setTaskHoursNotice({ n: index + 1, hours: updated.hours });
+          }
           clearError('time');
           setTaskEditorKey(null);
         }}
@@ -1919,17 +2080,18 @@ const styles = StyleSheet.create({
   },
   slot: {
     width: '47.5%',
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 12,
     minHeight: 52,
   },
+  slotBody: { alignItems: 'center', gap: 2, maxWidth: '100%' },
+  slotInnerRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   slotText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, flexShrink: 1 },
+  /** Second line inside the chip: never truncates the window above it. */
   slotNote: { fontFamily: 'Manrope_400Regular', fontSize: 9 },
   customRow: { marginTop: 10, gap: 4 },
   customChip: {
@@ -1997,6 +2159,38 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   taskEmptyText: { flex: 1, fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 17 },
+  taskEmptyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  taskEmptyBtnText: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
+  /** Step 4's task card: a header row plus its own hours control. */
+  taskCardFull: {
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+    gap: 10,
+  },
+  taskCardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  taskCardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  taskStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 4,
+  },
+  taskStepperBtn: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  taskStepperValue: { minWidth: 48, textAlign: 'center', fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  taskHoursHint: { fontFamily: 'Manrope_400Regular', fontSize: 10, lineHeight: 14 },
   taskCard: {
     flexDirection: 'row',
     alignItems: 'center',

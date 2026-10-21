@@ -439,7 +439,8 @@ eq('minute step keeps the hour', stepMinute(5, 1), 6);
 
 // ── Hours bounds ─────────────────────────────────────────────────────────
 eq('hours below the floor are clamped', clampExpectedHours(0), 1);
-eq('hours above the ceiling are clamped', clampExpectedHours(99), 24);
+// The ceiling is now the 11 PM rule's own maximum (8:00 AM → 15 h), never 24.
+eq('hours above the ceiling are clamped', clampExpectedHours(99), 15);
 eq('hours are rounded to integers', clampExpectedHours(3.6), 4);
 
 // ── Clock 12/24-hour conversion + labels ─────────────────────────────────
