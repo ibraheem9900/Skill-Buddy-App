@@ -56,6 +56,8 @@ const TEST_FILES = [
   'dataState.test.js',
   'tabNav.test.js',
   'postWizard.test.js',
+  'timeSlots.test.js',
+  'bidTimes.test.js',
   'postDetails.test.js',
   'postAddress.test.js',
   'translations.test.js',

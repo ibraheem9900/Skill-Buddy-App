@@ -51,6 +51,8 @@
     "./dataState.test.ts",
     "./tabNav.test.ts",
     "./postWizard.test.ts",
+    "./timeSlots.test.ts",
+    "./bidTimes.test.ts",
     "./postDetails.test.ts",
     "./postAddress.test.ts",
     "./translations.test.ts"
