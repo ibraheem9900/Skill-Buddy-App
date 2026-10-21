@@ -11,6 +11,7 @@ import {
   formatBidPriceLocale,
   type BidLocale,
 } from '@/lib/bid';
+import { parseProposedTimeLine, proposedTimesSummary } from '@/lib/bidTimes';
 import type { BidResponse } from '@/types';
 
 interface Props {
@@ -77,6 +78,15 @@ export default function BidOfferCard({
   const [photoFailed, setPhotoFailed] = useState(false);
 
   const { provider } = bid;
+  /**
+   * The pilot's chosen arrival(s), parsed out of the stored message by
+   * lib/bidTimes — the technical line itself is never displayed. One time is
+   * shown as "Starts 9:30 AM"; several are labelled per task.
+   */
+  const proposed = proposedTimesSummary(parseProposedTimeLine(bid.message).arrivals, {
+    am: t('post_sched_am'),
+    pm: t('post_sched_pm'),
+  });
   const price = formatBidPriceLocale(bid.offered_price, locale);
   const distance = formatBidDistanceLocale(bid.distance_km, locale);
   const eta = bidEtaParts(bid.eta_minutes);
@@ -192,6 +202,15 @@ export default function BidOfferCard({
           </View>
         </View>
 
+        {proposed ? (
+          <View style={styles.arrivalRow}>
+            <Feather name="clock" size={11} color={c.mutedForeground} />
+            <Text style={[styles.arrivalText, { color: c.mutedForeground }]}>
+              {proposed.single ? t('bid_starts', { time: proposed.text }) : proposed.text}
+            </Text>
+          </View>
+        ) : null}
+
         {(onAccept || onReject) && (
           <View style={styles.actions}>
             {onAccept ? (
@@ -248,6 +267,8 @@ const styles = StyleSheet.create({
   avatarInitial: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
   name: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  arrivalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  arrivalText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 16 },
   metaText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   dot: { width: 2.5, height: 2.5, borderRadius: 1.25, marginHorizontal: 2 },
   tier: { fontFamily: 'Manrope_500Medium', fontSize: 11, marginTop: 3 },

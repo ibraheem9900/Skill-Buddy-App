@@ -36,6 +36,11 @@ import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
 import { isPaymentPending } from '@/lib/jobPayment';
 import { bidCreatedNoticeText } from '@/lib/jobBidsLive';
 import {
+  parseProposedTimeLine,
+  proposedTimesSummary,
+  stripProposedTimeLine,
+} from '@/lib/bidTimes';
+import {
   canRestartJobTimer,
   isRestartNotAllowed,
   restartTimerFailureMessage,
@@ -130,6 +135,13 @@ function ProviderSheet({
     : null;
   const statusKey = bid ? bidStatusLabelKey(bid.status) : null;
   const submitted = bid ? formatDateTime(bid.created_at) : null;
+  /** The pilot's proposed start(s); the stored line is never shown raw. */
+  const proposed = bid
+    ? proposedTimesSummary(parseProposedTimeLine(bid.message).arrivals, {
+        am: t('post_sched_am'),
+        pm: t('post_sched_pm'),
+      })
+    : null;
 
   return (
     <BottomSheet visible={!!bid} onClose={onClose} title={t('cbids_provider_title')}>
@@ -152,6 +164,14 @@ function ProviderSheet({
           </View>
 
           {row(t('cbids_provider_price'), formatBidPriceLocale(bid.offered_price, locale))}
+          {row(
+            t('jobd_bid_arrival_title'),
+            proposed
+              ? proposed.single
+                ? t('bid_starts', { time: proposed.text })
+                : proposed.text
+              : null
+          )}
           {row(t('jobd_bid_summary_eta'), etaText)}
           {row(
             t('cbids_provider_rating'),
@@ -172,8 +192,8 @@ function ProviderSheet({
               {t('cbids_provider_message')}
             </Text>
             <Text style={[styles.sheetMessage, { color: c.text }]}>
-              {bid.message && bid.message.trim().length > 0
-                ? bid.message
+              {stripProposedTimeLine(bid.message).length > 0
+                ? stripProposedTimeLine(bid.message)
                 : t('cbids_provider_no_message')}
             </Text>
           </View>

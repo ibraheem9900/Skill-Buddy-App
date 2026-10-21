@@ -19,6 +19,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useRole } from '@/context/RoleContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
+import BidArrivalTimes from '@/components/BidArrivalTimes';
 import BidFormFields from '@/components/BidFormFields';
 import BottomSheet from '@/components/BottomSheet';
 import BrandedLoader from '@/components/BrandedLoader';
@@ -57,6 +58,19 @@ import {
   type BidDraft,
   type BidFieldName,
 } from '@/lib/bid';
+import {
+  composeBidMessage,
+  etaMinutesForFirstArrival,
+  firstMissingArrival,
+  hasBidMessageChanged,
+  hasEveryArrival,
+  jobTaskWindows,
+  messageRoomFor,
+  parseProposedTimeLine,
+  proposedTimesSummary,
+  stripProposedTimeLine,
+  type ProposedArrival,
+} from '@/lib/bidTimes';
 import type { BidResponse } from '@/types';
 import useNearbyJobGone from '@/hooks/useNearbyJobGone';
 import { markNearbyJobGone } from '@/lib/nearbyAvailability';
@@ -149,7 +163,6 @@ export default function PlaceBidScreen() {
    */
   const [editDraft, setEditDraft] = useState<BidDraft | null>(null);
   const [editPriceError, setEditPriceError] = useState<string | null>(null);
-  const [editEtaError, setEditEtaError] = useState<string | null>(null);
   const [editMessageError, setEditMessageError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -172,14 +185,34 @@ export default function PlaceBidScreen() {
   });
 
   const [price, setPrice] = useState('');
-  const [etaHours, setEtaHours] = useState(0);
-  const [etaMinutes, setEtaMinutes] = useState(0);
   const [message, setMessage] = useState('');
   const [priceError, setPriceError] = useState<string | null>(null);
-  const [etaError, setEtaError] = useState<string | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [retryable, setRetryable] = useState(false);
+
+  /**
+   * THE pilot's arrival times — one chosen half-hour per task, prefilled from
+   * the bid when editing. They are the ONLY time control on this screen: the
+   * old ETA steppers are gone, and `eta_minutes` (still required by the schema)
+   * is derived from the earliest chosen start by lib/bidTimes.
+   */
+  const [arrivals, setArrivals] = useState<ProposedArrival[]>([]);
+  const [arrivalError, setArrivalError] = useState<string | null>(null);
+  const [editArrivals, setEditArrivals] = useState<ProposedArrival[]>([]);
+  const [editArrivalError, setEditArrivalError] = useState<string | null>(null);
+
+  const meridiem = useMemo(
+    () => ({ am: t('post_sched_am'), pm: t('post_sched_pm') }),
+    [t]
+  );
+
+  /** One row per task of the job (single day = 1, multiple days = 1..7). */
+  const tasks = useMemo(() => jobTaskWindows(job), [job]);
+
+  /** The schema's 1000 characters, minus the line the chosen times occupy. */
+  const messageRoom = messageRoomFor(arrivals, meridiem);
+  const editMessageRoom = messageRoomFor(editArrivals, meridiem);
 
   /**
    * The countdown anchor is captured ONCE: the deadline must not be recomputed
@@ -245,18 +278,28 @@ export default function PlaceBidScreen() {
 
   /* ------------------------------------------------------------------ submit */
 
-  const etaTotalMinutes = Math.min(etaHours * 60 + etaMinutes, 24 * 60);
-
+  /**
+   * Every rule the wire checks, checked before the request: the price, the
+   * derived eta, the COMBINED message (the provider's words plus the time line),
+   * and one chosen arrival per task.
+   */
   const validateAll = useCallback((): boolean => {
     const priceResult = validateBidPrice(price);
-    const etaResult = validateEtaMinutes(String(etaTotalMinutes));
-    const messageResult = validateBidMessage(message);
+    const etaResult = validateEtaMinutes(
+      String(etaMinutesForFirstArrival(arrivals, tasks))
+    );
+    const messageResult = validateBidMessage(
+      composeBidMessage(message, arrivals, meridiem) ?? ''
+    );
+    const missing = firstMissingArrival(arrivals, tasks);
 
     setPriceError(priceResult.ok ? null : t(priceResult.errorKey));
-    setEtaError(etaResult.ok ? null : t(etaResult.errorKey));
     setMessageError(messageResult.ok ? null : t(messageResult.errorKey));
-    return priceResult.ok && etaResult.ok && messageResult.ok;
-  }, [price, etaTotalMinutes, message, t]);
+    setArrivalError(
+      missing === null ? null : t('jobd_bid_arrival_required', { n: missing })
+    );
+    return priceResult.ok && etaResult.ok && messageResult.ok && missing === null;
+  }, [price, message, arrivals, tasks, meridiem, t]);
 
   const submit = useCallback(async () => {
     if (numericId === null || bidSubmitting) return;
@@ -264,7 +307,14 @@ export default function PlaceBidScreen() {
     setRetryable(false);
     if (!validateAll()) return;
 
-    const outcome = await createBidForJob(numericId, price, String(etaTotalMinutes), message);
+    // eta_minutes is derived from the EARLIEST chosen arrival; the message is
+    // the provider's words plus the one fixed time line lib/bidTimes owns.
+    const outcome = await createBidForJob(
+      numericId,
+      price,
+      String(etaMinutesForFirstArrival(arrivals, tasks)),
+      composeBidMessage(message, arrivals, meridiem) ?? ''
+    );
 
     if (outcome.ok) {
       // The card comes from the 201 itself — status included — and the hook then
@@ -294,7 +344,7 @@ export default function PlaceBidScreen() {
       const etaMsg = bidFieldError(outcome.detail, etaField);
       const messageMsg = bidFieldError(outcome.detail, messageField);
       setPriceError(priceMsg ?? (outcome.message || null));
-      setEtaError(etaMsg);
+      setArrivalError(etaMsg);
       setMessageError(messageMsg);
       if (priceMsg || etaMsg || messageMsg) return;
     }
@@ -315,8 +365,10 @@ export default function PlaceBidScreen() {
     validateAll,
     createBidForJob,
     price,
-    etaTotalMinutes,
     message,
+    arrivals,
+    tasks,
+    meridiem,
     adoptCreatedBid,
     showAlert,
     t,
@@ -333,12 +385,26 @@ export default function PlaceBidScreen() {
    * leaves Save disabled until a real one is typed.
    */
   const openEdit = useCallback((bid: BidResponse) => {
-    setEditDraft(bidDraftFromBid(bid));
+    // The saved line is parsed back so the sheet opens on the times the pilot
+    // really chose; the message field shows only the pilot's own words.
+    const parsed = parseProposedTimeLine(bid.message);
+    const eta = etaMinutesForFirstArrival(parsed.arrivals, tasks);
+    setEditDraft({
+      ...bidDraftFromBid(bid),
+      message: parsed.userMessage,
+      etaHours: Math.floor(eta / 60),
+      etaMinutes: eta % 60,
+    });
+    setEditArrivals(parsed.arrivals);
     setEditPriceError(null);
-    setEditEtaError(null);
     setEditMessageError(null);
     setEditError(null);
-  }, []);
+    setEditArrivalError(
+      parsed.arrivals.length === 0 && tasks.length > 0
+        ? t('jobd_bid_arrival_legacy')
+        : null
+    );
+  }, [tasks, t]);
 
   /**
    * Close and DISCARD — the provider's way out without a request (lib/bid keeps
@@ -346,8 +412,9 @@ export default function PlaceBidScreen() {
    */
   const closeEdit = useCallback(() => {
     setEditDraft(null);
+    setEditArrivals([]);
+    setEditArrivalError(null);
     setEditPriceError(null);
-    setEditEtaError(null);
     setEditMessageError(null);
     setEditError(null);
   }, []);
@@ -451,12 +518,34 @@ export default function PlaceBidScreen() {
           </View>
         ) : null}
 
+        {/* The pilot's proposed start(s) — parsed out of the stored message,
+            whose technical line is never displayed. */}
+        {(() => {
+          const summary = proposedTimesSummary(
+            parseProposedTimeLine(bid.message).arrivals,
+            meridiem
+          );
+          if (!summary) return null;
+          return (
+            <View style={styles.row}>
+              <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
+                {t('jobd_bid_arrival_title')}
+              </Text>
+              <Text style={[styles.rowValue, { color: c.text }]}>
+                {summary.single ? t('bid_starts', { time: summary.text }) : summary.text}
+              </Text>
+            </View>
+          );
+        })()}
+
         <View style={styles.row}>
           <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
             {t('jobd_bid_summary_message')}
           </Text>
           <Text style={[styles.rowValue, { color: c.text }]}>
-            {bid.message && bid.message.trim().length > 0 ? bid.message : t('jobd_bid_no_message')}
+            {stripProposedTimeLine(bid.message).length > 0
+              ? stripProposedTimeLine(bid.message)
+              : t('jobd_bid_no_message')}
           </Text>
         </View>
 
@@ -610,9 +699,28 @@ export default function PlaceBidScreen() {
      * sheet was open — which LOCKS the form instead of dropping the work.
      */
     const editLocked = editDraft !== null && held.status !== 'PENDING';
-    const editChanged = editDraft !== null && hasBidDraftChanged(held, editDraft);
+    /**
+     * "Did anything change" is asked at the level the wire uses: the price and
+     * the provider's own words through lib/bid, and the WHOLE message (words +
+     * time line) through lib/bidTimes. The eta is never compared — it is derived
+     * from the arrivals and would drift with the clock on every render.
+     */
+    const editChanged =
+      editDraft !== null &&
+      (hasBidDraftChanged(
+        {
+          offered_price: held.offered_price,
+          eta_minutes: bidDraftEtaMinutes(editDraft),
+          message: stripProposedTimeLine(held.message),
+        },
+        editDraft
+      ) ||
+        hasBidMessageChanged(held.message, editDraft.message, editArrivals, meridiem));
     const editValid = editDraft !== null && isBidDraftValid(editDraft);
-    const canSaveEdit = !!editDraft && editChanged && editValid && !savingEdit && !editLocked;
+    /** A bid saved before this feature has no time yet — one is required now. */
+    const editArrivalsReady = hasEveryArrival(editArrivals, tasks);
+    const canSaveEdit =
+      !!editDraft && editChanged && editValid && editArrivalsReady && !savingEdit && !editLocked;
 
     const editFieldChange = (apply: (draft: BidDraft) => BidDraft, clear: () => void) => {
       setEditDraft((draft) => (draft ? apply(draft) : draft));
@@ -628,14 +736,26 @@ export default function PlaceBidScreen() {
       if (!editDraft || savingEdit || editLocked) return;
       setEditError(null);
       const priceResult = validateBidPrice(editDraft.price);
-      const etaResult = validateEtaMinutes(String(bidDraftEtaMinutes(editDraft)));
-      const messageResult = validateBidMessage(editDraft.message);
+      const eta = etaMinutesForFirstArrival(editArrivals, tasks);
+      const etaResult = validateEtaMinutes(String(eta));
+      const wireMessage = composeBidMessage(editDraft.message, editArrivals, meridiem);
+      const messageResult = validateBidMessage(wireMessage ?? '');
+      const missing = firstMissingArrival(editArrivals, tasks);
       setEditPriceError(priceResult.ok ? null : t(priceResult.errorKey));
-      setEditEtaError(etaResult.ok ? null : t(etaResult.errorKey));
       setEditMessageError(messageResult.ok ? null : t(messageResult.errorKey));
-      if (!priceResult.ok || !etaResult.ok || !messageResult.ok) return;
+      setEditArrivalError(
+        missing === null ? null : t('jobd_bid_arrival_required', { n: missing })
+      );
+      if (!priceResult.ok || !etaResult.ok || !messageResult.ok || missing !== null) return;
 
-      const outcome = await saveEditBid(held.id, buildBidUpdateRequest(editDraft));
+      // The PUT body keeps the schema's three fields; only the message differs
+      // from the draft (the line is added here, never typed by the pilot).
+      const body = buildBidUpdateRequest({
+        ...editDraft,
+        etaHours: Math.floor(eta / 60),
+        etaMinutes: eta % 60,
+      });
+      const outcome = await saveEditBid(held.id, { ...body, message: wireMessage });
 
       if (outcome.ok) {
         // The card already follows the PUT response (hooks/useMyBid); the sheet
@@ -662,7 +782,7 @@ export default function PlaceBidScreen() {
         const etaMsg = bidFieldError(outcome.detail, 'eta_minutes');
         const messageMsg = bidFieldError(outcome.detail, 'message');
         setEditPriceError(priceMsg);
-        setEditEtaError(etaMsg);
+        setEditArrivalError(etaMsg);
         setEditMessageError(messageMsg);
         if (priceMsg || etaMsg || messageMsg) return;
       }
@@ -799,21 +919,26 @@ export default function PlaceBidScreen() {
                   )
                 }
                 priceError={editPriceError}
-                etaHours={editDraft.etaHours}
-                etaMinutes={editDraft.etaMinutes}
-                onEtaHoursChange={(hours) =>
-                  editFieldChange(
-                    (draft) => ({ ...draft, etaHours: hours }),
-                    () => setEditEtaError(null)
-                  )
+                arrivalSection={
+                  <BidArrivalTimes
+                    tasks={tasks}
+                    arrivals={editArrivals}
+                    onChange={(next) => {
+                      setEditArrivals(next);
+                      setEditArrivalError(null);
+                      // Keep eta in step with the chosen times so the draft and
+                      // the PUT body agree; the field itself is no longer shown.
+                      const eta = etaMinutesForFirstArrival(next, tasks);
+                      setEditDraft((draft) =>
+                        draft
+                          ? { ...draft, etaHours: Math.floor(eta / 60), etaMinutes: eta % 60 }
+                          : draft
+                      );
+                    }}
+                    error={editArrivalError}
+                    disabled={savingEdit || editLocked}
+                  />
                 }
-                onEtaMinutesChange={(minutes) =>
-                  editFieldChange(
-                    (draft) => ({ ...draft, etaMinutes: minutes }),
-                    () => setEditEtaError(null)
-                  )
-                }
-                etaError={editEtaError}
                 message={editDraft.message}
                 onMessageChange={(value) =>
                   editFieldChange(
@@ -822,6 +947,7 @@ export default function PlaceBidScreen() {
                   )
                 }
                 messageError={editMessageError}
+                messageLimit={editMessageRoom}
                 disabled={savingEdit || editLocked}
                 priceExtra={editChips}
               />
@@ -974,23 +1100,25 @@ export default function PlaceBidScreen() {
               if (priceError) setPriceError(null);
             }}
             priceError={priceError}
-            etaHours={etaHours}
-            etaMinutes={etaMinutes}
-            onEtaHoursChange={(next) => {
-              setEtaHours(next);
-              if (etaError) setEtaError(null);
-            }}
-            onEtaMinutesChange={(next) => {
-              setEtaMinutes(next);
-              if (etaError) setEtaError(null);
-            }}
-            etaError={etaError}
+            arrivalSection={
+              <BidArrivalTimes
+                tasks={tasks}
+                arrivals={arrivals}
+                onChange={(next) => {
+                  setArrivals(next);
+                  setArrivalError(null);
+                }}
+                error={arrivalError}
+                disabled={bidSubmitting || nearbyGone}
+              />
+            }
             message={message}
             onMessageChange={(value) => {
               setMessage(value);
               if (messageError) setMessageError(null);
             }}
             messageError={messageError}
+            messageLimit={messageRoom}
             disabled={bidSubmitting}
           />
 

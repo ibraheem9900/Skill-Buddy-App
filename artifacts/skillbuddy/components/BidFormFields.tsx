@@ -31,14 +31,27 @@ export interface BidFormFieldsProps {
   price: string;
   onPriceChange: (value: string) => void;
   priceError: string | null;
-  etaHours: number;
-  etaMinutes: number;
-  onEtaHoursChange: (hours: number) => void;
-  onEtaMinutesChange: (minutes: number) => void;
-  etaError: string | null;
+  /** Legacy ETA stepper — only used when `arrivalSection` is absent. */
+  etaHours?: number;
+  etaMinutes?: number;
+  onEtaHoursChange?: (hours: number) => void;
+  onEtaMinutesChange?: (minutes: number) => void;
+  etaError?: string | null;
+  /**
+   * The pilot's arrival picker. It REPLACES the old ETA steppers: the arrival
+   * times are now the only time control, and `eta_minutes` is derived from
+   * them by lib/bidTimes (minutes until the first proposed start).
+   */
+  arrivalSection?: React.ReactNode;
   message: string;
   onMessageChange: (value: string) => void;
   messageError: string | null;
+  /**
+   * The room this field really has, in characters. It shrinks by the length of
+   * the proposed-time line lib/bidTimes appends on the way out, so the counter
+   * and the input's own cap measure what will actually be sent (≤ 1000).
+   */
+  messageLimit?: number;
   /** While a request is in flight every field is frozen. */
   disabled?: boolean;
   /** Rendered under the price input (e.g. the −10 / −5 / +5 / +10 chips). */
@@ -49,14 +62,16 @@ export default function BidFormFields({
   price,
   onPriceChange,
   priceError,
-  etaHours,
-  etaMinutes,
+  etaHours = 0,
+  etaMinutes = 0,
   onEtaHoursChange,
   onEtaMinutesChange,
-  etaError,
+  etaError = null,
+  arrivalSection,
   message,
   onMessageChange,
   messageError,
+  messageLimit = BID_MESSAGE_MAX_CHARS,
   disabled = false,
   priceExtra,
 }: BidFormFieldsProps) {
@@ -123,26 +138,31 @@ export default function BidFormFields({
         {priceError ?? t('jobd_bid_price_vat_note')}
       </Text>
 
-      {/* Expected time → eta_minutes (the schema's "estimated time of arrival"). */}
-      <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_eta_label')}</Text>
-      <View style={styles.stepperRowWrap}>
-        {stepper(t('jobd_bid_eta_hours_label'), etaHours, 1, 0, 24, (next) => {
-          onEtaHoursChange(next);
-          // 24 h is the schema's ceiling, so no minutes can join it.
-          if (next === 24 && etaMinutes !== 0) onEtaMinutesChange(0);
-        })}
-        {stepper(
-          t('jobd_bid_eta_minutes_label'),
-          etaMinutes,
-          5,
-          0,
-          etaHours === 24 ? 0 : 55,
-          onEtaMinutesChange
-        )}
-      </View>
-      <Text style={[styles.hint, { color: etaError ? c.destructive : c.mutedForeground }]}>
-        {etaError ?? t('jobd_bid_eta_hint')}
-      </Text>
+      {/* Time: the pilot's per-task arrival picker. The old ETA steppers only
+          appear for a caller that has not adopted it yet. */}
+      {arrivalSection ?? (
+        <>
+          <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_eta_label')}</Text>
+          <View style={styles.stepperRowWrap}>
+            {stepper(t('jobd_bid_eta_hours_label'), etaHours, 1, 0, 24, (next) => {
+              onEtaHoursChange?.(next);
+              // 24 h is the schema's ceiling, so no minutes can join it.
+              if (next === 24 && etaMinutes !== 0) onEtaMinutesChange?.(0);
+            })}
+            {stepper(
+              t('jobd_bid_eta_minutes_label'),
+              etaMinutes,
+              5,
+              0,
+              etaHours === 24 ? 0 : 55,
+              (next) => onEtaMinutesChange?.(next)
+            )}
+          </View>
+          <Text style={[styles.hint, { color: etaError ? c.destructive : c.mutedForeground }]}>
+            {etaError ?? t('jobd_bid_eta_hint')}
+          </Text>
+        </>
+      )}
 
       {/* Optional message, with a counter against the real limit. */}
       <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_message_label')}</Text>
@@ -162,7 +182,7 @@ export default function BidFormFields({
         placeholderTextColor={c.mutedForeground}
         multiline
         textAlignVertical="top"
-        maxLength={BID_MESSAGE_MAX_CHARS}
+        maxLength={messageLimit}
         editable={!disabled}
       />
       <View style={styles.metaRow}>
@@ -170,7 +190,7 @@ export default function BidFormFields({
           {messageError ?? t('jobd_bid_message_optional')}
         </Text>
         <Text style={[styles.counter, { color: c.mutedForeground }]}>
-          {message.length}/{BID_MESSAGE_MAX_CHARS}
+          {message.length}/{messageLimit}
         </Text>
       </View>
     </>
