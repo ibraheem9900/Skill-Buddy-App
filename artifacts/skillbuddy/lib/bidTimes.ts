@@ -21,11 +21,13 @@
  * until the FIRST proposed start, clamped to 0..1440 (the schema's own bounds).
  *
  * ── ARRIVAL OPTIONS (fixed by the product owner) ───────────────────────────
- * For one client window the pilot may pick a HALF-HOUR mark STRICTLY INSIDE it
- * (its start and end are never offered) — see lib/timeSlots.pilotTimesForSlot.
+ * For one client window the pilot may pick EVERY HALF-HOUR mark from the
+ * window's start up to, but not including, its end — the start is offered, the
+ * end never is (8-11 → 8:00, 8:30, 9:00, 9:30, 10:00, 10:30). A start between
+ * marks opens at the next one (9:20 → 9:30). See lib/timeSlots.pilotTimesForSlot.
  * An Anytime task has a custom window: the same rule applies to it, and when
- * the window is too short for any inner mark the client's exact start is the
- * only choice (the product owner's answer Q2/A).
+ * the window is too short for any mark the client's exact start is the only
+ * choice (the product owner's answer Q2/A).
  *
  * Pure: no React, no axios, no Intl.
  */
@@ -125,9 +127,9 @@ export function jobTaskWindows(job: JobResponse | null | undefined): BidTaskWind
 }
 
 /**
- * The half-hour marks a pilot may choose for one task: strictly inside the
- * client's window. A window too short for any mark offers its exact start, so a
- * task can never end up with no choice at all.
+ * The half-hour marks a pilot may choose for one task: every mark from the
+ * client's window start up to, not including, its end. A window too short for
+ * any mark offers its exact start, so a task can never end up with no choice.
  */
 export function arrivalOptionsFor(task: BidTaskWindow): ClockTime[] {
   const marks = pilotTimesForSlot({

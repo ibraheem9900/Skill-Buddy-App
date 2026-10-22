@@ -29,6 +29,11 @@ import {
 } from '../timeSlots';
 
 declare const console: { log: (msg: string) => void };
+declare function require(name: string): any;
+declare const __dirname: string;
+
+const fs = require('fs');
+const path = require('path');
 
 let passed = 0;
 const failures: string[] = [];
@@ -71,46 +76,72 @@ eq('11:00 AM is already the second window', slotContaining(660)?.key, 'slot_11_1
 eq('10:30 PM is in the last window', slotContaining(1350)?.key, 'slot_20_23');
 eq('11:00 PM belongs to no window', slotContaining(1380), null);
 
-/* ── The pilot's half-hour marks ─────────────────────────────────────────── */
-
-const marks = (key: string) =>
+/* ── The pilot's half-hour marks ─────────────────────────────────────────── */const marks = (key: string) =>
   pilotTimesForSlot(key)
     .map((clock) => formatTimeLabel(clock, MERIDIEM))
     .join(', ');
-
+// The product owner's list, slot by slot: every half-hour from the START up to
+// the mark before the END, and slot 2 labels each option with its own AM/PM.
 eq(
-  '8-11 AM offers 8:30 to 10:30',
+  'slot 1 (8-11 AM) offers 8:00 to 10:30',
   marks('slot_8_11'),
-  '8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM'
+  '8:00 AM, 8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM'
 );
 eq(
-  '11 AM-2 PM offers 11:30 to 1:30',
+  'slot 2 (11 AM-2 PM) offers 11:00 to 1:30 and crosses noon correctly',
   marks('slot_11_14'),
-  '11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM'
+  '11:00 AM, 11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM'
 );
 eq(
-  '2-5 PM offers 2:30 to 4:30',
+  'slot 3 (2-5 PM) offers 2:00 to 4:30',
   marks('slot_14_17'),
-  '2:30 PM, 3:00 PM, 3:30 PM, 4:00 PM, 4:30 PM'
+  '2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, 4:00 PM, 4:30 PM'
 );
 eq(
-  '5-8 PM offers 5:30 to 7:30',
+  'slot 4 (5-8 PM) offers 5:00 to 7:30',
   marks('slot_17_20'),
-  '5:30 PM, 6:00 PM, 6:30 PM, 7:00 PM, 7:30 PM'
+  '5:00 PM, 5:30 PM, 6:00 PM, 6:30 PM, 7:00 PM, 7:30 PM'
 );
 eq(
-  '8-11 PM offers 8:30 to 10:30',
+  'slot 5 (8-11 PM) offers 8:00 to 10:30',
   marks('slot_20_23'),
-  '8:30 PM, 9:00 PM, 9:30 PM, 10:00 PM, 10:30 PM'
+  '8:00 PM, 8:30 PM, 9:00 PM, 9:30 PM, 10:00 PM, 10:30 PM'
 );
 
-// The window's own start and end are NEVER offered.
+// The start IS offered (it sits on a mark in all five windows); the end is not.
 for (const entry of CLIENT_SLOTS) {
   const offered = pilotTimesForSlot(entry.key).map((clock) => minutesOf(clock));
-  check(`${entry.key} never offers its start`, !offered.includes(entry.startMinutes));
+  check(`${entry.key} offers its start`, offered.includes(entry.startMinutes));
   check(`${entry.key} never offers its end`, !offered.includes(entry.endMinutes));
-  eq(`${entry.key} offers five marks`, offered.length, 5);
+  eq(`${entry.key} offers six marks`, offered.length, 6);
+  eq(`${entry.key} steps by a half hour`, offered.every((m, i) => i === 0 || m === (offered[i - 1] ?? 0) + 30), true);
 }
+// A window that opens between marks starts at the NEXT mark (9:20 → 9:30).
+const offMark = pilotTimesForSlot({
+  key: 'anytime',
+  startMinutes: 9 * 60 + 20,
+  endMinutes: 11 * 60,
+  start: { hour: 9, minute: 20 },
+  end: { hour: 11, minute: 0 },
+});
+eq(
+  'a 9:20 start opens at 9:30',
+  offMark.map((clock) => formatTimeLabel(clock, MERIDIEM)).join(', '),
+  '9:30 AM, 10:00 AM, 10:30 AM'
+);
+// The end stays excluded even when the window ends between marks: 10:30 is
+// still before an end of 10:45, and 11:00 is never reached.
+eq(
+  'an end of 10:45 keeps 10:00 and 10:30 and never reaches 11:00',
+  pilotTimesForSlot({
+    key: 'anytime',
+    startMinutes: 10 * 60,
+    endMinutes: 10 * 60 + 45,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 10, minute: 45 },
+  }).map((clock) => minutesOf(clock)).join(','),
+  '600,630'
+);
 eq('an unknown slot offers nothing', pilotTimesForSlot('slot_1_2').length, 0);
 
 /* ── The 11 PM expected-hours rule ───────────────────────────────────────── */
@@ -254,6 +285,65 @@ eq('task 1 gets segment 1', numbered[0]?.startMinutes, 8 * 60);
 eq('task 2 gets segment 2', numbered[1]?.startMinutes, 17 * 60);
 eq('an unmatched task gets none', segmentsForTasks(segments, 3)[2], null);
 eq('a single-day line belongs to the only task', segmentsForTasks(singleSegments, 1)[0]?.startMinutes, 8 * 60);
+
+/* ── The rule lives in ONE module ───────────────────────────────────────── */
+
+// These checks are the point of the whole exercise: the pilot's marks must be
+// derived from one constant in lib/timeSlots, never re-typed in a screen, a
+// component or another lib module. A grep is the only way to prove absence.
+function projectRoot(from: string): string {
+  let dir = from;
+  for (let i = 0; i < 8; i += 1) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    dir = path.join(dir, '..');
+  }
+  throw new Error(`could not find the project root above ${from}`);
+}
+const root = projectRoot(__dirname);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.expo', 'dist', '__tests__']);
+
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) sourceFiles(full, out);
+    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+const files = sourceFiles(root).filter(
+  (file) => !file.includes(`${path.sep}lib${path.sep}__tests__${path.sep}`)
+);
+const relative = (file: string) => path.relative(root, file).split(path.sep).join('/');
+const DEFINES = /(?:^|\s)(?:export\s+)?(?:const|function)\s+(CLIENT_SLOTS|PILOT_STEP_MINUTES|pilotTimesForSlot)\b/m;
+const definers = files.filter((file) => DEFINES.test(fs.readFileSync(file, 'utf8'))).map(relative);
+
+eq(
+  'the client windows, the half-hour step and the pilot marks are defined only in lib/timeSlots',
+  definers.sort().join(', '),
+  'lib/timeSlots.ts'
+);
+
+// No screen may carry its own copy of the offsets the old rule used to add.
+const OFFSET_LIST = /\[\s*30\s*,\s*60\s*,\s*90\s*,\s*120\s*,\s*150\s*\]/;
+const copiedOffsets = files
+  .filter((file) => OFFSET_LIST.test(fs.readFileSync(file, 'utf8')))
+  .map(relative);
+eq('no module re-types the half-hour offsets', copiedOffsets.join(', '), '');
+
+// Every consumer must go through the shared function.
+const consumers = files
+  .filter((file) => /pilotTimesForSlot\s*\(/.test(fs.readFileSync(file, 'utf8')))
+  .map(relative)
+  .sort();
+eq(
+  'the marks are asked for through the shared function',
+  consumers.join(', '),
+  'lib/bidTimes.ts, lib/timeSlots.ts'
+);
+
+eq('the scan actually looked at the app', files.length > 50, true);
 
 console.log(`timeSlots: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {

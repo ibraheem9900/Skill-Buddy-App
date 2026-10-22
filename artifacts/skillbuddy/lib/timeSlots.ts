@@ -16,9 +16,10 @@
  *
  * ── PRODUCT RULES (fixed by the product owner) ─────────────────────────────
  *   Client windows : 8-11 AM · 11 AM-2 PM · 2-5 PM · 5-8 PM · 8-11 PM
- *   Pilot arrival  : HALF-HOUR marks STRICTLY INSIDE the client's window —
- *                    the window's own start and end are never offered
- *                    (8-11 → 8:30, 9:00, 9:30, 10:00, 10:30).
+ *   Pilot arrival  : EVERY HALF-HOUR mark from the window's start UP TO, but
+ *                    not including, its end — the start IS offered and the end
+ *                    never is (8-11 → 8:00, 8:30, 9:00, 9:30, 10:00, 10:30).
+ *                    A start between marks opens at the next one (9:20 → 9:30).
  *   Expected hours : maximum = from the chosen START until 11:00 PM that day,
  *                    in whole hours, rounded down. The END of an Anytime window
  *                    never changes the cap.
@@ -157,11 +158,15 @@ export function selectionWindowOf(
 export const PILOT_STEP_MINUTES = 30;
 
 /**
- * The half-hour marks a pilot may propose for one CLIENT window: strictly
- * inside it, so neither the window's start nor its end is ever offered.
+ * The half-hour marks a pilot may propose for one CLIENT window: from its start
+ * up to, but NOT including, its end. The start itself is offered when it sits on
+ * a mark; a start between marks opens at the next one (9:20 → 9:30). The end is
+ * always excluded.
  *
- *   8:00 AM - 11:00 AM → 8:30, 9:00, 9:30, 10:00, 10:30
- *   8:00 PM - 11:00 PM → 8:30, 9:00, 9:30, 10:00, 10:30
+ *   8:00 AM - 11:00 AM → 8:00, 8:30, 9:00, 9:30, 10:00, 10:30
+ *   11:00 AM - 2:00 PM → 11:00, 11:30, 12:00, 12:30, 1:00, 1:30
+ *   8:00 PM - 11:00 PM → 8:00, 8:30, 9:00, 9:30, 10:00, 10:30
+ *   9:20 AM - 11:00 AM → 9:30, 10:00, 10:30
  */
 export function pilotTimesForSlot(
   target: string | ClientSlot | null | undefined
@@ -169,11 +174,10 @@ export function pilotTimesForSlot(
   const entry = typeof target === 'string' ? slotByKey(target) : target ?? null;
   if (!entry) return [];
   const marks: ClockTime[] = [];
-  for (
-    let minutes = entry.startMinutes + PILOT_STEP_MINUTES;
-    minutes < entry.endMinutes;
-    minutes += PILOT_STEP_MINUTES
-  ) {
+  // First mark at or after the start, so an exact :00/:30 start is included and
+  // 9:20 begins at 9:30. `endMinutes` is never reached.
+  const first = Math.ceil(entry.startMinutes / PILOT_STEP_MINUTES) * PILOT_STEP_MINUTES;
+  for (let minutes = first; minutes < entry.endMinutes; minutes += PILOT_STEP_MINUTES) {
     marks.push(clockOf(minutes));
   }
   return marks;

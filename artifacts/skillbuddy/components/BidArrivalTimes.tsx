@@ -15,8 +15,12 @@ import { formatDayLabel, formatTimeLabel, minutesOf } from '@/lib/timeSlots';
 /**
  * "Select your arrival time" — the pilot's ONLY time control.
  *
- * One row per task: the task number, its date, the CLIENT's window, then the
- * half-hour marks strictly inside that window (lib/bidTimes.arrivalOptionsFor).
+ * One row per task: the task number, its date, the CLIENT's window, then every
+ * half-hour mark from that window's start to just before its end
+ * (lib/bidTimes.arrivalOptionsFor). Up to six chips are laid out three to a row
+ * with an equal width each, so a 360 dp screen never overflows or truncates and
+ * a 7-task job stays a simple vertical scroll.
+ *
  * There is no other time input anywhere in the bid flow, so a pilot can only
  * ever propose a moment the client's own booking allows.
  *
@@ -105,6 +109,7 @@ export default function BidArrivalTimes({
                     accessibilityState={{ selected: active, disabled }}
                   >
                     <Text
+                      numberOfLines={1}
                       style={[
                         styles.chipText,
                         { color: active ? c.primaryForeground : c.text },
@@ -154,11 +159,17 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0 },
   rowTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   rowMeta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // Three equal chips per row: 30 % + gap × 2 always fits the card's content
+  // width, and the same basis is used for every chip so none ever differs in
+  // size — including a short Anytime window with fewer than six marks.
+  chips: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 8 },
   chip: {
+    flexBasis: '30%',
+    flexGrow: 0,
+    alignItems: 'center',
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
   },
   chipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },

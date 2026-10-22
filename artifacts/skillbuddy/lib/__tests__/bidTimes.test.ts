@@ -61,29 +61,52 @@ const marks = (entry: BidTaskWindow) =>
 
 /* ── Arrival options ─────────────────────────────────────────────────────── */
 
+// Six marks per window, starting ON the client's start.
 eq(
-  'a client window offers its inner half-hours',
+  'a client window opens on its own start',
   marks(task()),
-  '8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM'
+  '8:00 AM, 8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM'
 );
 eq(
-  'the last window offers 8:30 to 10:30 PM',
+  'the noon-crossing window labels every option correctly',
+  marks(task({ startMinutes: 11 * 60, endMinutes: 14 * 60 })),
+  '11:00 AM, 11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM'
+);
+eq(
+  'the last window offers 8:00 to 10:30 PM',
   marks(task({ startMinutes: 20 * 60, endMinutes: 23 * 60 })),
-  '8:30 PM, 9:00 PM, 9:30 PM, 10:00 PM, 10:30 PM'
+  '8:00 PM, 8:30 PM, 9:00 PM, 9:30 PM, 10:00 PM, 10:30 PM'
 );
 // Anytime: the same rule on the client's own window.
 eq(
-  'an Anytime window offers its inner marks',
+  'an Anytime window opens on its own start',
   marks(task({ startMinutes: 9 * 60, endMinutes: 12 * 60, anytime: true })),
+  '9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM, 11:00 AM, 11:30 AM'
+);
+// A start between marks opens at the next mark.
+eq(
+  'an Anytime start at 9:20 opens at 9:30',
+  marks(task({ startMinutes: 9 * 60 + 20, endMinutes: 12 * 60, anytime: true })),
   '9:30 AM, 10:00 AM, 10:30 AM, 11:00 AM, 11:30 AM'
 );
-// A one-hour window still has its single inner mark.
+// A one-hour window now has both of its marks.
 eq(
-  'a one-hour window offers its inner half-hour',
+  'a one-hour Anytime window offers both marks',
   marks(task({ startMinutes: 9 * 60, endMinutes: 10 * 60, anytime: true })),
-  '9:30 AM'
+  '9:00 AM, 9:30 AM'
 );
-// A window too short for any inner mark offers the client's exact start.
+// A window whose end sits between marks stops before it.
+eq(
+  'an Anytime end at 10:45 keeps 10:00 and 10:30 but never the end',
+  marks(task({ startMinutes: 10 * 60, endMinutes: 10 * 60 + 45, anytime: true })),
+  '10:00 AM, 10:30 AM'
+);
+eq(
+  'an Anytime end exactly on a mark drops that mark',
+  marks(task({ startMinutes: 10 * 60, endMinutes: 11 * 60, anytime: true })),
+  '10:00 AM, 10:30 AM'
+);
+// A window too short for any mark at all offers the client's exact start.
 eq(
   'a 15-minute window offers its exact start',
   marks(task({ startMinutes: 9 * 60, endMinutes: 9 * 60 + 15, anytime: true })),
@@ -91,8 +114,9 @@ eq(
 );
 for (const entry of [task(), task({ startMinutes: 14 * 60, endMinutes: 17 * 60 })]) {
   const offered = arrivalOptionsFor(entry).map((clock) => minutesOf(clock));
-  check('the window start is never offered', !offered.includes(entry.startMinutes));
+  check('the window start is offered', offered.includes(entry.startMinutes));
   check('the window end is never offered', !offered.includes(entry.endMinutes));
+  eq('six options per client window', offered.length, 6);
 }
 
 /* ── Job tasks (from milestones + the stored schedule line) ──────────────── */
@@ -164,6 +188,41 @@ eq('appending keeps the words first', appended, `Gate code 1234\n${line}`);
 eq('appending twice never duplicates', appendProposedTimeLine(appended, line), `Gate code 1234\n${line}`);
 eq('no line means just the words', appendProposedTimeLine('Hello', null), 'Hello');
 eq('no words means just the line', appendProposedTimeLine('   ', line), line);
+
+/* ── Values saved under the OLD rule still parse ─────────────────────────── */
+
+// 8:30 AM was the first option before this round. A bid that stored it must
+// still prefill and re-save unchanged, and the new 8:00 must parse too.
+const legacy = parseProposedTimeLine('Please open the gate\nProposed time: Task 1 8:30 AM');
+eq('the old first option still parses', legacy.arrivals[0]?.minutes, 8 * 60 + 30);
+eq('and the pilot\u2019s words survive', legacy.userMessage, 'Please open the gate');
+eq(
+  'it round-trips unchanged',
+  composeBidMessage(legacy.userMessage, legacy.arrivals, MERIDIEM),
+  'Please open the gate\nProposed time: Task 1 8:30 AM'
+);
+const opening = parseProposedTimeLine('Proposed time: Task 1 8:00 AM; Task 2 12:00 PM');
+eq('the new start-of-window value parses', opening.arrivals[0]?.minutes, 8 * 60);
+eq('noon decodes as 12:00, not midnight', opening.arrivals[1]?.minutes, 12 * 60);
+
+// Every option the new rule offers must survive the encode/decode round trip.
+let roundTrips = 0;
+for (const window of [
+  { startMinutes: 8 * 60, endMinutes: 11 * 60 },
+  { startMinutes: 11 * 60, endMinutes: 14 * 60 },
+  { startMinutes: 14 * 60, endMinutes: 17 * 60 },
+  { startMinutes: 17 * 60, endMinutes: 20 * 60 },
+  { startMinutes: 20 * 60, endMinutes: 23 * 60 },
+]) {
+  for (const clock of arrivalOptionsFor(task({ ...window }))) {
+    const minutes = minutesOf(clock) ?? -1;
+    const encoded = composeBidMessage(null, [{ taskNumber: 1, minutes }], MERIDIEM) ?? '';
+    const decoded = parseProposedTimeLine(encoded).arrivals[0]?.minutes;
+    eq(`round trip for ${formatTimeLabel(clock, MERIDIEM)}`, decoded, minutes);
+    roundTrips += 1;
+  }
+}
+eq('all thirty options round-trip', roundTrips, 30);
 
 // The COMBINED text must fit the schema's 1000 characters.
 const longBody = 'x'.repeat(1200);
