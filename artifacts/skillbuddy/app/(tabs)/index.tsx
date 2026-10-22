@@ -45,6 +45,7 @@ import useSelectedLocation from '@/hooks/useSelectedLocation';
 import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
 import UpdateBanner from '@/components/UpdateBanner';
+import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 
 // No notifications backend exists yet (the API exposes no /notifications
 // endpoint), so the header bell never shows an unread badge — the previous
@@ -76,7 +77,7 @@ const QUICK_TILES = [
 ] as const;
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
-export default function HomeScreen() {
+function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme, colors: c } = useTheme();
@@ -974,3 +975,5 @@ const styles = StyleSheet.create({
   },
   inviteBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
 });
+
+export default withTabPagerPage(HomeScreen, 0);

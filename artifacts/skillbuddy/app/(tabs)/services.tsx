@@ -28,10 +28,11 @@ import ServerServiceRow from '@/components/ServerServiceRow';
 import useServices from '@/hooks/useServices';
 import useCategories from '@/hooks/useCategories';
 import { parseServicePrice } from '@/lib/servicePrice';
+import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 
 const ALL_ID = '__all__';
 
-export default function ServicesScreen() {
+function ServicesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
@@ -519,3 +520,5 @@ const styles = StyleSheet.create({
   },
   emptyBtnOutlineText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
 });
+
+export default withTabPagerPage(ServicesScreen, 1);

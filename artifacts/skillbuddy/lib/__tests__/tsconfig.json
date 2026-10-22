@@ -50,6 +50,7 @@
     "./moneyEvents.test.ts",
     "./dataState.test.ts",
     "./tabNav.test.ts",
+    "./tabPager.test.ts",
     "./postWizard.test.ts",
     "./timeSlots.test.ts",
     "./bidTimes.test.ts",

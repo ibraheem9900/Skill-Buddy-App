@@ -81,29 +81,60 @@ const root = projectRoot(__dirname);
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 const layout = read('app/(tabs)/_layout.tsx');
+const bar = read('components/tabBar/TabPagerBar.tsx');
+
+// ── The pager navigator ────────────────────────────────────────────────────
+eq('the five tabs are a pager, not discrete taps', layout.includes('<TopTabs'), true);
+eq('the custom bar is rendered at the bottom', layout.includes('tabBarPosition="bottom"'), true);
+eq('the bar is the custom one', layout.includes('<TabPagerBar'), true);
+eq('swiping between tabs is enabled', layout.includes('swipeEnabled: true'), true);
 eq(
-  'the bar height adds the real bottom inset',
-  layout.includes('height: TAB_BAR_HEIGHT + insets.bottom'),
+  'the immediate neighbours are pre-mounted, distant tabs stay lazy',
+  layout.includes('lazy: true') && layout.includes('lazyPreloadDistance: 1'),
   true
 );
-eq('the bar pads by the inset', layout.includes('paddingBottom: (insets.bottom > 0 ? insets.bottom : 0) + 6'), true);
-eq('the navigator is wrapped by the swipe area', layout.includes('<TabSwipeArea>'), true);
 eq(
-  'every tab uses the shared animated wrapper',
-  (layout.match(/<AnimatedTabIcon/g) ?? []).length,
+  'every tab is declared once',
+  (layout.match(/<TopTabs\.Screen/g) ?? []).length,
   5
 );
 eq('no leftover old icon names', /DoorTabIcon|GridBlocksTabIcon|ChatPopTabIcon|EyesTabIcon/.test(layout), false);
+eq('the old discrete swipe wrapper is gone', fs.existsSync(path.join(root, 'components/TabSwipeArea.tsx')), false);
 
-const swipe = read('components/TabSwipeArea.tsx');
-eq('the swipe is limited to root tabs', swipe.includes('isTabPath(pathname)'), true);
-eq('it needs a 24 px horizontal move to activate', swipe.includes('ACTIVATE_X = 24'), true);
-eq('a vertical move cancels it', swipe.includes('failOffsetY'), true);
+// ── The bar ────────────────────────────────────────────────────────────────
 eq(
-  'it navigates rather than pushing a stack screen',
-  swipe.includes('router.navigate') && !swipe.includes('router.push'),
+  'the bar height adds the real bottom inset',
+  bar.includes('height: isWeb ? 84 : TAB_BAR_HEIGHT + insets.bottom'),
   true
 );
+eq('the bar pads by the inset', bar.includes('paddingBottom: isWeb ? 34 : (insets.bottom > 0 ? insets.bottom : 0) + 6'), true);
+eq('one continuous position drives the pill', bar.includes('position.interpolate(pillLeftRange('), true);
+eq('each icon cross-fades outline to filled', bar.includes('position.interpolate(iconFillRange('), true);
+eq('each label cross-fades its colour', bar.includes('opacity: fill'), true);
+eq('the incoming icon lifts with a scale', bar.includes('position.interpolate(iconScaleRange('), true);
+eq('tapping a tab goes through the pager', bar.includes('jumpTo(route.key)'), true);
+eq('the bar draws its own icons', /HomeTabIcon[\s\S]*ProfileTabIcon/.test(bar), true);
+
+// ── Pages ──────────────────────────────────────────────────────────────────
+const page = read('components/tabBar/TabPagerPage.tsx');
+eq('pages read the same pager position', page.includes('TabAnimationContext'), true);
+eq('pages fade as they leave', page.includes('pageOpacityRange(index)'), true);
+eq('pages scale slightly as they leave', page.includes('pageScaleRange(index)'), true);
+eq('reduce motion switches the polish off', page.includes('reduceMotion'), true);
+
+for (const [file, name, index] of [
+  ['index.tsx', 'HomeScreen', 0],
+  ['services.tsx', 'ServicesScreen', 1],
+  ['jobs.tsx', 'JobsScreen', 2],
+  ['inbox.tsx', 'InboxScreen', 3],
+  ['profile.tsx', 'ProfileScreen', 4],
+] as const) {
+  eq(
+    `${name} is wrapped for the pager at index ${index}`,
+    read(`app/(tabs)/${file}`).includes(`withTabPagerPage(${name}, ${index})`),
+    true
+  );
+}
 
 console.log(`tabNav: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) throw new Error(`${failures.length} tabNav check(s) failed`);

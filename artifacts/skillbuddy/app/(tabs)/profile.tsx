@@ -14,6 +14,7 @@ import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
 import useProviderDashboard from '@/hooks/useProviderDashboard';
 import { useCreditWallet } from '@/hooks/useWallet';
 import { failureCopyKind, resolveDataViewState } from '@/lib/dataState';
+import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 
 interface MenuItem {
   icon: keyof typeof Feather.glyphMap;
@@ -25,7 +26,7 @@ interface MenuItem {
   isThemeToggle?: boolean;
 }
 
-export default function ProfileScreen() {
+function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { logout, user } = useAuth();
@@ -533,3 +534,5 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
   badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 });
+
+export default withTabPagerPage(ProfileScreen, 4);

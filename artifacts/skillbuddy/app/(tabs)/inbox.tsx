@@ -8,13 +8,14 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import type { ChatThread } from '@/types';
 import EmptyState from '@/components/EmptyState';
+import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 
 // No chat backend exists yet (the live API exposes no chat/threads/messages
 // endpoints), so the inbox is honestly empty until one ships. The thread
 // rendering below stays in place so real data can flow straight into it.
 const CHAT_THREADS: ChatThread[] = [];
 
-export default function InboxScreen() {
+function InboxScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
@@ -121,3 +122,5 @@ const styles = StyleSheet.create({
   badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: '#FFF' },
   separator: { height: 1 },
 });
+
+export default withTabPagerPage(InboxScreen, 3);

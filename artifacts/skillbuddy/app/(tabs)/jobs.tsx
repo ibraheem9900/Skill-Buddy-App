@@ -35,6 +35,7 @@ import useJobList, { hasActiveFilters } from '@/hooks/useJobList';
 import { useRole } from '@/context/RoleContext';
 import type { JobListItem } from '@/types';
 import type { TranslationKey } from '@/context/LanguageContext';
+import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 
 /**
  * The client's job list, backed by GET /api/v1/jobs.
@@ -74,7 +75,7 @@ const PROVIDER_TABS: { key: ProviderTab; labelKey: TranslationKey }[] = [
   { key: 'myBids', labelKey: 'mybids_tab' },
 ];
 
-export default function JobsScreen() {
+function JobsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
@@ -498,3 +499,5 @@ const styles = StyleSheet.create({
   footer: { paddingVertical: 16, alignItems: 'center' },
   footerText: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
 });
+
+export default withTabPagerPage(JobsScreen, 2);

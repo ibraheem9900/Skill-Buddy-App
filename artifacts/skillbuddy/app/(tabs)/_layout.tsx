@@ -1,25 +1,20 @@
-import React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
-import { Tabs } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { SymbolView } from 'expo-symbols';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import TopTabs from 'expo-router/js-top-tabs';
+import type { MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
+import * as Haptics from 'expo-haptics';
+import { usePathname } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import SuspensionGate from '@/components/SuspensionGate';
-import AnimatedTabIcon from '@/components/AnimatedTabIcon';
-import TabSwipeArea from '@/components/TabSwipeArea';
-import {
-  HomeTabIcon,
-  ServicesTabIcon,
-  JobsTabIcon,
-  InboxTabIcon,
-  ProfileTabIcon,
-} from '@/components/AnimatedTabIcons';
-import { TAB_BAR_HEIGHT } from '@/lib/tabNav';
+import TabPagerBar, { type TabPagerBarProps } from '@/components/tabBar/TabPagerBar';
+import { TabPagerIndexContext } from '@/components/tabBar/TabPagerContext';
+import { tabIndex } from '@/lib/tabNav';
+
+/** A light tick when a swipe (or tap) lands on a different tab. */
+const TAB_HAPTICS_ENABLED = true;
 
 function NativeTabLayout() {
   const { t } = useLanguage();
@@ -49,117 +44,89 @@ function NativeTabLayout() {
   );
 }
 
+/**
+ * The five tab screens as a horizontal pager.
+ *
+ * expo-router's TopTabs (react-native-tab-view over react-native-pager-view)
+ * renders the five scenes side by side and reports a continuous `position`
+ * (0…4, including the fraction under the finger) from the native scroll. The
+ * custom bar reads that same value, so the pill, the icon fills and the labels
+ * are always exactly where the pages are.
+ *
+ * `lazyPreloadDistance: 1` keeps the immediate neighbours mounted without
+ * mounting the whole app at launch, so a reveal is never blank.
+ */
 function ClassicTabLayout() {
-  const { colors: c, theme } = useTheme();
+  const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const insets = useSafeAreaInsets();
-  const isIOS = Platform.OS === 'ios';
-  const isWeb = Platform.OS === 'web';
-  const isDark = theme === 'dark';
+  const pathname = usePathname();
+  // Seeded from the URL (deep links land on the right tab) and kept up to date
+  // by the bar, which sees the navigator's own index the moment it settles.
+  const [activeIndex, setActiveIndex] = useState(() => Math.max(0, tabIndex(pathname)));
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: c.tabBarActive,
-        tabBarInactiveTintColor: c.tabBarInactive,
-        tabBarLabelStyle: { fontFamily: 'Manrope_500Medium', fontSize: 11, marginBottom: 2 },
-        tabBarStyle: {
-          position: 'absolute',
-          backgroundColor: isIOS ? 'transparent' : c.tabBarBg,
-          borderTopWidth: isWeb ? 1 : 0.5,
-          borderTopColor: c.border,
-          elevation: 0,
-          // The bar is exactly TAB_BAR_HEIGHT of content PLUS the device's own
-          // bottom inset, so gesture-nav pills and 3-button nav bars sit below
-          // it instead of under the labels. Screens reserve the same padding.
-          ...(isWeb
-            ? { height: 84, paddingBottom: 34 }
-            : {
-                height: TAB_BAR_HEIGHT + insets.bottom,
-                paddingTop: 8,
-                paddingBottom: (insets.bottom > 0 ? insets.bottom : 0) + 6,
-              }),
-        },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView
-              intensity={90}
-              tint={isDark ? 'dark' : 'light'}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: c.tabBarBg }]} />
-          ) : null,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: t('tab_home'),
-          tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <HomeTabIcon focused={focused} color={col} size={22} />}
-            </AnimatedTabIcon>
-          ),
+    <TabPagerIndexContext.Provider value={activeIndex}>
+      <TopTabs
+        tabBarPosition="bottom"
+        overScrollMode="always"
+        tabBar={(props: MaterialTopTabBarProps) => (
+          <TabPagerBar
+            {...(props as unknown as TabPagerBarProps)}
+            onActiveIndexChange={setActiveIndex}
+          />
+        )}
+        screenOptions={{
+          swipeEnabled: true,
+          animationEnabled: true,
+          lazy: true,
+          lazyPreloadDistance: 1,
+          sceneStyle: { backgroundColor: c.background },
         }}
-      />
-      <Tabs.Screen
-        name="services"
-        options={{
-          title: t('tab_services'),
-          tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <ServicesTabIcon focused={focused} color={col} size={22} />}
-            </AnimatedTabIcon>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="jobs"
-        options={{
-          title: t('tab_jobs'),
-          tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <JobsTabIcon focused={focused} color={col} size={22} />}
-            </AnimatedTabIcon>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="inbox"
-        options={{
-          title: t('tab_inbox'),
-          tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <InboxTabIcon focused={focused} color={col} size={22} />}
-            </AnimatedTabIcon>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: t('tab_profile'),
-          tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon focused={focused} color={color} activeColor={c.tabBarActive}>
-              {(col) => <ProfileTabIcon focused={focused} color={col} size={22} />}
-            </AnimatedTabIcon>
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <TopTabs.Screen name="index" options={{ title: t('tab_home') }} />
+        <TopTabs.Screen name="services" options={{ title: t('tab_services') }} />
+        <TopTabs.Screen name="jobs" options={{ title: t('tab_jobs') }} />
+        <TopTabs.Screen name="inbox" options={{ title: t('tab_inbox') }} />
+        <TopTabs.Screen name="profile" options={{ title: t('tab_profile') }} />
+      </TopTabs>
+    </TabPagerIndexContext.Provider>
   );
+}
+
+/**
+ * One light impact per tab change, whether it came from a tap or a swipe.
+ * Deliberately outside the bar so it fires exactly once when navigation lands.
+ */
+function TabHaptics() {
+  const pathname = usePathname();
+  const index = tabIndex(pathname);
+  const previous = useRef(index);
+  const first = useRef(true);
+
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      previous.current = index;
+      return;
+    }
+    if (index < 0 || index === previous.current) return;
+    previous.current = index;
+    if (!TAB_HAPTICS_ENABLED) return;
+    if (Platform.OS === 'android' || Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
+        /* haptics are cosmetic — never let them surface an error */
+      });
+    }
+  }, [index]);
+
+  return null;
 }
 
 export default function TabLayout() {
   return (
     <SuspensionGate>
-      {/* Swipe left/right between adjacent tabs. Wraps the navigator, so it
-          only ever sees gestures on the five root tab screens. */}
-      <TabSwipeArea>
-        {isLiquidGlassAvailable() ? <NativeTabLayout /> : <ClassicTabLayout />}
-      </TabSwipeArea>
+      <TabHaptics />
+      {isLiquidGlassAvailable() ? <NativeTabLayout /> : <ClassicTabLayout />}
     </SuspensionGate>
   );
 }

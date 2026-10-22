@@ -65,6 +65,8 @@
     "expo-glass-effect": "~57.0.4",
     "expo-secure-store": "~57.0.4",
     "expo-updates": "~57.0.23",
-    "expo-video": "~57.0.5"
+    "expo-video": "~57.0.5",
+    "react-native-pager-view": "8.0.2",
+    "react-native-tab-view": "4.3.4"
   }
 }

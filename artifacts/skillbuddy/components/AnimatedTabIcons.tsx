@@ -1,50 +1,30 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import type { ColorValue } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedProps, withTiming, Easing } from 'react-native-reanimated';
-
-const AnimatedRect = Animated.createAnimatedComponent(Rect);
-const AnimatedPath = Animated.createAnimatedComponent(Path);
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /**
  * The five bottom-tab icons, drawn as ONE family:
  *
  *   • 24×24 viewBox, 1.7 stroke, round caps/joins, outline in the tab's tint;
- *   • each icon has exactly ONE solid element that fades in when the tab is
- *     active (door, tiles, latch, dots, head), so the selected tab reads as
- *     "filled" without a second, unrelated icon set;
- *   • every transition is the same 180 ms, so all five feel uniform.
+ *   • each icon has exactly ONE solid element (door, tiles, latch, dots, head)
+ *     whose `fill` opacity is passed in, so the bar can cross-fade the outline
+ *     copy into the filled copy progressively as a swipe moves the tab;
+ *   • the shapes are deliberately distinct at a glance: a house, a 2×2 grid, a
+ *     briefcase with a visible handle and seam, a speech bubble, a person.
  *
- * The shapes are deliberately distinct at a glance: a house, a 2×2 grid, a
- * briefcase with a visible handle and seam, a speech bubble, a person.
+ * These are pure presentational SVGs: no animation state, no effects. The tab
+ * bar owns the timing (see `components/tabBar/TabPagerBar.tsx`).
  */
-interface IconProps {
-  focused: boolean;
+export interface TabIconProps {
   /** Matches RN's `ColorValue` and react-native-svg's fill/stroke types. */
   color: ColorValue;
+  /** Opacity (0–1) of the icon's single solid element. */
+  fill?: number;
   size?: number;
 }
 
-/** The shared transition: 180 ms, ease-out, both directions. */
-export const TAB_ICON_DURATION = 180;
-
-function useActiveProgress(focused: boolean) {
-  const progress = useSharedValue(focused ? 1 : 0);
-  useEffect(() => {
-    progress.value = withTiming(focused ? 1 : 0, {
-      duration: TAB_ICON_DURATION,
-      easing: Easing.out(Easing.quad),
-    });
-  }, [focused, progress]);
-  return progress;
-}
-
 /** Home — a house whose door fills in when selected. */
-export function HomeTabIcon({ focused, color, size = 24 }: IconProps) {
-  const progress = useActiveProgress(focused);
-  const doorProps = useAnimatedProps(() => ({ fillOpacity: 0.15 + progress.value * 0.85 }));
-
+export function HomeTabIcon({ color, fill = 0, size = 24 }: TabIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -53,14 +33,14 @@ export function HomeTabIcon({ focused, color, size = 24 }: IconProps) {
         strokeWidth={1.7}
         strokeLinejoin="round"
       />
-      <AnimatedRect
-        animatedProps={doorProps}
+      <Rect
         x={9.2}
         y={13}
         width={5.6}
         height={7.9}
         rx={1}
         fill={color}
+        fillOpacity={0.15 + fill * 0.85}
       />
       <Path d="M9.2 13h5.6" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
     </Svg>
@@ -68,10 +48,7 @@ export function HomeTabIcon({ focused, color, size = 24 }: IconProps) {
 }
 
 /** Services — a 2×2 grid of tiles that fills in when selected. */
-export function ServicesTabIcon({ focused, color, size = 24 }: IconProps) {
-  const progress = useActiveProgress(focused);
-  const tileProps = useAnimatedProps(() => ({ fillOpacity: progress.value * 0.95 }));
-
+export function ServicesTabIcon({ color, fill = 0, size = 24 }: TabIconProps) {
   const tiles: [number, number][] = [
     [3.5, 3.5],
     [13.5, 3.5],
@@ -84,14 +61,14 @@ export function ServicesTabIcon({ focused, color, size = 24 }: IconProps) {
       {tiles.map(([x, y]) => (
         <React.Fragment key={`${x}-${y}`}>
           <Rect x={x} y={y} width={7} height={7} rx={1.8} stroke={color} strokeWidth={1.7} />
-          <AnimatedRect
-            animatedProps={tileProps}
+          <Rect
             x={x}
             y={y}
             width={7}
             height={7}
             rx={1.8}
             fill={color}
+            fillOpacity={fill * 0.95}
           />
         </React.Fragment>
       ))}
@@ -100,10 +77,7 @@ export function ServicesTabIcon({ focused, color, size = 24 }: IconProps) {
 }
 
 /** Jobs — a briefcase: handle, body and centre latch; the latch fills in. */
-export function JobsTabIcon({ focused, color, size = 24 }: IconProps) {
-  const progress = useActiveProgress(focused);
-  const latchProps = useAnimatedProps(() => ({ fillOpacity: 0.2 + progress.value * 0.8 }));
-
+export function JobsTabIcon({ color, fill = 0, size = 24 }: TabIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       {/* handle */}
@@ -118,24 +92,22 @@ export function JobsTabIcon({ focused, color, size = 24 }: IconProps) {
       {/* seam — what makes it read as a briefcase rather than a box */}
       <Path d="M3 11.4h18" stroke={color} strokeWidth={1.7} />
       {/* latch */}
-      <AnimatedRect
-        animatedProps={latchProps}
+      <Rect
         x={10.1}
         y={9.9}
         width={3.8}
         height={3}
         rx={0.9}
         fill={color}
+        fillOpacity={0.2 + fill * 0.8}
       />
     </Svg>
   );
 }
 
 /** Inbox — a speech bubble whose three dots appear when selected. */
-export function InboxTabIcon({ focused, color, size = 24 }: IconProps) {
-  const progress = useActiveProgress(focused);
-  const dotProps = useAnimatedProps(() => ({ fillOpacity: 0.15 + progress.value * 0.85 }));
-
+export function InboxTabIcon({ color, fill = 0, size = 24 }: TabIconProps) {
+  const dotOpacity = 0.15 + fill * 0.85;
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -144,27 +116,18 @@ export function InboxTabIcon({ focused, color, size = 24 }: IconProps) {
         strokeWidth={1.7}
         strokeLinejoin="round"
       />
-      <AnimatedCircle animatedProps={dotProps} cx={7.6} cy={11.9} r={1.25} fill={color} />
-      <AnimatedCircle animatedProps={dotProps} cx={12} cy={11.9} r={1.25} fill={color} />
-      <AnimatedCircle animatedProps={dotProps} cx={16.4} cy={11.9} r={1.25} fill={color} />
+      <Circle cx={7.6} cy={11.9} r={1.25} fill={color} fillOpacity={dotOpacity} />
+      <Circle cx={12} cy={11.9} r={1.25} fill={color} fillOpacity={dotOpacity} />
+      <Circle cx={16.4} cy={11.9} r={1.25} fill={color} fillOpacity={dotOpacity} />
     </Svg>
   );
 }
 
 /** Profile — head and shoulders; the head fills in when selected. */
-export function ProfileTabIcon({ focused, color, size = 24 }: IconProps) {
-  const progress = useActiveProgress(focused);
-  const headProps = useAnimatedProps(() => ({ fillOpacity: progress.value * 0.95 }));
-
+export function ProfileTabIcon({ color, fill = 0, size = 24 }: TabIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <AnimatedCircle
-        animatedProps={headProps}
-        cx={12}
-        cy={8}
-        r={4.1}
-        fill={color}
-      />
+      <Circle cx={12} cy={8} r={4.1} fill={color} fillOpacity={fill * 0.95} />
       <Circle cx={12} cy={8} r={4.1} stroke={color} strokeWidth={1.7} />
       <Path
         d="M4 20.5c0-3.9 3.6-6.4 8-6.4s8 2.5 8 6.4"
