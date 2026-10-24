@@ -159,12 +159,24 @@ export function validateJobAddressUpdate(
   if (!values.streetAddress.trim())
     fieldErrors.street_address = 'addr_c_err_required';
 
-  if (values.latitude === null || values.longitude === null) {
-    fieldErrors.latitude = 'addr_u_invalid_coords';
-    fieldErrors.longitude = 'addr_u_invalid_coords';
+  // FIX (address forms): latitude/longitude are no longer typed by the user on
+  // ANY address screen, so the pair is OPTIONAL — both or neither (the pair only
+  // fails when exactly one is set), sane bounds when present. Verified against
+  // the live OpenAPI spec: JobAddressUpdate has no required[] and allows
+  // latitude/longitude null, so an update without fresh coordinates is accepted.
+  if (values.latitude === null && values.longitude === null) {
+    // No coordinates — accepted (schema allows null; nothing typed on the form).
   } else {
-    if (Math.abs(values.latitude) > 90) fieldErrors.latitude = 'addr_u_invalid_coords';
-    if (Math.abs(values.longitude) > 180) fieldErrors.longitude = 'addr_u_invalid_coords';
+    if (
+      values.latitude === null ||
+      Math.abs(values.latitude) > 90
+    )
+      fieldErrors.latitude = 'addr_u_invalid_coords';
+    if (
+      values.longitude === null ||
+      Math.abs(values.longitude) > 180
+    )
+      fieldErrors.longitude = 'addr_u_invalid_coords';
   }
 
   return { ok: Object.keys(fieldErrors).length === 0, fieldErrors };
@@ -180,16 +192,15 @@ export function validateJobAddressUpdate(
  *
  * formatted_address is kept when the user supplied one; otherwise it is composed from
  * street + house + postal so the address is always describable and stays consistent
- * with the edited text/location. Unlike create, lat/lng are ALWAYS present here (the
- * update schema requires them and the screen has a map picker).
+ * with the edited text/location. Coordinates are handed through as the typed values
+ * (number or null — the schema accepts both; the UI no longer asks for them, and the
+ * prefilled cached values are re-sent unchanged).
  */
 export function buildUpdateJobAddressRequest(
   values: JobAddressUpdateValues & {
     countryId: number;
     countyId: number;
     cityId: number;
-    latitude: number;
-    longitude: number;
   }
 ): JobAddressUpdate {
   const street = values.streetAddress.trim();

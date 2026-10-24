@@ -37,19 +37,16 @@ import type { AddressCountryResponse, AddressRegionResponse } from '@/types';
  * server-side (no required[] — latitude/longitude accept number | numeric
  * string | null; is_default defaults false). Client-side minimum: the
  * country/county/city cascade + street_address (an address without them is
- * unusable for booking); house_number/postal_code/landmark/formatted_address
- * stay optional. latitude/longitude are typed in BY HAND and sent as ONE PAIR:
- * the app has no map picker or GPS source, so nothing is geocoded — but the
- * pair is what makes a provider visible for nearby jobs (GET
- * /api/v1/providers/me/nearby-jobs answers
- * 400 {"detail":"You are not visible for nearby jobs..."} without saved
- * coordinates — verified live), and 0,0 is never sent as a stand-in. Leaving
- * both empty is allowed and simply saves an address without a location.
+ * unusable for booking); house_number/postal_code stay optional.
  *
- * COORDINATE RULES come from the shared module (lib/providerAddress): both or
- * neither, inside the live bounds, parsed by the same parseCoordinate the rest
- * of the app uses. The form, not the backend, enforces them — the live schema
- * requires nothing at all.
+ * FIX (address forms): the "Map location" inputs (Latitude, Longitude),
+ * Landmark and "Full address" are GONE from this form. Their state rows stay
+ * at their initial values and flow through the shared module: the pair is
+ * sent as null/null (never 0,0 — the parser rejects junk), and
+ * landmark/formatted_address go out null except that formatted_address is
+ * COMPOSED from house + street + city + county + country so the saved
+ * address is still describable. Nothing the form does not ask for is
+ * invented beyond that.
  *
  * PICKER IDS: country_id/county_id/city_id are numeric ids fetched live from
  * the PUBLIC geo endpoints (GET /api/v1/countries/ → /countries/{id}/counties
@@ -80,10 +77,11 @@ export default function AddAddressScreen() {
   const [houseNumber, setHouseNumber] = useState('');
   const [streetAddress, setStreetAddress] = useState('');
   const [postalCode, setPostalCode] = useState('');
+  // Uninputted fields from the removed UI — they ride through the payload
+  // builder unchanged (null on this create screen).
   const [landmark, setLandmark] = useState('');
   const [formattedAddress, setFormattedAddress] = useState('');
   const [isDefault, setIsDefault] = useState(false);
-  // Coordinates as typed text; parsed and paired on submit (lib/providerAddress).
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
 
@@ -512,22 +510,16 @@ export default function AddAddressScreen() {
         ) : null}
         {pickerRow('city_id', 'addr_c_city', city?.name ?? null, !countyId || citiesLoading, () => setPickerOpen('city'))}
 
-        {/* Coordinates — typed by hand (no map picker in the app). Providers need
-            this pair to appear in Available jobs; clients can leave it empty. */}
-        <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>
-          {t('provider_addr_coords_title')}
-        </Text>
-        {textField('latitude', 'addr_u_lat', latitude, setLatitude, { decimal: true })}
-        {textField('longitude', 'addr_u_lng', longitude, setLongitude, { decimal: true })}
-        <Text style={[styles.coordsHint, { color: c.mutedForeground }]}>
-          {t('provider_addr_coords_hint')}
-        </Text>
+        {/* FIX (address forms): the "Map location" block (Latitude, Longitude
+            and the "Used to match nearby jobs..." hint), Landmark and
+            "Full address (optional)" are GONE. Their state stays (always
+            empty → sent as a null pair / null keys, which the API accepts —
+            AddressCreate has no required[]). */}
 
+        {/* House / Building Number FIRST, Apartment / Office Number below it. */}
         {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
         {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
         {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, { numeric: true })}
-        {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
-        {textField('formatted_address', 'addr_c_formatted', formattedAddress, setFormattedAddress, { multiline: true })}
 
         <View style={[styles.defaultRow, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={styles.defaultTextWrap}>
@@ -573,8 +565,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   headerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 18 },
-  sectionLabel: { fontFamily: 'Manrope_700Bold', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 6, marginBottom: 10 },
-  coordsHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: -6, marginBottom: 14 },
   fieldWrap: { marginBottom: 14 },
   label: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginBottom: 6 },
   inputRow: {

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet from '@/components/BottomSheet';
-import TimeRangeFields, { type ClockRange } from '@/components/TimeRangeFields';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
@@ -13,16 +12,17 @@ import {
   type TimeChoice,
 } from '@/lib/jobBooking';
 import { maxHoursForStart, minutesOf, selectionWindowOf } from '@/lib/timeSlots';
-import type { TaskDraft } from '@/lib/postWizard';
+import { toggleAnytime, type TaskDraft } from '@/lib/postWizard';
 
 /**
  * One task's editor: its TIME, and nothing else.
  *
  * Task names were removed from the product (a task is "Task N") and the day is
  * owned by the strip on the previous step, so this sheet offers exactly the five
- * client windows plus Anytime with the same inline hours/minutes arrows the
- * Single-day flow uses. Save is refused until a valid time is chosen, and a
- * window that leaves no hour before 11 PM is refused with its own message.
+ * client windows plus the fixed "8AM-11PM (Anytime)" slot — always a plain
+ * 8:00 AM - 11:00 PM window, with NO start/end pickers. Save is refused until a
+ * valid time is chosen, and a window that leaves no hour before 11 PM is refused
+ * with its own message.
  *
  * The expected-hours stepper is NOT here on purpose: it lives on the task card
  * (Part C), and the card re-clamps the value when this sheet returns a time with
@@ -53,18 +53,6 @@ export default function TaskEditSheet({
     if (!visible || !task) return;
     setTime(task.time);
   }, [visible, task]);
-
-  const seeded: ClockRange =
-    task?.time?.kind === 'anytime'
-      ? { start: task.time.start, end: task.time.end }
-      : { start: { hour: 9, minute: 0 }, end: { hour: 12, minute: 0 } };
-  const [custom, setCustom] = useState<ClockRange>(seeded);
-
-  useEffect(() => {
-    if (!visible || !task) return;
-    if (task.time?.kind === 'anytime') setCustom({ start: task.time.start, end: task.time.end });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, task?.key]);
 
   const errorKey = task ? validateTimeChoice(time, task.day, new Date()) : 'post_err_time';
   const label = formatWindowLabel(time, meridiem);
@@ -168,13 +156,7 @@ export default function TaskEditSheet({
                 borderColor: time?.kind === 'anytime' ? c.primary : c.border,
               },
             ]}
-            onPress={() => {
-              setTime((current) =>
-                current?.kind === 'anytime'
-                  ? null
-                  : { kind: 'anytime', start: custom.start, end: custom.end }
-              );
-            }}
+            onPress={() => setTime((current) => toggleAnytime(current))}
             accessibilityRole="button"
             accessibilityState={{ selected: time?.kind === 'anytime' }}
           >
@@ -188,23 +170,12 @@ export default function TaskEditSheet({
                 styles.slotText,
                 { color: time?.kind === 'anytime' ? c.primaryForeground : c.text },
               ]}
+              numberOfLines={1}
             >
               {t('post_time_anytime')}
             </Text>
           </TouchableOpacity>
         </View>
-
-        {time?.kind === 'anytime' ? (
-          <View style={styles.customWrap}>
-            <TimeRangeFields
-              value={custom}
-              onChange={(range) => {
-                setCustom(range);
-                setTime({ kind: 'anytime', start: range.start, end: range.end });
-              }}
-            />
-          </View>
-        ) : null}
 
         {time ? (
           <Text style={[styles.hint, { color: c.mutedForeground }]}>
@@ -234,7 +205,6 @@ const styles = StyleSheet.create({
   },
   slotText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, flexShrink: 1 },
   slotNote: { fontFamily: 'Manrope_400Regular', fontSize: 9 },
-  customWrap: { marginTop: 6 },
   hint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: 4 },
   summary: { fontFamily: 'Manrope_700Bold', fontSize: 12, textAlign: 'center', marginBottom: 10 },
   footer: { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1 },

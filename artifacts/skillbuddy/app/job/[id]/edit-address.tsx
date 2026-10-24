@@ -137,7 +137,11 @@ export default function EditJobAddressScreen() {
     void loadCountries();
   }, [loadCountries]);
 
-  // Apply the cached address values when the job first becomes ready.
+  // Fix (prefill): hydrating the cached address fills the cascade ids, but the
+  // county/city LISTS were never loaded — opening the County/City picker showed
+  // an empty sheet and the fields stayed on "Select..." even though the job
+  // already had an address. Load them here, from the SAME hooks (and therefore
+  // the same endpoints) the Add Address / Edit Address screens use.
   useEffect(() => {
     if (!job || job.address == null || prefillDone.current) return;
     const values = hydrateFromCachedAddress(job.address);
@@ -149,8 +153,10 @@ export default function EditJobAddressScreen() {
     setPostalCode(values.postalCode);
     setLandmark(values.landmark);
     setFormattedAddress(values.formattedAddress);
-    setFormattedTouched(values.formattedAddress.length > 0);
+    if (values.countryId != null && counties == null) void loadForCountry(values.countryId);
+    if (values.countyId != null && cities == null) void loadForCounty(values.countyId);
     prefillDone.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.address]);
 
   const clearError = (field: JobAddressUpdateField) => {
@@ -173,17 +179,6 @@ export default function EditJobAddressScreen() {
   const city = useMemo(
     () => cities?.find((x) => x.id === cascade.cityId) ?? null,
     [cities, cascade.cityId]
-  );
-
-  // Keep formatted_address consistent with edited location text when the user hasn't
-  // written their own. If the user has touched it, we never overwrite it.
-  const recomputeFormatted = useCallback(
-    (street: string, house: string, postal: string) => {
-      if (formattedTouched) return;
-      const composed = composeFormattedAddress([street || null, house || null, postal || null]);
-      setFormattedAddress(composed ?? '');
-    },
-    [formattedTouched]
   );
 
   // Each parent selection resets its children (pure rule in lib/jobAddressUpdate) and
@@ -213,6 +208,26 @@ export default function EditJobAddressScreen() {
     setCascade((prev) => selectCity(prev, cityId));
     clearError('city_id');
   }, []);
+
+  // Fix (picker open): make sure the child list actually exists before the
+  // sheet renders it — a prefilled screen may have skipped the list fetch.
+  const openPicker = useCallback(
+    (level: 'country' | 'county' | 'city') => {
+      setPickerOpen(level);
+      if (
+        level === 'county' &&
+        cascade.countryId != null &&
+        counties == null &&
+        countiesStatus !== 'loading'
+      ) {
+        void loadForCountry(cascade.countryId);
+      }
+      if (level === 'city' && cascade.countyId != null && cities == null) {
+        void loadForCounty(cascade.countyId);
+      }
+    },
+    [cascade.countryId, cascade.countyId, counties, cities, countiesStatus, loadForCountry, loadForCounty]
+  );
 
   const submit = useCallback(async () => {
     if (!job || submitting || inFlight.current) return;
@@ -244,8 +259,6 @@ export default function EditJobAddressScreen() {
       countryId: cascade.countryId!,
       countyId: cascade.countyId!,
       cityId: cascade.cityId!,
-      latitude: latitude!,
-      longitude: longitude!,
     });
 
     inFlight.current = true;
@@ -479,70 +492,6 @@ export default function EditJobAddressScreen() {
     </View>
   );
 
-  // Coordinate inputs (map-picker aware). On prefill these are parsed from the cached
-  // strings; a real map picker would set these directly. Editing them also recomputes
-  // formatted_address when the user hasn't supplied their own.
-  const coordinateText = (
-    field: JobAddressUpdateField,
-    labelKey: string,
-    value: number | null,
-    onChange: (v: number | null) => void,
-    kind: 'lat' | 'lng'
-  ) => (
-    <View style={styles.fieldWrap}>
-      <Text style={[styles.label, { color: c.text }]}>{t(labelKey as any)}</Text>
-      <TextInput
-        style={[
-          styles.input,
-          {
-            backgroundColor: c.input,
-            color: c.text,
-            borderColor: fieldErrors[field] ? c.destructive : c.border,
-          },
-        ]}
-        placeholder={t('addr_c_placeholder')}
-        placeholderTextColor={c.mutedForeground}
-        value={value == null ? '' : String(value)}
-        onChangeText={(raw) => {
-          const trimmed = raw.trim();
-          if (trimmed === '') {
-            onChange(null);
-            clearError(field);
-            return;
-          }
-          const n = Number(trimmed);
-          if (!Number.isFinite(n)) {
-            onChange(null);
-            setFieldErrors((prev) => ({ ...prev, [field]: t('addr_u_invalid_coords') }));
-            return;
-          }
-          // Enforce the same bounds as parseCoordinate so the form is consistent with
-          // the cached value rules.
-          const limit = kind === 'lat' ? 90 : 180;
-          if (Math.abs(n) > limit) {
-            onChange(null);
-            setFieldErrors((prev) => ({ ...prev, [field]: t('addr_u_invalid_coords') }));
-            return;
-          }
-          onChange(n);
-          clearError(field);
-          // Keep formatted_address consistent with the text the user is typing, unless
-          // they wrote their own.
-          recomputeFormatted(streetAddress, houseNumber, postalCode);
-        }}
-        keyboardType="decimal-pad"
-      />
-      {fieldErrors[field] ? (
-        <Text style={[styles.error, { color: c.destructive }]}>{fieldErrors[field]}</Text>
-      ) : null}
-      <Text style={[styles.hint, { color: c.mutedForeground }]}>
-        {kind === 'lat'
-          ? 'Between -90 and 90'
-          : 'Between -180 and 180'}
-      </Text>
-    </View>
-  );
-
   // The picker's data source follows which level is open.
   const pickerSource: AddressRegionResponse[] | null =
     pickerOpen === 'country'
@@ -583,7 +532,7 @@ export default function EditJobAddressScreen() {
 
         {/* country → county → city, each child cleared when its parent changes */}
         {pickerRow('country_id', 'addr_c_country', country?.name ?? null, false, () =>
-          setPickerOpen('country')
+          openPicker('country')
         )}
         {countriesStatus === 'error' ? (
           <TouchableOpacity onPress={() => void refreshCountries()}>
@@ -596,54 +545,26 @@ export default function EditJobAddressScreen() {
           'addr_c_county',
           county?.name ?? null,
           !cascade.countryId,
-          () => setPickerOpen('county')
+          () => openPicker('county')
         )}
         {pickerRow(
           'city_id',
           'addr_c_city',
           city?.name ?? null,
           !cascade.countyId,
-          () => setPickerOpen('city')
+          () => openPicker('city')
         )}
 
-        {/* Map-picker-aware coordinates — numbers on the wire; parsed from cached strings
-            on prefill. */}
-        {coordinateText('latitude', 'addr_u_lat', latitude, setLatitude, 'lat')}
-        {coordinateText('longitude', 'addr_u_lng', longitude, setLongitude, 'lng')}
-        <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('addr_u_map_pin')}</Text>
+        {/* FIX (address forms): Latitude/Longitude/"Map pin", Landmark and
+            "Full address" are GONE from this form. Their state is kept — the
+            prefilled cached values (including the parsed coordinates) are
+            re-sent unchanged, and landmark/formatted_address empty stay empty
+            — matching the schema, which demands none of them (no required[]). */}
 
+        {/* House / Building Number FIRST, Apartment / Office Number below it. */}
         {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber, true)}
         {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
         {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, true)}
-        {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
-
-        <View style={styles.fieldWrap}>
-          <Text style={[styles.label, { color: c.text }]}>{t('addr_c_formatted')}</Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: c.input,
-                color: c.text,
-                borderColor: fieldErrors.formatted_address ? c.destructive : c.border,
-              },
-            ]}
-            placeholder={t('addr_c_placeholder')}
-            placeholderTextColor={c.mutedForeground}
-            value={formattedAddress}
-            onChangeText={(v) => {
-              setFormattedAddress(v);
-              setFormattedTouched(true);
-              clearError('formatted_address');
-            }}
-          />
-          {fieldErrors.formatted_address ? (
-            <Text style={[styles.error, { color: c.destructive }]}>{fieldErrors.formatted_address}</Text>
-          ) : null}
-        </View>
-        <Text style={[styles.hint, { color: c.mutedForeground }]}>
-          {t('addr_c_formatted_hint')}
-        </Text>
 
         <TouchableOpacity
           style={[
@@ -695,13 +616,33 @@ export default function EditJobAddressScreen() {
                 <ActivityIndicator color={c.primary} />
               </View>
             ) : !pickerSource || pickerSource.length === 0 ? (
-              <View style={styles.modalState}>
-                <Text style={[styles.bannerText, { color: c.mutedForeground }]}>
+              <View style={[styles.modalState, { flex: 1, justifyContent: 'center' }]}>
+                <Text style={[styles.bannerText, { color: c.mutedForeground, flex: 0 }]}>
                   {t('addr_c_geo_empty')}
                 </Text>
+                {pickerOpen && pickerOpen !== 'country' ? (
+                  <TouchableOpacity
+                    onPress={() =>
+                      pickerOpen === 'county' && cascade.countryId != null
+                        ? void loadForCountry(cascade.countryId)
+                        : pickerOpen === 'city' && cascade.countyId != null
+                          ? void loadForCounty(cascade.countyId)
+                          : void refreshCountries()
+                    }
+                  >
+                    <Text style={[styles.optionText, { color: c.primary, marginTop: 10 }]}>
+                      {t('addr_retry')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ) : (
-              <ScrollView style={styles.modalList}>
+              <ScrollView
+                style={styles.modalList}
+                contentContainerStyle={{
+                  paddingBottom: Math.max(insets.bottom, 12) + 12,
+                }}
+              >
                 {pickerSource.map((option) => {
                   const active = selectedId === option.id;
                   return (
@@ -801,7 +742,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderWidth: 1,
-    maxHeight: '78%',
+    // Fix (culprit for the collapsed sheet): a fixed 62% of the screen instead
+    // of maxHeight '78%' — with only a header inside, the sheet used to
+    // collapse to title height, hiding the list behind the Android nav bar.
+    height: '62%',
+    overflow: 'hidden',
+    paddingBottom: Math.max(12, 0),
   },
   modalHead: {
     flexDirection: 'row',
@@ -812,7 +758,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
-  modalList: { maxHeight: 380 },
+  modalList: { flex: 1 },
   modalState: { padding: 32, alignItems: 'center', gap: 10 },
   optionRow: {
     flexDirection: 'row',

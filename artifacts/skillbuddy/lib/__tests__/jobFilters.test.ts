@@ -182,9 +182,9 @@ function code(source: string): string {
 /** Every popup surface an entrance animation could hide in. */
 const POPUPS = [
   'components/BottomSheet.tsx',
-  // The clock face and the 7-day calendar sheet were REMOVED from the wizard;
-  // their replacements are audited here instead.
-  'components/TimeRangeSheet.tsx',
+  // The clock face, the 7-day calendar sheet and the old custom Anytime
+  // time-range sheet were REMOVED from the wizard; their replacements are
+  // audited here instead.
   'components/TaskEditSheet.tsx',
   'components/AddressFormModal.tsx',
   'components/JobsFilterSheet.tsx',

@@ -24,16 +24,19 @@ import type { AddressField, PostAddressForm } from '@/lib/postAddress';
  * sits ON TOP of the wizard, so the wizard's state (service, description,
  * attachments, dates, tasks) is never unmounted while it is open.
  *
- * Fields are in the order the design asks for:
- *   Country → County → City → Apartment / Street → House number → Postal code
- *   → Full address (optional) → Landmark (optional)
+ * Fields are in the order the design asks for (FIX — address forms):
+ *   Country → County → City → House / Building Number → Apartment / Office Number
+ *   → Postal code
+ * Latitude/Longitude, "Full address" and "Landmark" are NOT collected on this
+ * form: the Address schemas demand none of them (no required[]), so whatever
+ * the prefill holds for those fields is re-sent unchanged.
  *
  * ── BACKEND REALITY (live OpenAPI, re-read 2026-10-21) ─────────────────────
  * AddressCreate/AddressUpdate have NO `name` and NO `phone` field, so the
  * account's own name and phone are shown READ-ONLY at the top (they come from
  * the signed-in user) and are never sent. "Apartment number" likewise has no
  * field of its own: it is mapped onto the documented `street_address`, labelled
- * "Apartment / Street". Both gaps are listed in the delivery report.
+ * "Apartment / Office Number". Both gaps are listed in the delivery report.
  *
  * Country/county/city are the existing public geo endpoints; the county and city
  * lists are memoised per id for the whole session, so re-opening the form never
@@ -223,8 +226,7 @@ export default function AddressFormModal({
     }
     if (
       form.streetAddress.trim().length === 0 &&
-      form.houseNumber.trim().length === 0 &&
-      form.formattedAddress.trim().length === 0
+      form.houseNumber.trim().length === 0
     ) {
       setLocalError(t('post_addr_err_street'));
       return;
@@ -236,7 +238,7 @@ export default function AddressFormModal({
     field: AddressField,
     value: string,
     onChangeText: (text: string) => void,
-    placeholderKey: 'post_addr_apartment_ph' | 'post_addr_house_ph' | 'post_addr_postal_ph' | 'post_addr_full_ph' | 'post_addr_landmark_ph',
+    placeholderKey: 'post_addr_apartment_ph' | 'post_addr_house_ph' | 'post_addr_postal_ph',
     options?: { multiline?: boolean; maxLength?: number }
   ) => (
     <View style={styles.fieldWrap}>
@@ -333,6 +335,14 @@ export default function AddressFormModal({
             t
           )}
 
+          {/* FIX (address forms): House / Building Number FIRST, Apartment /
+              Office Number below it — and "Full address" + "Landmark" are
+              GONE. Their state stays (always empty on add; the prefilled row
+              on edit), so buildAddressPost keeps re-sending it exactly as the
+              server has it — the schema demands none of these fields. */}
+          {inputFor('house_number', form.houseNumber, (text) => set('houseNumber', text), 'post_addr_house_ph', {
+            maxLength: 20,
+          })}
           {inputFor(
             'street_address',
             form.streetAddress,
@@ -340,21 +350,8 @@ export default function AddressFormModal({
             'post_addr_apartment_ph',
             { maxLength: 255 }
           )}
-          {inputFor('house_number', form.houseNumber, (text) => set('houseNumber', text), 'post_addr_house_ph', {
-            maxLength: 20,
-          })}
           {inputFor('postal_code', form.postalCode, (text) => set('postalCode', text), 'post_addr_postal_ph', {
             maxLength: 20,
-          })}
-          {inputFor(
-            'formatted_address',
-            form.formattedAddress,
-            (text) => set('formattedAddress', text),
-            'post_addr_full_ph',
-            { multiline: true, maxLength: 500 }
-          )}
-          {inputFor('landmark', form.landmark, (text) => set('landmark', text), 'post_addr_landmark_ph', {
-            maxLength: 255,
           })}
 
           {localError ? (
