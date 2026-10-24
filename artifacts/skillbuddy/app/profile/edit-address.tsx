@@ -51,11 +51,15 @@ import type { AddressResponse, AddressCountryResponse, AddressRegionResponse } f
  * If the user changes the country/county/city cascade they must re-pick
  * county/city (ids reset on country change, cities on county change).
  *
- * COORDINATES: typed in by hand (the app has no map picker or GPS source), sent
- * as ONE PAIR via lib/providerAddress — both parsed numbers or both empty, never
- * half a pair and never 0,0. They are what makes a PROVIDER visible for nearby
+ * COORDINATES: FIX (address forms) — the hand-typed Latitude/Longitude inputs,
+ * the "Used to match nearby jobs..." hint, Landmark and "Full address (optional)"
+ * are GONE from this form. The saved coordinate pair is parsed on prefill and
+ * re-sent UNCHANGED on submit (both parsed numbers or both null — the shared
+ * parser), and landmark/formatted_address ride through as the server has them
+ * (formatted_address falls back to the composed "house, city, county, country"
+ * line when empty). They are what make a PROVIDER visible for nearby
  * jobs (GET /providers/me/nearby-jobs answers 400 without saved coordinates —
- * verified live), and a client can leave them empty.
+ * verified live) — the edit form simply never re-asks for them.
  *
  * IS_DEFAULT: the SERVER's 200 AddressResponse is the only truth — the
  * cached entry is replaced with it and no other address is patched
@@ -270,7 +274,7 @@ export default function EditAddressScreen() {
     ) : null;
 
   const textField = (
-    keyName: 'house_number' | 'street_address' | 'postal_code' | 'landmark' | 'formatted_address' | 'latitude' | 'longitude',
+    keyName: 'house_number' | 'street_address' | 'postal_code',
     labelKey: Parameters<typeof t>[0],
     value: string,
     setter: (v: string) => void,
@@ -302,7 +306,7 @@ export default function EditAddressScreen() {
           onFocus={() => setFocusedField(keyName)}
           onBlur={() => setFocusedField(null)}
           multiline={opts?.multiline}
-          keyboardType={opts?.decimal ? 'decimal-pad' : opts?.numeric ? 'numeric' : 'default'}
+          keyboardType={opts?.numeric ? 'numeric' : 'default'}
           autoCapitalize="none"
           editable={!saving && prefillState === 'ready'}
         />
@@ -639,23 +643,17 @@ export default function EditAddressScreen() {
           ) : null}
           {pickerRow('city_id', 'addr_c_city', city?.name ?? null, !countyId || citiesLoading, () => setPickerOpen('city'))}
 
-          {/* Coordinates — pre-filled from the saved address and typed by hand (the
-              app has no map picker). Providers need this pair to appear in
-              Available jobs; a client may leave both empty. */}
-          <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>
-            {t('provider_addr_coords_title')}
-          </Text>
-          {textField('latitude', 'addr_u_lat', latitude, setLatitude, { decimal: true })}
-          {textField('longitude', 'addr_u_lng', longitude, setLongitude, { decimal: true })}
-          <Text style={[styles.coordsHint, { color: c.mutedForeground }]}>
-            {t('provider_addr_coords_hint')}
-          </Text>
+          {/* FIX (address forms): the "Map location" block (Latitude, Longitude
+              and the "Used to match nearby jobs..." hint), Landmark and
+              "Full address (optional)" are GONE. The saved coordinate pair
+              (parsed on prefill) is re-sent UNCHANGED by buildPayload, and
+              landmark/formatted_address stay as the server has them — the
+              AddressUpdate schema demands none of these (no required[]). */}
 
+          {/* House / Building Number FIRST, Apartment / Office Number below it. */}
           {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
           {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
           {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, { numeric: true })}
-          {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
-          {textField('formatted_address', 'addr_c_formatted', formattedAddress, setFormattedAddress, { multiline: true })}
 
           <View style={[styles.defaultRow, { backgroundColor: c.card, borderColor: c.border }]}>
             <View style={styles.defaultTextWrap}>
@@ -713,8 +711,6 @@ const styles = StyleSheet.create({
   },
   stateText: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center' },
   fieldWrap: { marginBottom: 14 },
-  sectionLabel: { fontFamily: 'Manrope_700Bold', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 6, marginBottom: 10 },
-  coordsHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16, marginTop: -6, marginBottom: 14 },
   label: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, marginBottom: 6 },
   inputRow: {
     flexDirection: 'row',

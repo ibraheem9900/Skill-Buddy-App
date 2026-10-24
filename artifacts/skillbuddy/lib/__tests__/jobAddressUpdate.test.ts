@@ -160,8 +160,16 @@ eq(
   emptyValidation.fieldErrors.street_address,
   'addr_c_err_required'
 );
-eq('empty form lat flagged', emptyValidation.fieldErrors.latitude, 'addr_u_invalid_coords');
-eq('empty form lng flagged', emptyValidation.fieldErrors.longitude, 'addr_u_invalid_coords');
+eq(
+  'empty form lat optional (null pair is legal)',
+  emptyValidation.fieldErrors.latitude,
+  undefined
+);
+eq(
+  'empty form lng optional (null pair is legal)',
+  emptyValidation.fieldErrors.longitude,
+  undefined
+);
 
 const okValidation = validateJobAddressUpdate(validValues);
 check('complete form is valid', okValidation.ok === true);

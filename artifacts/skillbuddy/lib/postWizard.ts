@@ -49,6 +49,7 @@ import {
   exceedsHoursCap,
   maxHoursForStart,
   minutesOf,
+  type ClockTime,
 } from '@/lib/timeSlots';
 
 /** The strip is always one week — the only span MULTI_DAY accepts. */
@@ -326,4 +327,18 @@ export function buildTaskMilestones(tasks: TaskDraft[]): MilestoneDraft[] {
 export function toggleSlot(choice: TimeChoice | null, key: string): TimeChoice | null {
   if (choice?.kind === 'slot' && choice.key === key) return null;
   return { kind: 'slot', key };
+}
+
+/**
+ * The FIXED Anytime window: 8:00 AM - 11:00 PM, everywhere in the app. The old
+ * custom start/end pickers are gone; "Anytime" is just another slot button, so
+ * a second tap clears the choice, and the window it produces is always
+ * 08:00 - 23:00 in the same payload shape as before.
+ */
+export const ANYTIME_START: ClockTime = { hour: 8, minute: 0 };
+export const ANYTIME_END: ClockTime = { hour: 23, minute: 0 };
+
+export function toggleAnytime(choice: TimeChoice | null): TimeChoice | null {
+  if (choice?.kind === 'anytime') return null;
+  return { kind: 'anytime', start: { ...ANYTIME_START }, end: { ...ANYTIME_END } };
 }

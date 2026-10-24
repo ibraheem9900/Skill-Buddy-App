@@ -48,7 +48,6 @@ import { canProviderPauseJob } from '@/lib/providerPause';
 import { canReportBlocker } from '@/lib/jobBlocker';
 import {
   attachmentRemovedAfterResync,
-  canAddJobAttachment,
   canRemoveJobAttachment,
   isAttachmentAlreadyGone,
   isAttachmentUnauthorized,
@@ -1144,6 +1143,17 @@ export default function BiddingDashboardScreen() {
     const completedOn = isJobCompleted(serverJob) ? formatDate(serverJob.completed_at) : null;
     const cancelled = isJobCancelledStatus(serverJob);
     const cancelledOn = cancelled ? formatDateTime(serverJob.cancelled_at) : null;
+    // Status badge colouring (theme-consistent): cancelled is the loud red one,
+    // completed/muted for paused, everything else reads as active/green.
+    const statusBadge = cancelled
+      ? { bg: c.urgentLight, fg: c.destructive }
+      : isJobCompleted(serverJob)
+        ? { bg: c.successLight, fg: c.success }
+        : isJobPausedStatus(serverJob)
+          ? { bg: c.muted, fg: c.mutedForeground }
+          : statusKey
+            ? { bg: c.primaryLight, fg: c.primary }
+            : { bg: c.muted, fg: c.mutedForeground };
     // Countdown anchor from the backend's own bidding window (null = no timer).
     const deadline = biddingDeadline(serverJob, Date.now());
     // The stored "Preferred time:" line is DATA, not prose: it is removed from
@@ -1165,6 +1175,34 @@ export default function BiddingDashboardScreen() {
       scheduleWeekdays,
       scheduleMeridiem
     );
+    // FIX (Job Details summary): the old info block showed only Task 1's date
+    // and hours. Multi-day jobs now show the task count and the total expected
+    // hours; single-day jobs keep date + the full stored window + expected hours.
+    const isMultiDay = serverJob.booking_type === 'MULTI_DAY' || milestones.length > 1;
+    const totalHours = milestones.reduce((sum, m) => {
+      const h = parseExpectedHours(m.expected_hours);
+      return h === null ? sum : sum + h;
+    }, 0);
+    const singleDayWindow = (() => {
+      const local = scheduledLocal;
+      const segment = taskSegments[0] ?? null;
+      if (segment && local) {
+        return formatWindowLabel(
+          clockOf(segment.startMinutes),
+          segment.endMinutes !== null ? clockOf(segment.endMinutes) : local.clock,
+          scheduleMeridiem
+        );
+      }
+      return local ? formatTimeLabel(local.clock, scheduleMeridiem) : '';
+    })();
+    const singleDateLine = scheduledLocal
+      ? [
+          formatDayLabel(scheduledLocal.day, scheduleMonths, scheduleWeekdays),
+          singleDayWindow,
+        ]
+          .filter((part) => part.length > 0)
+          .join(' · ')
+      : '';
     const history = [...(serverJob.status_history ?? [])].sort(
       (a, b) =>
         (parseIsoDate(a.created_at)?.getTime() ?? 0) -
@@ -1294,6 +1332,36 @@ export default function BiddingDashboardScreen() {
           {/* request_type, status and booking_type — all three enums are the
               server's, and an unrecognised status falls back to the raw value
               in a neutral chip rather than disappearing. */}
+          {/* FIX (Job Details status): the bare "Open" chip between the type
+              chips is gone — the real status now lives in its own headed
+              section with a theme-consistent badge (Cancelled reads loud red). */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('jobd_status_title')}</Text>
+          </View>
+          <View
+            style={[
+              styles.sortChip,
+              {
+                backgroundColor: statusBadge.bg,
+                alignSelf: 'flex-start',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+              },
+            ]}
+          >
+            <View style={[styles.statusDot, { backgroundColor: statusBadge.fg }]} />
+            <Text
+              style={[
+                styles.sortChipText,
+                { color: statusBadge.fg, fontFamily: 'Manrope_600SemiBold' },
+              ]}
+            >
+              {statusKey ? t(statusKey) : serverJob.status}
+            </Text>
+          </View>
+
+          {/* request_type and booking_type chips ... */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <View
               style={[
@@ -1318,11 +1386,6 @@ export default function BiddingDashboardScreen() {
                 ]}
               >
                 {t(serverJob.request_type === 'URGENT' ? 'jobs_urgent' : 'jobs_regular')}
-              </Text>
-            </View>
-            <View style={[styles.sortChip, { backgroundColor: c.muted }]}>
-              <Text style={[styles.sortChipText, { color: c.mutedForeground }]}>
-                {statusKey ? t(statusKey) : serverJob.status}
               </Text>
             </View>
             <View style={[styles.sortChip, { backgroundColor: c.muted }]}>
@@ -1372,6 +1435,87 @@ export default function BiddingDashboardScreen() {
               />
             </View>
           ) : null}
+
+          {/* FIX (summary): the old info block showed only Task 1's date and
+              hours. Multi-day jobs now show the task count and the total
+              expected hours of every task; single-day jobs keep their date and
+              the full stored window plus expected hours. Created/provider
+              lines are unchanged. */}
+          <View style={{ marginTop: 14, gap: 8 }}>
+            {isMultiDay ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="layers" size={13} color={c.mutedForeground} />
+                  <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                    {t('jobd_summary_tasks', { n: milestones.length })}
+                  </Text>
+                </View>
+                {totalHours > 0 ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Feather name="clock" size={13} color={c.mutedForeground} />
+                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                      {t('jobd_summary_total_hours', { n: totalHours })}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {scheduledAt ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Feather name="calendar" size={13} color={c.mutedForeground} />
+                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                      {scheduledLocal
+                        ? singleDateLine
+                        : scheduledLabel || formatDateTime(serverJob.scheduled_at)}
+                    </Text>
+                  </View>
+                ) : null}
+                {hours !== null ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Feather name="clock" size={13} color={c.mutedForeground} />
+                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                      {hours === 1
+                        ? t('post_hours_value', { n: hours })
+                        : t('post_hours_value_plural', { n: hours })}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+            {createdOn ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Feather name="info" size={13} color={c.mutedForeground} />
+                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                  {t('jobd_created', { date: createdOn })}
+                </Text>
+              </View>
+            ) : null}
+            {providerAssigned && serverJob.assigned_provider_id != null ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Feather name="user-check" size={13} color={c.mutedForeground} />
+                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                  {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
+                  {assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : ''}
+                </Text>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Feather name="user-x" size={13} color={c.mutedForeground} />
+                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                  {t('jobd_not_assigned')}
+                </Text>
+              </View>
+            )}
+            {completedOn ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Feather name="check-circle" size={13} color={c.mutedForeground} />
+                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                  {t('jobd_completed_on', { date: completedOn })}
+                </Text>
+              </View>
+            ) : null}
+          </View>
 
           {/* View bids — the CLIENT's way into the Bids screen, which lists this
               job's incoming offers (GET /api/v1/jobs/{job_id}/bids). Gated by
@@ -1659,125 +1803,79 @@ export default function BiddingDashboardScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {/* Add Attachment — attaches ONE file to this job
-              (POST /api/v1/jobs/{job_id}/attachments, Swagger "Add Attachment").
-              MULTIPART, not JSON, so it opens its own upload screen which owns the
-              picker, the local type/size guard, the in-flight state and the retry. No
-              role check: the contract never says whether the client or the provider may
-              attach, and the uploader's identity is derived server-side from the Bearer
-              token. Offered on any non-terminal job (cancelled/completed are ruled out
-              client-side; every other status is left to the backend to accept or
-              refuse). Like every other job action the response is the FULL job, so the
-              attachments list below re-renders from the server's own copy — nothing is
-              ever appended locally. */}
-          {canAddJobAttachment(serverJob) ? (
-            <TouchableOpacity
-              style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
-              onPress={() => router.push(`/job/${serverJob.id}/attachment` as any)}
-              activeOpacity={0.85}
-            >
-              <Feather name="paperclip" size={15} color={c.primary} />
-              <Text style={[styles.restartText, { color: c.primary }]}>
-                {t('jobd_attach_action')}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
+          {/* FIX: the "Add Attachment" entry point is removed from THIS job
+              details screen only. The upload screen (/job/{id}/attachment) and
+              the Post a Job flow keep their attach capability untouched. */}
 
           {/* Which actions exist is decided by is_editable / is_cancellable /
               can_restart_timer / can_convert_to_regular / can_convert_to_urgent
               exactly as returned — never re-derived from status or dates. */}
           {actions.length > 0 ? (
-            <View style={{ marginTop: 14, gap: 8 }}>
-              {actions.map((action) => {
-                const danger = action === 'cancel';
-                const tint = danger ? c.destructive : c.text;
-                // Disabled for the duration of the call so a double tap cannot fire
-                // the same state-changing action twice (each hook rejects a second
-                // call regardless).
-                const busy =
-                  (action === 'restartTimer' && restarting) ||
-                  (action === 'convertToRegular' && converting) ||
-                  (action === 'convertToUrgent' && convertingToUrgent);
-                const busyLabel =
-                  action === 'restartTimer'
-                    ? 'jobd_restart_busy'
-                    : action === 'convertToUrgent'
-                      ? 'jobd_urgent_busy'
-                      : 'jobd_convert_busy';
-                return (
-                  <TouchableOpacity
-                    key={action}
-                    style={[styles.restartBtn, { borderColor: danger ? c.destructive : c.border, marginTop: 0 }]}
-                    onPress={() => runAction(action)}
-                    disabled={busy}
-                    activeOpacity={0.85}
-                  >
-                    {busy ? (
-                      <ActivityIndicator size="small" color={tint} />
-                    ) : (
-                      <Feather name={actionIcon[action]} size={14} color={tint} />
-                    )}
-                    <Text style={[styles.restartText, { color: tint }]}>
-                      {busy ? t(busyLabel) : t(JOB_ACTION_LABEL_KEY[action])}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+            <View style={{ marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {/* FIX (layout): Edit / Restart Timer / Convert … render as a 2-column
+                  grid of equal secondary buttons; "Cancel Job" is pulled out to the
+                  end as the single full-width destructive outline. Show/hide
+                  conditions and routes are unchanged. */}
+              {actions
+                .filter((action) => action !== 'cancel')
+                .map((action) => {
+                  const tint = c.text;
+                  // Disabled for the duration of the call so a double tap cannot fire
+                  // the same state-changing action twice (each hook rejects a second
+                  // call regardless).
+                  const busy =
+                    (action === 'restartTimer' && restarting) ||
+                    (action === 'convertToRegular' && converting) ||
+                    (action === 'convertToUrgent' && convertingToUrgent);
+                  const busyLabel =
+                    action === 'restartTimer'
+                      ? 'jobd_restart_busy'
+                      : action === 'convertToUrgent'
+                        ? 'jobd_urgent_busy'
+                        : 'jobd_convert_busy';
+                  return (
+                    <TouchableOpacity
+                      key={action}
+                      style={[
+                        styles.restartBtn,
+                        { borderColor: c.border, width: '48%', marginTop: 0 },
+                      ]}
+                      onPress={() => runAction(action)}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                    >
+                      {busy ? (
+                        <ActivityIndicator size="small" color={tint} />
+                      ) : (
+                        <Feather name={actionIcon[action]} size={14} color={tint} />
+                      )}
+                      <Text
+                        style={[styles.restartText, { color: tint }]}
+                        numberOfLines={1}
+                      >
+                        {busy ? t(busyLabel) : t(JOB_ACTION_LABEL_KEY[action])}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              {actions.includes('cancel') ? (
+                <TouchableOpacity
+                  style={[
+                    styles.restartBtn,
+                    { borderColor: c.destructive, width: '100%', marginTop: 0 },
+                  ]}
+                  onPress={() => runAction('cancel')}
+                  activeOpacity={0.85}
+                >
+                  <Feather name={actionIcon.cancel} size={14} color={c.destructive} />
+                  <Text style={[styles.restartText, { color: c.destructive }]}>
+                    {t(JOB_ACTION_LABEL_KEY.cancel)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
 
-          <View style={{ marginTop: 16, gap: 8 }}>
-            {scheduledAt ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="calendar" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {scheduledLabel || formatDateTime(serverJob.scheduled_at)}
-                </Text>
-              </View>
-            ) : null}
-            {hours !== null ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="clock" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {hours === 1
-                    ? t('post_hours_value', { n: hours })
-                    : t('post_hours_value_plural', { n: hours })}
-                </Text>
-              </View>
-            ) : null}
-            {createdOn ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="info" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {t('jobd_created', { date: createdOn })}
-                </Text>
-              </View>
-            ) : null}
-            {providerAssigned && serverJob.assigned_provider_id != null ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-check" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
-                  {assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : ''}
-                </Text>
-              </View>
-            ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-x" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {t('jobd_not_assigned')}
-                </Text>
-              </View>
-            )}
-            {completedOn ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="check-circle" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
-                  {t('jobd_completed_on', { date: completedOn })}
-                </Text>
-              </View>
-            ) : null}
-          </View>
 
           {description ? (
             <>
@@ -2131,6 +2229,7 @@ const styles = StyleSheet.create({
   viewAll: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   sortChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   sortChipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusCard: { alignItems: 'center', gap: 8, borderRadius: 16, padding: 24, marginTop: 10 },
   statusText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   cancelBtn: { marginTop: 24, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },

@@ -894,13 +894,15 @@ export interface UpdateJobRequest {
  * Contract for this task: FULL BODY only (partial bodies NOT confirmed, so
  * follow the full-body rule). All fields below are sent explicitly; the geo ids
  * are integers from the public country → county → city cascade; latitude and
- * longitude are sent as NUMBERS (the API returns them as numeric strings on the
- * 200 response). The caller must be sure the job already has an address — this is
+ * longitude may be sent as NUMBERS or null (verified against the live OpenAPI:
+ * JobAddressUpdate has no required[] and accepts null for the pair — the edit
+ * form no longer re-asks for coordinates and re-sends the prefilled values as
+ * they were). The caller must be sure the job already has an address — this is
  * edit-only, never the first address (that is POST /api/v1/jobs/{job_id}/address).
  */
 export interface JobAddressUpdate {
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   country_id: number;
   county_id: number;
   city_id: number;

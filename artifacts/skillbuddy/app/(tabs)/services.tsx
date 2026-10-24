@@ -39,9 +39,19 @@ function ServicesScreen() {
   const { t } = useLanguage();
   const inputRef = useRef<TextInput>(null);
 
+  const [searchText, setSearchText] = useState('');
+  /** The filtering query — a 300 ms-debounced copy of what the user typed. */
   const [query, setQuery] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
   const { filters, activeCount } = useServiceFilters();
+
+  // FIX (search): the typed text filters the list only after the user pauses
+  // typing for ~300 ms. The input itself updates instantly, so typed characters
+  // are always visible and never swallowed.
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(searchText), 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
 
   // ── Live catalog: GET /api/v1/services ───────────────────────────────────
   // Fetched once per session (module cache inside useServices) and re-checked
@@ -124,7 +134,16 @@ function ServicesScreen() {
         String(s.category_id) === String(chip.id) ||
         (s.category_name ?? '').trim().toLowerCase() === (chip.name ?? '').trim().toLowerCase();
       const from = parseServicePrice(s.price_from);
-      const matchPrice = from === null || (from >= filters.minPrice && from <= filters.maxPrice);
+      // FIX (all services hidden): the untouched default price range
+      // (€20–€200) used to be applied to every item, so any service cheaper
+      // than €20 (and the whole list when the catalog is low-priced)
+      // silently vanished. The price range now only filters when the user
+      // actually moved the bounds in the filter sheet.
+      const priceRangeMoved =
+        filters.minPrice !== DEFAULT_FILTERS.minPrice ||
+        filters.maxPrice !== DEFAULT_FILTERS.maxPrice;
+      const matchPrice =
+        !priceRangeMoved || from === null || (from >= filters.minPrice && from <= filters.maxPrice);
       return matchQ && matchCat && matchPrice;
     });
   }, [serverCategories, serverServices, query, selectedCatId, filters.minPrice, filters.maxPrice]);
@@ -139,6 +158,7 @@ function ServicesScreen() {
   };
 
   const clearSearch = () => {
+    setSearchText('');
     setQuery('');
     inputRef.current?.focus();
   };
@@ -162,8 +182,8 @@ function ServicesScreen() {
             <TextInput
               ref={inputRef}
               style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
+              value={searchText}
+              onChangeText={setSearchText}
               placeholder={t('search_placeholder')}
               placeholderTextColor="#9E9E9E"
               returnKeyType="search"
@@ -279,7 +299,7 @@ function ServicesScreen() {
         </View>
 
         {/* ── Live-catalog states: loading / error (strict API, no fallback) ── */}
-        {svcStatus === 'error' && serverServices == null ? (
+        {svcStatus === 'error' && (serverServices == null || serverServices.length === 0) ? (
           <View style={[styles.stateBanner, { backgroundColor: c.card, borderColor: c.destructive }]}>
             <Feather name="wifi-off" size={16} color={c.destructive} />
             <Text style={[styles.stateText, { color: c.destructive }]}>{t('services_load_error')}</Text>
@@ -395,8 +415,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_400Regular',
     fontSize: 13,
     color: '#1A1A1A',
-    // Explicit height avoids web rendering quirks
+    // Explicit height avoids web rendering quirks. Android: zero vertical
+    // padding + centered text — the platform's default textPadding is what
+    // made the typed characters invisible inside this small box.
     height: 24,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   clearBtn: {
     width: 20,

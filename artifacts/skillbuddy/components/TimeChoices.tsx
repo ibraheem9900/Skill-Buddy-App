@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import TimeRangeSheet from '@/components/TimeRangeSheet';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
@@ -10,15 +9,16 @@ import {
   hasSlotStarted,
   type TimeChoice,
 } from '@/lib/jobBooking';
-import { toggleSlot } from '@/lib/postWizard';
+import { toggleSlot, toggleAnytime } from '@/lib/postWizard';
 
 /**
- * ONE time control for the whole app: the five client windows plus Anytime.
+ * ONE time control for the whole app: the five client windows plus the fixed
+ * "8AM-11PM (Anytime)" slot.
  *
  *  • a second tap on the chosen window CLEARS the choice;
- *  • Anytime opens the same inline hours/minutes sheet the wizard always used
- *    (no clock face) and, once chosen, shows its window on the chip with a
- *    clear (x) so it can be removed without reopening the sheet;
+ *  • Anytime is a plain slot like the others: one tap selects a FIXED
+ *    8:00 AM - 11:00 PM window, a second tap clears it — no modal, no clock,
+ *    no start/end pickers;
  *  • a window that has already started on `day` is disabled and says
  *    "Already started" on a SECOND line, so the window text is never truncated.
  *
@@ -40,10 +40,6 @@ export default function TimeChoices({
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const meridiem = { am: t('post_sched_am'), pm: t('post_sched_pm') };
-  const [sheetOpen, setSheetOpen] = useState(false);
-
-  const anytimeRange =
-    choice?.kind === 'anytime' ? { start: choice.start, end: choice.end } : null;
 
   return (
     <View>
@@ -92,85 +88,86 @@ export default function TimeChoices({
           );
         })}
 
-        <TouchableOpacity
-          style={[
-            styles.slot,
-            {
-              backgroundColor: choice?.kind === 'anytime' ? c.primary : c.input,
-              borderColor: choice?.kind === 'anytime' ? c.primary : c.border,
-              opacity: disabled ? 0.55 : 1,
-            },
-          ]}
-          onPress={() => {
-            if (disabled) return;
-            if (choice?.kind === 'anytime') onChange(null);
-            else setSheetOpen(true);
-          }}
+        <AnytimeSlot
+          choice={choice}
+          day={day}
           disabled={disabled}
-          accessibilityRole="button"
-          accessibilityState={{ selected: choice?.kind === 'anytime', disabled }}
-        >
-          <View style={styles.slotBody}>
-            <View style={styles.slotInnerRow}>
-              <Feather
-                name="clock"
-                size={13}
-                color={choice?.kind === 'anytime' ? c.primaryForeground : c.mutedForeground}
-              />
-              <Text
-                style={[
-                  styles.slotText,
-                  { color: choice?.kind === 'anytime' ? c.primaryForeground : c.text },
-                ]}
-              >
-                {t('post_time_anytime')}
-              </Text>
-            </View>
-            {choice?.kind === 'anytime' ? (
-              <Text
-                style={[styles.slotNote, { color: c.primaryForeground }]}
-                numberOfLines={1}
-              >
-                {formatWindowLabel(choice, meridiem)}
-              </Text>
-            ) : null}
-          </View>
-        </TouchableOpacity>
+          label={t('post_time_anytime')}
+          startedLabel={t('post_time_slot_started')}
+          meridiem={meridiem}
+          onChange={onChange}
+        />
       </View>
-
-      {choice?.kind === 'anytime' ? (
-        <View style={styles.chipRow}>
-          <View
-            style={[styles.chip, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
-          >
-            <Feather name="clock" size={13} color={c.primary} />
-            <Text style={[styles.chipText, { color: c.primary }]}>
-              {formatWindowLabel(choice, meridiem)}
-            </Text>
-            <TouchableOpacity
-              onPress={() => onChange(null)}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel={t('post_time_clear')}
-            >
-              <Feather name="x" size={13} color={c.primary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      <TimeRangeSheet
-        visible={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-        title={t('post_time_custom_title')}
-        value={anytimeRange}
-        day={day}
-        onApply={(range) => {
-          onChange({ kind: 'anytime', start: range.start, end: range.end });
-          setSheetOpen(false);
-        }}
-      />
     </View>
+  );
+}
+
+/**
+ * The "8AM-11PM (Anytime)" slot: a FIXED 8:00 AM - 11:00 PM window, selectable
+ * and unselectable exactly like the five preset windows (including the
+ * "Already started" state for today once 8:00 AM has passed).
+ */
+function AnytimeSlot({
+  choice,
+  day,
+  disabled,
+  label,
+  startedLabel,
+  meridiem,
+  onChange,
+}: {
+  choice: TimeChoice | null;
+  day: Date | null;
+  disabled: boolean;
+  label: string;
+  startedLabel: string;
+  meridiem: { am: string; pm: string };
+  onChange: (next: TimeChoice | null) => void;
+}) {
+  const { colors: c } = useTheme();
+  const active = choice?.kind === 'anytime';
+  const started = hasSlotStarted(choice, day);
+  const off = disabled || started;
+  return (
+    <TouchableOpacity
+      style={[
+        styles.slot,
+        {
+          backgroundColor: active ? c.primary : c.input,
+          borderColor: active ? c.primary : c.border,
+          opacity: started ? 0.45 : disabled ? 0.55 : 1,
+        },
+      ]}
+      onPress={() => onChange(toggleAnytime(choice))}
+      disabled={off}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active, disabled: off }}
+    >
+      <View style={styles.slotBody}>
+        <View style={styles.slotInnerRow}>
+          <Feather
+            name="clock"
+            size={13}
+            color={active ? c.primaryForeground : c.mutedForeground}
+          />
+          <Text
+            style={[styles.slotText, { color: active ? c.primaryForeground : c.text }]}
+            numberOfLines={1}
+          >
+            {label}
+          </Text>
+        </View>
+        {active ? (
+          <Text style={[styles.slotNote, { color: c.primaryForeground }]} numberOfLines={1}>
+            {formatWindowLabel(choice, meridiem)}
+          </Text>
+        ) : started ? (
+          <Text style={[styles.slotNote, { color: c.mutedForeground }]} numberOfLines={1}>
+            {startedLabel}
+          </Text>
+        ) : null}
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -196,16 +193,4 @@ const styles = StyleSheet.create({
   slotInnerRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   slotText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, flexShrink: 1 },
   slotNote: { fontFamily: 'Manrope_400Regular', fontSize: 9 },
-  chipRow: { marginTop: 10 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chipText: { fontFamily: 'Manrope_700Bold', fontSize: 12 },
 });

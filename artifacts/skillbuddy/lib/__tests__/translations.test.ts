@@ -484,8 +484,6 @@ const NEW_POST_WIZARD_KEYS = [
   'post_date_start',
   'post_days_selected_of',
   'post_time_anytime',
-  'post_time_start',
-  'post_time_end',
   'post_time_slot_started',
   'post_err_time_window',
   'post_time_short_hint',

@@ -209,7 +209,13 @@ export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEd
   const paired = segmentsForTasks(segments, Math.max(1, milestones.length));
   const segment = paired.length > 0 ? paired[0] : segments[0] ?? null;
   // DerivedTime is structurally the TimeChoice the form holds (slot | anytime).
-  const time = deriveSlotOf({ scheduledAt, segment }) as TimeChoice | null;
+  // Anytime is now a FIXED 8:00 AM - 11:00 PM window: a legacy custom window
+  // (e.g. the old 2:05 AM - 2:55 AM) is rewritten to the fixed one, which caps
+  // expected hours at 15 and can no longer surface values like 20 h.
+  let time = deriveSlotOf({ scheduledAt, segment }) as TimeChoice | null;
+  if (time?.kind === 'anytime' && (time.start.hour !== 8 || time.start.minute !== 0 || time.end.hour !== 23 || time.end.minute !== 0)) {
+    time = { kind: 'anytime', start: { hour: 8, minute: 0 }, end: { hour: 23, minute: 0 } };
+  }
 
   const parsedHours = parseExpectedHours(job.expected_hours);
   const fallbackHours = parsedHours !== null ? parsedHours : 1;
