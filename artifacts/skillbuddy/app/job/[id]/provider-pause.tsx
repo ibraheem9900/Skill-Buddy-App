@@ -1,8 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +16,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { usePauseJobByProvider } from '@/hooks/usePauseJobByProvider';
 import {
@@ -243,16 +242,14 @@ export default function ProviderPauseJobScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('jobd_ppause_screen_title'))}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={24}
+      {/* FIX (keyboard): edge-to-edge Android does not resize the window; the
+          shared aware scroller keeps the focused field above the keyboard. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={styles.form}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
       >
-        <ScrollView
-          contentContainerStyle={styles.form}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        >
           <View style={[styles.warnCard, { backgroundColor: c.card, borderColor: c.border }]}>
             <Feather name="pause-circle" size={16} color={c.primary} />
             <Text style={[styles.warnText, { color: c.mutedForeground }]}>
@@ -325,8 +322,7 @@ export default function ProviderPauseJobScreen() {
               <Text style={[styles.retryText, { color: c.text }]}>{t('jobs_retry')}</Text>
             </TouchableOpacity>
           ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

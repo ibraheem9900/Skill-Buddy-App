@@ -1240,7 +1240,7 @@ const lv = {
   post_publish_failed_title: 'Neizdevās publicēt',
   post_publish_failed_msg: 'Jūsu melnraksts ir saglabāts. Lūdzu, mēģiniet publicēt vēlreiz.',
   status_draft: 'Melnraksts',
-  status_open: 'Atvērts',
+  status_open: 'Pieņem piedāvājumus',
   status_payment_pending: 'Gaida maksājumu',
   status_provider_assigned: 'Piešķirts izpildītājs',
   status_in_progress: 'Procesā',

@@ -5,6 +5,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
   jobStatusLabelKey,
+  jobStatusTone,
   parseExpectedHours,
   resolveBiddingEndsAt,
 } from '@/lib/jobList';
@@ -38,6 +39,10 @@ export default function JobCard({
   const accentLight = urgent ? c.urgentLight : c.successLight;
 
   const statusKey = jobStatusLabelKey(job.status);
+  // The shared tone rule (lib/jobList) keeps this chip's colour identical to
+  // the Job Details badge for the same status: green for aiming/active/complete,
+  // neutral in between, red for the cancelled variants.
+  const statusTone = jobStatusTone(job.status);
   const hours = parseExpectedHours(job.expected_hours);
   const milestoneCount = job.milestones?.length ?? 0;
 
@@ -65,8 +70,32 @@ export default function JobCard({
           </Text>
         </View>
         {statusKey ? (
-          <View style={[styles.statusChip, { backgroundColor: c.muted }]}>
-            <Text style={[styles.statusText, { color: c.mutedForeground }]}>
+          <View
+            style={[
+              styles.statusChip,
+              {
+                backgroundColor:
+                  statusTone === 'destructive'
+                    ? c.urgentLight
+                    : statusTone === 'success'
+                      ? c.successLight
+                      : c.muted,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                {
+                  color:
+                    statusTone === 'destructive'
+                      ? c.destructive
+                      : statusTone === 'success'
+                        ? c.success
+                        : c.mutedForeground,
+                },
+              ]}
+            >
               {t(statusKey)}
             </Text>
           </View>

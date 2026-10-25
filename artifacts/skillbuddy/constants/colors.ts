@@ -34,6 +34,10 @@ const colors = {
     secondaryForeground: '#1A1A1A',
     muted: '#F5F5F5',
     mutedForeground: '#737373',
+    // A slightly darker grey for the summary/info labels — the plain muted
+    // grey read too light on Job Details (token, not a hardcoded color on
+    // individual screens).
+    mutedStrong: '#595959',
     accent: palette.primaryLight,
     accentForeground: palette.primary,
     destructive: palette.destructive,
@@ -86,6 +90,7 @@ const colors = {
     secondaryForeground: '#EDF2F2',
     muted: '#131818',
     mutedForeground: '#7E8C8C',
+    mutedStrong: '#AEBBBB',
     accent: 'rgba(77, 191, 173, 0.12)',
     accentForeground: '#4DBFAD',
     destructive: '#E74C3C',

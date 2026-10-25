@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +23,7 @@ import { joinFavoriteWithService, useClientFavorites } from '@/hooks/useClientFa
 import useServices from '@/hooks/useServices';
 import { formatServicePrice } from '@/lib/servicePrice';
 import type { FavoriteItemResponse } from '@/types';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
 type DetailState = 'loading' | 'ready' | 'notfound' | 'error';
 
@@ -178,7 +178,14 @@ export default function FavoriteDetailScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+      {/* FIX (keyboard): shared aware scroller keeps the focused field above
+          the keyboard; edge-to-edge Android does not resize the window. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={{ padding: 20, paddingBottom: 40, flexGrow: 1 }}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
+      >
         {state === 'loading' ? (
           <View style={[styles.stateWrap, { backgroundColor: c.card, borderColor: c.border }]}>
             <ActivityIndicator size="large" color={c.primary} />
@@ -327,7 +334,7 @@ export default function FavoriteDetailScreen() {
             </TouchableOpacity>
           </>
         ) : null}
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

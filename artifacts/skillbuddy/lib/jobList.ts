@@ -319,3 +319,46 @@ export function jobStatusLabelKey(status: string | null | undefined): JobStatusL
   if (typeof status !== 'string') return null;
   return (STATUS_LABEL_KEY as Record<string, JobStatusLabelKey>)[status] ?? null;
 }
+
+/**
+ * Badge tone for a job status — ONE shared mapping, so the Job Details
+ * screen, the JobCard and any future status chip colour the same status the
+ * same way everywhere. The tone names are theme-agnostic; the SCREEN maps a
+ * tone onto the theme tokens (successLight/success, muted/mutedForeground,
+ * urgentLight/destructive), which keeps dark theme consistent.
+ *
+ * Mapping (JobApiStatus, the LIVE server enum):
+ *  - green (success):  OPEN ("Accepting Bids"), IN_PROGRESS, COMPLETED
+ *  - neutral (muted):  everything in between — DRAFT, PAYMENT_PENDING,
+ *                      PROVIDER_ASSIGNED, declined/paused/blocked
+ *  - red (destructive): the three cancelled variants
+ * An UNRECOGNISED status (or a missing one) falls back to neutral — the UI
+ * still shows the raw value via the label fallback rather than crashing.
+ */
+export type JobStatusTone = 'success' | 'muted' | 'destructive';
+
+const STATUS_TONE: Record<JobApiStatus, JobStatusTone> = {
+  DRAFT: 'muted',
+  OPEN: 'success',
+  PAYMENT_PENDING: 'muted',
+  PROVIDER_ASSIGNED: 'muted',
+  IN_PROGRESS: 'success',
+  DECLINED_BY_PROVIDER: 'muted',
+  DECLINED_BY_CLIENT: 'muted',
+  PAUSED_BY_CLIENT: 'muted',
+  PAUSED_BY_PROVIDER: 'muted',
+  BLOCKED: 'muted',
+  COMPLETED: 'success',
+  CANCELLED: 'destructive',
+  CANCELLED_BY_CLIENT: 'destructive',
+  CANCELLED_BY_PROVIDER: 'destructive',
+};
+
+/** Shared tone for a status badge; neutral for unknown/missing values. */
+export function jobStatusTone(status: string | null | undefined): JobStatusTone {
+  if (typeof status === 'string') {
+    const tone = (STATUS_TONE as Record<string, JobStatusTone>)[status];
+    if (tone) return tone;
+  }
+  return 'muted';
+}

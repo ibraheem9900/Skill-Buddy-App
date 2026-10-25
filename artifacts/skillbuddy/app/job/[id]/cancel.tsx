@@ -1,8 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +16,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { useCancelJob } from '@/hooks/useCancelJob';
 import {
@@ -236,16 +235,15 @@ export default function CancelJobScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('job_cancel'))}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={24}
+      {/* FIX (keyboard): in edge-to-edge mode the Android window does not
+          resize, so the shared aware scroller (react-native-keyboard-controller,
+          already in the APK) lifts the focused field above the keyboard. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={styles.form}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
       >
-        <ScrollView
-          contentContainerStyle={styles.form}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        >
           <View style={[styles.warnCard, { backgroundColor: c.card, borderColor: c.border }]}>
             <Feather name="alert-triangle" size={16} color={c.destructive} />
             <Text style={[styles.warnText, { color: c.mutedForeground }]}>
@@ -338,8 +336,7 @@ export default function CancelJobScreen() {
               <Text style={[styles.retryText, { color: c.text }]}>{t('jobs_retry')}</Text>
             </TouchableOpacity>
           ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

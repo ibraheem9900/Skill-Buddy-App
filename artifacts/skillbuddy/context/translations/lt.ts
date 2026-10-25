@@ -1240,7 +1240,7 @@ const lt = {
   post_publish_failed_title: 'Paskelbti nepavyko',
   post_publish_failed_msg: 'Jūsų juodraštis išsaugotas. Bandykite paskelbti dar kartą.',
   status_draft: 'Juodraštis',
-  status_open: 'Atidarytas',
+  status_open: 'Priima pasiūlymus',
   status_payment_pending: 'Laukiama mokėjimo',
   status_provider_assigned: 'Paskirtas teikėjas',
   status_in_progress: 'Vykdoma',

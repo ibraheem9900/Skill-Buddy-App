@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -29,7 +31,12 @@ import { useProviderCancelJob } from '@/hooks/useProviderCancelJob';
 import { useRemoveJobAttachment } from '@/hooks/useRemoveJobAttachment';
 import { useRole } from '@/context/RoleContext';
 import { useAuth } from '@/context/AuthContext';
-import { jobStatusLabelKey, parseExpectedHours } from '@/lib/jobList';
+import {
+  jobStatusLabelKey,
+  jobStatusTone,
+  parseExpectedHours,
+  type JobStatusTone,
+} from '@/lib/jobList';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
 import { canAddJobAddress } from '@/lib/jobAddress';
 import { canClientCancelJob } from '@/lib/jobCancel';
@@ -1037,12 +1044,45 @@ export default function BiddingDashboardScreen() {
     void refetchServerJob();
   }, [refetchServerJob]);
 
+  // FIX (Job Details header): the hero is a dark surface that extends behind
+  // the status bar, so its icons switch to light content while THIS screen is
+  // focused — and back to the app default when it is left (the form screens
+  // pushed on top get their normal status bar back).
+  const [statusBarLight, setStatusBarLight] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarLight(true);
+      return () => setStatusBarLight(false);
+    }, [])
+  );
+
   if (isServer) {
-    const serverHeader = (title: string) => (
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <BackButton />
-        <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>{title}</Text>
-        <View style={styles.backBtn} />
+    // FIX (Job Details header): the plain white app bar was weak, so the top
+    // of the screen is now a hero — the approved hero surface (c.heroCard:
+    // the primary dark green in light theme, charcoal in dark) extends behind
+    // the status bar with rounded bottom corners and carries the circular back
+    // button, the job title in white bold (max 2 lines) and a 2-line
+    // description preview (hidden when the description is empty, so the
+    // layout stays tidy). Everything below continues from a short fade that
+    // blends the hero into the screen background.
+    const serverHeader = (title: string, subtitle: string | null = null) => (
+      <View style={[styles.hero, { backgroundColor: c.heroCard }]}>
+        <View style={{ height: insets.top }} />
+        <View style={styles.heroBackRow}>
+          <BackButton />
+        </View>
+        <Text style={[styles.heroTitle, { color: c.primaryForeground }]} numberOfLines={2}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text
+            style={[styles.heroSubtitle, { color: c.primaryForeground }]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
     );
 
@@ -1143,17 +1183,19 @@ export default function BiddingDashboardScreen() {
     const completedOn = isJobCompleted(serverJob) ? formatDate(serverJob.completed_at) : null;
     const cancelled = isJobCancelledStatus(serverJob);
     const cancelledOn = cancelled ? formatDateTime(serverJob.cancelled_at) : null;
-    // Status badge colouring (theme-consistent): cancelled is the loud red one,
-    // completed/muted for paused, everything else reads as active/green.
-    const statusBadge = cancelled
-      ? { bg: c.urgentLight, fg: c.destructive }
-      : isJobCompleted(serverJob)
-        ? { bg: c.successLight, fg: c.success }
-        : isJobPausedStatus(serverJob)
-          ? { bg: c.muted, fg: c.mutedForeground }
-          : statusKey
-            ? { bg: c.primaryLight, fg: c.primary }
-            : { bg: c.muted, fg: c.mutedForeground };
+    // Status badge colouring — the ONE shared tone rule from lib/jobList:
+    // green for Accepting Bids / In Progress / Completed, neutral for Provider
+    // Assigned and everything paused/declined/blocked, red for the three
+    // cancelled variants (exactly the JobApiStatus enum, no guessing). The
+    // screen maps the tone onto the theme tokens so dark theme stays
+    // consistent below.
+    const statusTone: JobStatusTone = jobStatusTone(serverJob.status);
+    const statusBadge =
+      statusTone === 'destructive'
+        ? { bg: c.urgentLight, fg: c.destructive }
+        : statusTone === 'success'
+          ? { bg: c.successLight, fg: c.success }
+          : { bg: c.muted, fg: c.mutedForeground };
     // Countdown anchor from the backend's own bidding window (null = no timer).
     const deadline = biddingDeadline(serverJob, Date.now());
     // The stored "Preferred time:" line is DATA, not prose: it is removed from
@@ -1294,10 +1336,21 @@ export default function BiddingDashboardScreen() {
     };
 
     return (
-      <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        {serverHeader(serverJob.title)}
+      <View style={[styles.root, { backgroundColor: c.background }]}>
+        <StatusBar style={statusBarLight ? 'light' : 'auto'} />
+        {serverHeader(serverJob.title, description)}
+        {/* The fade: the hero colour blends into the screen background so the
+            Status section below reads as one connected header block. */}
+        <LinearGradient
+          colors={[c.heroCard, c.background]}
+          style={styles.heroFade}
+        />
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 20 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* A paused job has no connected resume endpoint yet, so say so plainly
               instead of leaving the client on a dead end. The paused state comes from
               the backend's own status (PAUSED_BY_CLIENT / PAUSED_BY_PROVIDER) — never a
@@ -1446,14 +1499,14 @@ export default function BiddingDashboardScreen() {
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Feather name="layers" size={13} color={c.mutedForeground} />
-                  <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                  <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                     {t('jobd_summary_tasks', { n: milestones.length })}
                   </Text>
                 </View>
                 {totalHours > 0 ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="clock" size={13} color={c.mutedForeground} />
-                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                    <Feather name="clock" size={13} color={c.mutedStrong} />
+                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                       {t('jobd_summary_total_hours', { n: totalHours })}
                     </Text>
                   </View>
@@ -1463,8 +1516,8 @@ export default function BiddingDashboardScreen() {
               <>
                 {scheduledAt ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="calendar" size={13} color={c.mutedForeground} />
-                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                    <Feather name="calendar" size={13} color={c.mutedStrong} />
+                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                       {scheduledLocal
                         ? singleDateLine
                         : scheduledLabel || formatDateTime(serverJob.scheduled_at)}
@@ -1473,8 +1526,8 @@ export default function BiddingDashboardScreen() {
                 ) : null}
                 {hours !== null ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="clock" size={13} color={c.mutedForeground} />
-                    <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                    <Feather name="clock" size={13} color={c.mutedStrong} />
+                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                       {hours === 1
                         ? t('post_hours_value', { n: hours })
                         : t('post_hours_value_plural', { n: hours })}
@@ -1485,32 +1538,32 @@ export default function BiddingDashboardScreen() {
             )}
             {createdOn ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="info" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                <Feather name="info" size={13} color={c.mutedStrong} />
+                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                   {t('jobd_created', { date: createdOn })}
                 </Text>
               </View>
             ) : null}
             {providerAssigned && serverJob.assigned_provider_id != null ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-check" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                <Feather name="user-check" size={13} color={c.mutedStrong} />
+                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                   {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
                   {assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : ''}
                 </Text>
               </View>
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-x" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                <Feather name="user-x" size={13} color={c.mutedStrong} />
+                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                   {t('jobd_not_assigned')}
                 </Text>
               </View>
             )}
             {completedOn ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="check-circle" size={13} color={c.mutedForeground} />
-                <Text style={[styles.metaLine, { color: c.mutedForeground }]}>
+                <Feather name="check-circle" size={13} color={c.mutedStrong} />
+                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
                   {t('jobd_completed_on', { date: completedOn })}
                 </Text>
               </View>
@@ -1818,7 +1871,12 @@ export default function BiddingDashboardScreen() {
                   conditions and routes are unchanged. */}
               {actions
                 .filter((action) => action !== 'cancel')
-                .map((action) => {
+                .map((action, index, mappedActions) => {
+                  // Layout fix: an ODD count used to leave the last secondary
+                  // button alone at half width; stretch that last row to the
+                  // full width so the grid never shows an orphan.
+                  const spansFullRow =
+                    mappedActions.length % 2 === 1 && index === mappedActions.length - 1;
                   const tint = c.text;
                   // Disabled for the duration of the call so a double tap cannot fire
                   // the same state-changing action twice (each hook rejects a second
@@ -1838,7 +1896,11 @@ export default function BiddingDashboardScreen() {
                       key={action}
                       style={[
                         styles.restartBtn,
-                        { borderColor: c.border, width: '48%', marginTop: 0 },
+                        {
+                          borderColor: c.border,
+                          width: spansFullRow ? '100%' : '48%',
+                          marginTop: 0,
+                        },
                       ]}
                       onPress={() => runAction(action)}
                       disabled={busy}
@@ -2246,6 +2308,23 @@ const styles = StyleSheet.create({
   publishBtnBusy: { opacity: 0.6 },
   publishText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
   metaLine: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'left' },
+  metaLineStrong: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textAlign: 'left' },
+  hero: {
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+  },
+  heroBackRow: { marginBottom: 12 },
+  heroTitle: { fontFamily: 'Manrope_700Bold', fontSize: 20, lineHeight: 26 },
+  heroSubtitle: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  heroFade: { height: 26 },
   bodyLine: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20, textAlign: 'left' },
   milestoneTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
 });

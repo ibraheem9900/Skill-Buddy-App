@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import BrandedLoader from '@/components/BrandedLoader';
 import DateStrip from '@/components/DateStrip';
 import TimeChoices from '@/components/TimeChoices';
@@ -333,10 +333,18 @@ export default function EditJobScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('job_edit'))}
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
+      {/* FIX (keyboard): in edge-to-edge mode the Android window does not
+          resize, so the shared aware scroller (react-native-keyboard-controller,
+          already in the APK) lifts the focused field above the keyboard. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: styles.scroll.paddingBottom + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
       >
         {/* Description — the schedule line is stripped and never counted. */}
         <View style={styles.labelRow}>
@@ -562,7 +570,7 @@ export default function EditJobScreen() {
             {submitting ? t('editjob_saving') : t('editjob_submit')}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

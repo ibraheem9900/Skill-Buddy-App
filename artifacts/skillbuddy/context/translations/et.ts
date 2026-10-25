@@ -1240,7 +1240,7 @@ const et = {
   post_publish_failed_title: 'Avaldamine ebaõnnestus',
   post_publish_failed_msg: 'Sinu mustand on salvestatud. Palun proovi uuesti avaldada.',
   status_draft: 'Mustand',
-  status_open: 'Avatud',
+  status_open: 'Pakkumisi vastu võetakse',
   status_payment_pending: 'Makse ootel',
   status_provider_assigned: 'Teenusepakkuja määratud',
   status_in_progress: 'Töös',

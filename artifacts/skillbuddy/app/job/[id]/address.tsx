@@ -16,6 +16,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import BrandedLoader from '@/components/BrandedLoader';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { invalidateJobList } from '@/hooks/useJobList';
@@ -418,10 +419,15 @@ export default function AddJobAddressScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('jobaddr_title'))}
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
+      {/* FIX (keyboard): in edge-to-edge mode the Android window does not
+          resize, so the shared aware scroller keeps the focused field above
+          the keyboard. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[styles.scroll, { paddingBottom: styles.scroll.paddingBottom + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
       >
         {formError ? (
           <View style={[styles.banner, { backgroundColor: c.card, borderColor: c.destructive }]}>
@@ -484,7 +490,7 @@ export default function AddJobAddressScreen() {
             {submitting ? t('editjob_saving') : t('addr_c_save')}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
 
       {/* One modal, three levels — the same pattern the Post-a-Job screen uses */}
       <Modal

@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,6 +20,8 @@ import BackButton from '@/components/BackButton';
 import BidArrivalTimes from '@/components/BidArrivalTimes';
 import BidFormFields from '@/components/BidFormFields';
 import BottomSheet from '@/components/BottomSheet';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import BrandedLoader from '@/components/BrandedLoader';
 import CountdownTimer from '@/components/CountdownTimer';
 import { useJobDetail } from '@/hooks/useJobDetail';
@@ -891,15 +891,14 @@ export default function PlaceBidScreen() {
           </View>
         }
       >
+        {/* FIX (keyboard): edge-to-edge Android does not resize the window; the
+            shared aware scroller keeps the focused field above the keyboard. */}
         {editDraft ? (
-          <KeyboardAvoidingView
+          <KeyboardAwareScrollViewCompat
             style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            contentContainerStyle={styles.sheetBody}
+            keyboardShouldPersistTaps="handled"
           >
-            <ScrollView
-              contentContainerStyle={styles.sheetBody}
-              keyboardShouldPersistTaps="handled"
-            >
               {editLocked ? (
                 <View
                   style={[styles.lockNote, { borderColor: c.border, backgroundColor: c.muted }]}
@@ -951,8 +950,7 @@ export default function PlaceBidScreen() {
                 disabled={savingEdit || editLocked}
                 priceExtra={editChips}
               />
-            </ScrollView>
-          </KeyboardAvoidingView>
+          </KeyboardAwareScrollViewCompat>
         ) : null}
       </BottomSheet>
     );
@@ -1041,16 +1039,14 @@ export default function PlaceBidScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('jobd_bid_screen_title'))}
-      <KeyboardAvoidingView
+      {/* FIX (keyboard): edge-to-edge Android does not resize the window; the
+          shared aware scroller keeps the focused field above the keyboard. */}
+      <KeyboardAwareScrollViewCompat
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={24}
+        contentContainerStyle={styles.form}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
-        <ScrollView
-          contentContainerStyle={styles.form}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        >
           {deadline !== null ? (
             <CountdownTimer
               endsAt={deadline}
@@ -1128,8 +1124,9 @@ export default function PlaceBidScreen() {
               <Text style={[styles.errorText, { color: c.destructive }]}>{formError}</Text>
             </View>
           ) : null}
-        </ScrollView>
+      </KeyboardAwareScrollViewCompat>
 
+      <KeyboardStickyView>
         {/* Sticky footer, inside the safe area, above the keyboard. */}
         <View
           style={[
@@ -1167,7 +1164,7 @@ export default function PlaceBidScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardStickyView>
     </View>
   );
 }

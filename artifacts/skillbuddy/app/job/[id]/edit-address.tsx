@@ -17,6 +17,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { invalidateJobList } from '@/hooks/useJobList';
 import useCountries from '@/hooks/useCountries';
@@ -518,10 +519,16 @@ export default function EditJobAddressScreen() {
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
       {header(t('jobaddr_update_title'))}
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
+      {/* FIX (keyboard): the Android window does NOT resize in edge-to-edge
+          mode, so the keyboard used to open over the focused input. The shared
+          aware scroller (react-native-keyboard-controller, already in the
+          installed APK) lifts the focused field above the keyboard and locks
+          in tap persistence + dismiss behaviour. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 20 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        bottomOffset={12}
       >
         {formError ? (
           <View style={[styles.banner, { backgroundColor: c.card, borderColor: c.destructive }]}>
@@ -583,13 +590,14 @@ export default function EditJobAddressScreen() {
             {submitting ? t('editjob_saving') : t('addr_u_save')}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
 
       {/* One modal, three levels — the same pattern the Post-a-Job screen uses */}
       <Modal
         visible={pickerOpen !== null}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setPickerOpen(null)}
       >
         <View style={styles.modalBackdrop}>

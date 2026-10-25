@@ -1240,7 +1240,7 @@ const de = {
   post_publish_failed_title: 'Veröffentlichung fehlgeschlagen',
   post_publish_failed_msg: 'Ihr Entwurf ist gespeichert. Bitte versuchen Sie die Veröffentlichung erneut.',
   status_draft: 'Entwurf',
-  status_open: 'Offen',
+  status_open: 'Angebote werden angenommen',
   status_payment_pending: 'Zahlung ausstehend',
   status_provider_assigned: 'Anbieter zugewiesen',
   status_in_progress: 'In Bearbeitung',

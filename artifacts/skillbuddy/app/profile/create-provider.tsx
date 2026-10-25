@@ -2,10 +2,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,6 +16,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { SERVICE_RADIUS_MAX, SERVICE_RADIUS_MIN } from '@/lib/nearbyJobs';
 
 /**
@@ -152,8 +150,10 @@ export default function CreateProviderProfileScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={{ padding: 20, gap: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
           <Text style={[styles.intro, { color: c.mutedForeground }]}>{t('cp_intro')}</Text>
 
           {renderField(t('cp_bio'), bio, setBio, 'bio', { icon: 'file-text', multiline: true })}
@@ -218,8 +218,7 @@ export default function CreateProviderProfileScreen() {
               <Text style={[styles.submitText, { color: c.primaryForeground }]}>{t('cp_submit')}</Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }

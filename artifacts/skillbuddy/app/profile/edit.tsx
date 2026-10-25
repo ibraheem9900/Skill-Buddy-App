@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Alert, ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
 import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
@@ -177,7 +178,14 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      {/* FIX (keyboard): shared aware scroller keeps the focused field above
+          the keyboard; edge-to-edge Android does not resize the window. */}
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+        bottomOffset={12}
+      >
         <View style={[styles.avatarWrap, { backgroundColor: c.primaryLight }]}>
           {user?.profile_picture ? (
             <Image source={{ uri: user.profile_picture }} style={styles.avatarImage} />
@@ -212,7 +220,7 @@ export default function EditProfileScreen() {
             <Text style={[styles.errorBannerText, { color: c.destructive }]}>{generalError}</Text>
           </View>
         ) : null}
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }
