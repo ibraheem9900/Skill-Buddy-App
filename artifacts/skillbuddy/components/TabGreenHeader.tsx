@@ -135,7 +135,9 @@ export default function TabGreenHeader({
                   <View
                     style={[
                       styles.filterBadge,
-                      { backgroundColor: c.destructive, borderColor: c.headerBg },
+                      // Same ring the Services header always had (white surface),
+                      // so extracting the component did not restyle that tab.
+                      { backgroundColor: c.destructive, borderColor: c.surface },
                     ]}
                   >
                     <Text style={styles.filterBadgeText}>{filter.count}</Text>
