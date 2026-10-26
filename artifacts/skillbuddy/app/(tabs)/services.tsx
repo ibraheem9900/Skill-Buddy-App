@@ -57,6 +57,8 @@ function ServicesScreen() {
   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
   /** True while pull-to-refresh is running — drives the RefreshControl spinner. */
   const [pulling, setPulling] = useState(false);
+  /** True while a Try Again tap is running — the button shows a spinner. */
+  const [retrying, setRetrying] = useState(false);
   const { filters, activeCount } = useServiceFilters();
 
   // FIX (search): the typed text filters the list only after the user pauses
@@ -114,9 +116,19 @@ function ServicesScreen() {
     }
   };
 
-  /** Retry from the error / empty states — same visible loading path. */
-  const retryNow = () => {
-    void refreshServices();
+  /**
+   * Retry from the error / empty states. `retrying` makes the tap visibly
+   * busy: while the list already holds data the screen keeps rendering it, so
+   * without this the user would get no feedback at all that a refetch started.
+   */
+  const retryNow = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await refreshServices();
+    } finally {
+      setRetrying(false);
+    }
   };
 
   // FIX (states): an empty catalog that is still LOADING must show the
@@ -326,11 +338,16 @@ function ServicesScreen() {
               <Text style={[styles.emptyTitle, { color: c.text }]}>{t('services_load_error')}</Text>
               <TouchableOpacity
                 style={[styles.emptyBtn, { backgroundColor: c.primary }]}
-                onPress={retryNow}
+                onPress={() => void retryNow()}
+                disabled={retrying}
                 activeOpacity={0.85}
                 accessibilityRole="button"
               >
-                <Feather name="refresh-cw" size={16} color="#FFF" />
+                {retrying ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Feather name="refresh-cw" size={16} color="#FFF" />
+                )}
                 <Text style={[styles.emptyBtnTextRow]}>{t('try_again')}</Text>
               </TouchableOpacity>
             </View>
@@ -376,11 +393,16 @@ function ServicesScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
-              onPress={retryNow}
+              onPress={() => void retryNow()}
+              disabled={retrying}
               activeOpacity={0.85}
               accessibilityRole="button"
             >
-              <Feather name="refresh-cw" size={16} color={c.primary} />
+              {retrying ? (
+                <ActivityIndicator size="small" color={c.primary} />
+              ) : (
+                <Feather name="refresh-cw" size={16} color={c.primary} />
+              )}
               <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
                 {t('try_again')}
               </Text>
@@ -413,6 +435,25 @@ function ServicesScreen() {
               <Feather name="message-circle" size={16} color={c.primary} />
               <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
                 {t('services_start_live_chat')}
+              </Text>
+            </TouchableOpacity>
+            {/* The filtered-empty state is the one from the phone screenshot:
+                give it the same Try Again as the truly-empty state, so a
+                surprising "0 available" is always one tap away from a refetch. */}
+            <TouchableOpacity
+              style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
+              onPress={() => void retryNow()}
+              disabled={retrying}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              {retrying ? (
+                <ActivityIndicator size="small" color={c.primary} />
+              ) : (
+                <Feather name="refresh-cw" size={16} color={c.primary} />
+              )}
+              <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
+                {t('try_again')}
               </Text>
             </TouchableOpacity>
           </View>
