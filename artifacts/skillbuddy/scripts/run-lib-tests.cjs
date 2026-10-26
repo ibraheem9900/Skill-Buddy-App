@@ -63,6 +63,8 @@ const TEST_FILES = [
   'postDetails.test.js',
   'postAddress.test.js',
   'translations.test.js',
+  'colorStops.test.js',
+  'fetchRetry.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

@@ -3,14 +3,25 @@
  *   Inline search input + Filter chip → Categories row (filters list in-place) → Services list
  * No navigation away from this screen; the bottom tab bar stays visible throughout.
  * Tapping an individual service card goes to /service/[id].
+ *
+ * The green header is the SHARED TabGreenHeader (also used by the Jobs tab) —
+ * this screen's look is unchanged, only the markup moved into the component.
+ *
+ * FOUR DISTINCT STATES (FIX: the list used to flicker a false "No Services
+ * Found" while loading, and a stale hook instance could show it forever):
+ *   error          → message + "Try Again" button (only when there is no data)
+ *   loading        → spinner row that REPLACES the empty state, never stacks
+ *   truly empty    → "No services yet" + Custom Quote / Live Chat / Try Again
+ *   has data       → list (search + category filtering client-side, as before)
+ * plus pull-to-refresh on the list.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Keyboard,
   Platform,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +36,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useServiceFilters, DEFAULT_FILTERS } from '@/context/FilterContext';
 import { useLanguage } from '@/context/LanguageContext';
 import ServerServiceRow from '@/components/ServerServiceRow';
+import TabGreenHeader from '@/components/TabGreenHeader';
 import useServices from '@/hooks/useServices';
 import useCategories from '@/hooks/useCategories';
 import { parseServicePrice } from '@/lib/servicePrice';
@@ -43,6 +55,8 @@ function ServicesScreen() {
   /** The filtering query — a 300 ms-debounced copy of what the user typed. */
   const [query, setQuery] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string>(ALL_ID);
+  /** True while pull-to-refresh is running — drives the RefreshControl spinner. */
+  const [pulling, setPulling] = useState(false);
   const { filters, activeCount } = useServiceFilters();
 
   // FIX (search): the typed text filters the list only after the user pauses
@@ -55,8 +69,11 @@ function ServicesScreen() {
 
   // ── Live catalog: GET /api/v1/services ───────────────────────────────────
   // Fetched once per session (module cache inside useServices) and re-checked
-  // on focus. The endpoint accepts NO query parameters (verified against the
-  // live OpenAPI), so every control below filters client-side.
+  // on focus — including when the cached list is EMPTY or the last attempt
+  // FAILED, which is exactly how the intermittent "0 available" screen stuck
+  // around (see hooks/useServices.ts). The endpoint accepts NO query
+  // parameters (verified against the live OpenAPI), so every control below
+  // filters client-side.
   const {
     status: svcStatus,
     services: serverServices,
@@ -78,6 +95,7 @@ function ServicesScreen() {
     status: catStatus,
     categories: serverCategories,
     load: loadCategories,
+    refresh: refreshCategories,
   } = useCategories();
 
   useFocusEffect(
@@ -86,11 +104,32 @@ function ServicesScreen() {
     }, [loadCategories]),
   );
 
+  // Pull-to-refresh re-runs BOTH fetches (force), with a visible spinner.
+  const onRefresh = async () => {
+    setPulling(true);
+    try {
+      await Promise.all([refreshServices(), refreshCategories()]);
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  /** Retry from the error / empty states — same visible loading path. */
+  const retryNow = () => {
+    void refreshServices();
+  };
+
+  // FIX (states): an empty catalog that is still LOADING must show the
+  // spinner, not a premature "No services found" (serverServices === [] from
+  // the previous run would otherwise keep the empty state visible while the
+  // retry is in flight).
   const firstLoad =
-    (svcStatus === 'loading' && serverServices == null) ||
+    (svcStatus === 'loading' && (serverServices == null || serverServices.length === 0)) ||
     (catStatus === 'loading' && serverCategories == null);
   const catalogEmpty =
     svcStatus === 'ready' && (serverServices?.length ?? 0) === 0;
+  /** A real failure with NOTHING to show — never an "empty" masquerade. */
+  const catalogError = svcStatus === 'error' && (serverServices?.length ?? 0) === 0;
 
   const TAB_H = Platform.OS === 'web' ? 84 : 60;
 
@@ -149,7 +188,8 @@ function ServicesScreen() {
   }, [serverCategories, serverServices, query, selectedCatId, filters.minPrice, filters.maxPrice]);
 
   /** The live API exposes no rating, so a min-rating filter can't apply to it. */
-  const ratingFilterUnavailable = !!filters.minRating && !catalogEmpty;
+  const ratingFilterUnavailable =
+    !!filters.minRating && !catalogEmpty && !catalogError && !firstLoad;
   const resultCount = filteredServer.length;
 
   const handleCategoryPress = (id: string) => {
@@ -171,55 +211,33 @@ function ServicesScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <View style={[styles.header, { backgroundColor: c.headerBg, paddingTop: insets.top + 10 }]}>
-        <Text style={styles.headerTitle}>{t('services_title')}</Text>
-
-        {/* Inline search bar — always editable, never redirects */}
-        <View style={styles.searchRow}>
-          <View style={[styles.searchBar, { backgroundColor: '#FFF' }]}>
-            <Feather name="search" size={15} color="#9E9E9E" />
-            <TextInput
-              ref={inputRef}
-              style={styles.searchInput}
-              value={searchText}
-              onChangeText={setSearchText}
-              placeholder={t('search_placeholder')}
-              placeholderTextColor="#9E9E9E"
-              returnKeyType="search"
-              onSubmitEditing={Keyboard.dismiss}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-            {query.length > 0 && (
-              <TouchableOpacity onPress={clearSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <View style={styles.clearBtn}>
-                  <Feather name="x" size={12} color="#9E9E9E" />
-                </View>
-              </TouchableOpacity>
-            )}
-          </View>
-          {/* Filter button — opens filter bottom sheet */}
-          <TouchableOpacity
-            style={styles.filterBtn}
-            onPress={() => router.push('/filter')}
-            activeOpacity={0.8}
-          >
-            <Feather name="sliders" size={16} color={c.primary} />
-            {activeCount > 0 && (
-              <View style={[styles.filterBadge, { backgroundColor: c.destructive, borderColor: c.surface }]}>
-                <Text style={styles.filterBadgeText}>{activeCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* ── Header (SHARED with the Jobs tab) ──────────────────────────────── */}
+      <TabGreenHeader
+        title={t('services_title')}
+        search={{
+          value: searchText,
+          onChange: setSearchText,
+          onClear: clearSearch,
+          placeholder: t('search_placeholder'),
+          onSubmit: Keyboard.dismiss,
+          inputRef,
+        }}
+        filter={{ count: activeCount, onPress: () => router.push('/filter') }}
+      />
 
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + TAB_H + 20 }}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={pulling}
+            onRefresh={() => void onRefresh()}
+            tintColor={c.primary}
+            colors={[c.primary]}
+          />
+        }
       >
         {/* ── Categories row ────────────────────────────────────────────────── */}
         <View style={styles.catSection}>
@@ -288,39 +306,48 @@ function ServicesScreen() {
           </ScrollView>
         </View>
 
-        {/* ── Results header ────────────────────────────────────────────────── */}
-        <View style={styles.resultsHeader}>
-          <Text style={[styles.sectionTitle, { color: c.text }]}>
-            {activeCategoryName}
-          </Text>
-          <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
-            {t('services_available_count', { n: resultCount })}
-          </Text>
-        </View>
+        {/* ── Results header (hidden while loading/error for distinct states) ─ */}
+        {!firstLoad && !catalogError ? (
+          <View style={styles.resultsHeader}>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>
+              {activeCategoryName}
+            </Text>
+            <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
+              {t('services_available_count', { n: resultCount })}
+            </Text>
+          </View>
+        ) : null}
 
-        {/* ── Live-catalog states: loading / error (strict API, no fallback) ── */}
-        {svcStatus === 'error' && (serverServices == null || serverServices.length === 0) ? (
-          <View style={[styles.stateBanner, { backgroundColor: c.card, borderColor: c.destructive }]}>
-            <Feather name="wifi-off" size={16} color={c.destructive} />
-            <Text style={[styles.stateText, { color: c.destructive }]}>{t('services_load_error')}</Text>
-            <TouchableOpacity onPress={() => void refreshServices()} hitSlop={6}>
-              <Text style={[styles.stateRetry, { color: c.primary }]}>{t('cats_retry')}</Text>
-            </TouchableOpacity>
+        {/* ── ERROR: message + Try Again (only with nothing to show) ───────── */}
+        {catalogError ? (
+          <View style={styles.stateWrap}>
+            <View style={[styles.stateCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Feather name="wifi-off" size={32} color={c.destructive} />
+              <Text style={[styles.emptyTitle, { color: c.text }]}>{t('services_load_error')}</Text>
+              <TouchableOpacity
+                style={[styles.emptyBtn, { backgroundColor: c.primary }]}
+                onPress={retryNow}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+              >
+                <Feather name="refresh-cw" size={16} color="#FFF" />
+                <Text style={[styles.emptyBtnTextRow]}>{t('try_again')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : firstLoad ? (
+          /* ── LOADING: spinner row, replaces (never stacks with) the empty state */
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color={c.primary} />
             <Text style={[styles.stateText, { color: c.mutedForeground }]}>{t('services_loading')}</Text>
           </View>
-        ) : null}
-
-        {ratingFilterUnavailable ? (
+        ) : ratingFilterUnavailable ? (
           <Text style={[styles.fallbackNote, { color: c.mutedForeground }]}>
             {t('services_rating_filter_unavailable')}
           </Text>
         ) : null}
 
-        {/* ── Empty state ──────────────────────────────────────────────────── */}
+        {/* ── TRULY EMPTY (200 + []): Custom Quote / Live Chat / Try Again ─── */}
         {catalogEmpty ? (
           <View style={styles.emptyWrap}>
             <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
@@ -330,8 +357,36 @@ function ServicesScreen() {
             <Text style={[styles.emptySub, { color: c.mutedForeground }]}>
               {t('services_empty_sub')}
             </Text>
+            <TouchableOpacity
+              style={[styles.emptyBtn, { backgroundColor: c.primary }]}
+              onPress={() => router.push('/quote-request' as any)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.emptyBtnText}>{t('services_get_custom_quote')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
+              onPress={() => router.push('/(tabs)/inbox' as any)}
+              activeOpacity={0.85}
+            >
+              <Feather name="message-circle" size={16} color={c.primary} />
+              <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
+                {t('services_start_live_chat')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.emptyBtnOutline, { borderColor: c.primary }]}
+              onPress={retryNow}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Feather name="refresh-cw" size={16} color={c.primary} />
+              <Text style={[styles.emptyBtnOutlineText, { color: c.primary }]}>
+                {t('try_again')}
+              </Text>
+            </TouchableOpacity>
           </View>
-        ) : resultCount === 0 && (
+        ) : !catalogError && !firstLoad && resultCount === 0 ? (
           <View style={styles.emptyWrap}>
             <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryLight }]}>
               <Feather name="search" size={32} color={c.primary} />
@@ -361,7 +416,7 @@ function ServicesScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
         {/* ── Services list ─────────────────────────────────────────────────── */}
         {/* Server rows only — the local-card fallback was removed with the
@@ -386,72 +441,6 @@ function ServicesScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flex: 1 },
-
-  // ── Header ─────────────────────────────────────────────────────────────────
-  header: {
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomLeftRadius: 22,
-    borderBottomRightRadius: 22,
-    gap: 10,
-  },
-  headerTitle: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 20,
-    color: '#FFF',
-  },
-  searchRow: { flexDirection: 'row', gap: 8 },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 11 : 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 13,
-    color: '#1A1A1A',
-    // Explicit height avoids web rendering quirks. Android: zero vertical
-    // padding + centered text — the platform's default textPadding is what
-    // made the typed characters invisible inside this small box.
-    height: 24,
-    paddingVertical: 0,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
-  },
-  clearBtn: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#E0E0E0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterBtn: {
-    backgroundColor: '#FFF',
-    width: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  filterBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#FFF' },
 
   // ── Category chips ──────────────────────────────────────────────────────────
   catSection: { paddingTop: 20 },
@@ -488,19 +477,17 @@ const styles = StyleSheet.create({
   servicesList: { paddingHorizontal: 16 },
 
   // ── Live-catalog state banners ──────────────────────────────────────────────
-  stateBanner: {
-    flexDirection: 'row',
+  stateWrap: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8 },
+  stateCard: {
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginHorizontal: 16,
-    marginBottom: 12,
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    width: '100%',
   },
   stateText: { fontFamily: 'Manrope_400Regular', fontSize: 12, flex: 1 },
-  stateRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -532,8 +519,17 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 17, textAlign: 'center' },
   emptySub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  emptyBtn: { marginTop: 4, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 28 },
+  emptyBtn: {
+    marginTop: 4,
+    paddingHorizontal: 28,
+    paddingVertical: 13,
+    borderRadius: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   emptyBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
+  emptyBtnTextRow: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF' },
   emptyBtnOutline: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,12 +16,15 @@ import {
   activeFilterCount,
   activeFilterIds,
   buildListJobsQuery,
+  filterJobsBySearch,
   hasActiveFilters,
   isClientProfileMissing,
+  jobStatusLabelKey,
   removeFilter,
   resolveJobsViewState,
   type JobListFilters,
 } from '../jobList';
+import type { JobListItem } from '@/types';
 import { classifyCreateJobFailure, createJobErrorCopy } from '../jobCreate';
 import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '../motion';
 
@@ -58,6 +61,61 @@ eq(
   'true'
 );
 eq('a status is sent verbatim', buildListJobsQuery({ status: 'PAYMENT_PENDING' }).status, 'PAYMENT_PENDING');
+
+// ── Jobs screen search (title + readable status label) ────────────────────
+const job = (id: number, title: string, status: JobListItem['status']): JobListItem => ({
+  id,
+  client_id: 1,
+  category_id: 1,
+  service_id: 1,
+  title,
+  request_type: 'REGULAR',
+  booking_type: 'ONE_TIME',
+  status,
+  is_urgent: false,
+  is_bidding_open: false,
+  created_at: '2026-10-20T00:00:00Z',
+  updated_at: '2026-10-20T00:00:00Z',
+});
+// The screen's resolver: the READABLE English label (what `t(jobStatusLabelKey)
+// actually renders), falling back to the raw enum value for unknown statuses.
+const READABLE_LABELS: Record<string, string> = {
+  OPEN: 'Accepting Bids',
+  IN_PROGRESS: 'In Progress',
+  PROVIDER_ASSIGNED: 'Provider Assigned',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  CANCELLED_BY_CLIENT: 'Cancelled by client',
+  CANCELLED_BY_PROVIDER: 'Cancelled by provider',
+};
+const labelOf = (status: JobListItem['status']): string => {
+  const key = jobStatusLabelKey(status);
+  if (!key) return String(status);
+  return READABLE_LABELS[String(status)] ?? String(status);
+};
+const searchable = [
+  job(1, 'Party Organizer', 'OPEN'),
+  job(2, 'Dog Walker', 'CANCELLED_BY_CLIENT'),
+  job(3, 'Accountant', 'IN_PROGRESS'),
+];
+eq('blank query returns everything', filterJobsBySearch(searchable, '   ', labelOf).length, 3);
+eq('matches the title case-insensitively', filterJobsBySearch(searchable, 'party', labelOf)[0]?.id, 1);
+eq(
+  'matches the READABLE status label (Accepting Bids ← OPEN)',
+  filterJobsBySearch(searchable, 'accepting', labelOf).length,
+  1
+);
+eq(
+  'status match respects the real enum words too (via label fallback)',
+  filterJobsBySearch(searchable, 'cancelled by client', labelOf)[0]?.id,
+  2
+);
+eq('no match → empty array, not the full list', filterJobsBySearch(searchable, 'zzz', labelOf).length, 0);
+eq(
+  'search combines with server filters (it only narrows what it is given)',
+  filterJobsBySearch(searchable.slice(0, 1), 'dog', labelOf).length,
+  0
+);
 eq('a request type is sent verbatim', buildListJobsQuery({ request_type: 'URGENT' }).request_type, 'URGENT');
 eq('offset 0 is explicit when asked for', buildListJobsQuery({ offset: 0 }).offset, '0');
 eq('a negative offset is clamped', buildListJobsQuery({ offset: -5 }).offset, '0');

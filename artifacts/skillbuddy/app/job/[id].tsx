@@ -5,6 +5,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { interpolateColorStops } from '@/lib/colorStops';
 import { StatusBar } from 'expo-status-bar';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
@@ -1067,7 +1068,10 @@ export default function BiddingDashboardScreen() {
     // blends the hero into the screen background.
     const serverHeader = (title: string, subtitle: string | null = null) => (
       <View style={[styles.hero, { backgroundColor: c.heroCard }]}>
-        <View style={{ height: insets.top }} />
+        {/* FIX (back button): sit ~14dp BELOW the safe-area inset so the
+            button no longer hugs the status bar — matching the position the
+            other standard screens (e.g. Edit Job Address) use. */}
+        <View style={{ height: insets.top + 14 }} />
         <View style={styles.heroBackRow}>
           <BackButton />
         </View>
@@ -1120,7 +1124,10 @@ export default function BiddingDashboardScreen() {
               ? serverMessage ?? t('jobd_unavailable_msg')
               : t('jobd_load_error_sub');
       return (
-        <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
+        // No paddingTop here: the hero itself owns the status-bar inset, so
+        // the green surface stays FULL-BLEED (a root inset would leave a white
+        // band above it on the error screen).
+        <View style={[styles.root, { backgroundColor: c.background }]}>
           {serverHeader(t('jobs_title'))}
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
             <View
@@ -1253,6 +1260,114 @@ export default function BiddingDashboardScreen() {
     const attachments = [...(serverJob.attachments ?? [])].sort(
       (a, b) => a.position - b.position || a.id - b.id
     );
+    // FIX (Job Details info): the tile grid's contents — the SAME values the
+    // old icon lines showed (status, type, schedule, tasks, hours, created,
+    // provider, completed), each under a small muted heading. An odd tile
+    // count stretches the LAST tile to full width (no orphan half-tile).
+    const infoValueStyle = [styles.infoValue, { color: c.text }];
+    const infoTiles: { key: string; heading: string; value: React.ReactNode }[] = [
+      {
+        key: 'status',
+        heading: t('jobd_status_title'),
+        value: (
+          <View
+            style={[
+              styles.sortChip,
+              {
+                backgroundColor: statusBadge.bg,
+                alignSelf: 'flex-start',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+              },
+            ]}
+          >
+            <View style={[styles.statusDot, { backgroundColor: statusBadge.fg }]} />
+            <Text
+              style={[
+                styles.sortChipText,
+                { color: statusBadge.fg, fontFamily: 'Manrope_600SemiBold' },
+              ]}
+            >
+              {statusKey ? t(statusKey) : serverJob.status}
+            </Text>
+          </View>
+        ),
+      },
+      {
+        key: 'type',
+        heading: t('jobd_tile_type'),
+        value: (
+          <Text style={infoValueStyle} numberOfLines={2}>
+            {[
+              t(serverJob.request_type === 'URGENT' ? 'jobs_urgent' : 'jobs_regular'),
+              t(
+                serverJob.booking_type === 'MULTI_DAY' ? 'booking_multi_day' : 'booking_one_time'
+              ),
+            ].join(' · ')}
+          </Text>
+        ),
+      },
+    ];
+    if (!isMultiDay && scheduledAt) {
+      const scheduledValue = scheduledLocal
+        ? singleDateLine
+        : scheduledLabel || formatDateTime(serverJob.scheduled_at);
+      infoTiles.push({
+        key: 'scheduled',
+        heading: t('jobd_tile_scheduled'),
+        value: <Text style={infoValueStyle}>{scheduledValue}</Text>,
+      });
+    }
+    infoTiles.push({
+      key: 'tasks',
+      heading: t('jobd_milestones'),
+      value: <Text style={infoValueStyle}>{String(milestones.length)}</Text>,
+    });
+    const hoursValue = isMultiDay ? (totalHours > 0 ? totalHours : null) : hours;
+    if (hoursValue !== null) {
+      infoTiles.push({
+        key: 'hours',
+        heading: isMultiDay ? t('jobd_tile_total_hours') : t('jobd_tile_hours'),
+        value: (
+          <Text style={infoValueStyle}>
+            {hoursValue === 1
+              ? t('post_hours_value', { n: hoursValue })
+              : t('post_hours_value_plural', { n: hoursValue })}
+          </Text>
+        ),
+      });
+    }
+    if (createdOn) {
+      infoTiles.push({
+        key: 'created',
+        heading: t('jobd_tile_created'),
+        value: <Text style={infoValueStyle}>{createdOn}</Text>,
+      });
+    }
+    infoTiles.push({
+      key: 'provider',
+      heading: t('jobd_tile_provider'),
+      value: (
+        <Text style={infoValueStyle}>
+          {providerAssigned && serverJob.assigned_provider_id != null
+            ? t('jobd_provider_n', { id: serverJob.assigned_provider_id }) +
+              (assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : '')
+            : t('jobd_not_assigned')}
+        </Text>
+      ),
+    });
+    if (completedOn) {
+      infoTiles.push({
+        key: 'completed',
+        heading: t('jobd_tile_completed'),
+        value: <Text style={infoValueStyle}>{completedOn}</Text>,
+      });
+    }
+    const infoTilesOdd = infoTiles.length % 2 === 1;
+
     // Visibility comes from the BACKEND's permission flags only. The one extra
     // condition on each convert action is direction: "Convert to Regular" is never
     // offered on a job that is already regular, and "Convert to Urgent" never on one
@@ -1339,15 +1454,23 @@ export default function BiddingDashboardScreen() {
       <View style={[styles.root, { backgroundColor: c.background }]}>
         <StatusBar style={statusBarLight ? 'light' : 'auto'} />
         {serverHeader(serverJob.title, description)}
-        {/* The fade: the hero colour blends into the screen background so the
-            Status section below reads as one connected header block. */}
+        {/* The fade: OPAQUE stops interpolated in RGB between the hero green
+            and the exact page background — the first stop IS the hero colour
+            (no seam) and nothing ever passes through 'transparent'
+            (rgba(0,0,0,0) is what mixed with black and read as mud-gray). */}
         <LinearGradient
-          colors={[c.heroCard, c.background]}
+          colors={interpolateColorStops(c.heroCard, c.background, 6)}
           style={styles.heroFade}
         />
 
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 20 }}
+          contentContainerStyle={{
+            padding: 20,
+            // First section sits 10dp under the fade — no white gap, same
+            // horizontal padding as the rest of the content.
+            paddingTop: 10,
+            paddingBottom: insets.bottom + 20,
+          }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -1382,72 +1505,31 @@ export default function BiddingDashboardScreen() {
             </View>
           ) : null}
 
-          {/* request_type, status and booking_type — all three enums are the
-              server's, and an unrecognised status falls back to the raw value
-              in a neutral chip rather than disappearing. */}
-          {/* FIX (Job Details status): the bare "Open" chip between the type
-              chips is gone — the real status now lives in its own headed
-              section with a theme-consistent badge (Cancelled reads loud red). */}
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('jobd_status_title')}</Text>
-          </View>
+          {/* FIX (Job Details info): the standalone Status heading, the chip
+              rows and the icon text lines below are replaced by ONE compact
+              tile grid — a muted heading above a bold value per piece, two
+              columns, and the last tile stretched full width when the count
+              is odd. Every VALUE is exactly what the old lines showed; only
+              the layout changed. The grid starts right after the fade (the
+              root has no extra top padding), so there is no white gap. */}
           <View
-            style={[
-              styles.sortChip,
-              {
-                backgroundColor: statusBadge.bg,
-                alignSelf: 'flex-start',
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-              },
-            ]}
+            style={[styles.infoGrid, { marginTop: isJobPausedStatus(serverJob) ? 14 : 0 }]}
           >
-            <View style={[styles.statusDot, { backgroundColor: statusBadge.fg }]} />
-            <Text
-              style={[
-                styles.sortChipText,
-                { color: statusBadge.fg, fontFamily: 'Manrope_600SemiBold' },
-              ]}
-            >
-              {statusKey ? t(statusKey) : serverJob.status}
-            </Text>
-          </View>
-
-          {/* request_type and booking_type chips ... */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <View
-              style={[
-                styles.sortChip,
-                {
-                  backgroundColor: serverJob.is_urgent ? c.urgentLight : c.successLight,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                },
-              ]}
-            >
-              <Feather
-                name={serverJob.is_urgent ? 'zap' : 'clock'}
-                size={11}
-                color={serverJob.is_urgent ? c.urgent : c.success}
-              />
-              <Text
+            {infoTiles.map((tile, index) => (
+              <View
+                key={tile.key}
                 style={[
-                  styles.sortChipText,
-                  { color: serverJob.is_urgent ? c.urgent : c.success },
+                  styles.infoTile,
+                  { backgroundColor: c.card, borderColor: c.border },
+                  infoTilesOdd && index === infoTiles.length - 1 ? styles.infoTileFull : null,
                 ]}
               >
-                {t(serverJob.request_type === 'URGENT' ? 'jobs_urgent' : 'jobs_regular')}
-              </Text>
-            </View>
-            <View style={[styles.sortChip, { backgroundColor: c.muted }]}>
-              <Text style={[styles.sortChipText, { color: c.mutedForeground }]}>
-                {t(
-                  serverJob.booking_type === 'MULTI_DAY' ? 'booking_multi_day' : 'booking_one_time'
-                )}
-              </Text>
-            </View>
+                <Text style={[styles.infoHeading, { color: c.mutedForeground }]}>
+                  {tile.heading}
+                </Text>
+                {tile.value}
+              </View>
+            ))}
           </View>
 
           {/* DRAFT-only: publishing a job that is already out there makes no
@@ -1488,87 +1570,6 @@ export default function BiddingDashboardScreen() {
               />
             </View>
           ) : null}
-
-          {/* FIX (summary): the old info block showed only Task 1's date and
-              hours. Multi-day jobs now show the task count and the total
-              expected hours of every task; single-day jobs keep their date and
-              the full stored window plus expected hours. Created/provider
-              lines are unchanged. */}
-          <View style={{ marginTop: 14, gap: 8 }}>
-            {isMultiDay ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Feather name="layers" size={13} color={c.mutedForeground} />
-                  <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                    {t('jobd_summary_tasks', { n: milestones.length })}
-                  </Text>
-                </View>
-                {totalHours > 0 ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="clock" size={13} color={c.mutedStrong} />
-                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                      {t('jobd_summary_total_hours', { n: totalHours })}
-                    </Text>
-                  </View>
-                ) : null}
-              </>
-            ) : (
-              <>
-                {scheduledAt ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="calendar" size={13} color={c.mutedStrong} />
-                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                      {scheduledLocal
-                        ? singleDateLine
-                        : scheduledLabel || formatDateTime(serverJob.scheduled_at)}
-                    </Text>
-                  </View>
-                ) : null}
-                {hours !== null ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="clock" size={13} color={c.mutedStrong} />
-                    <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                      {hours === 1
-                        ? t('post_hours_value', { n: hours })
-                        : t('post_hours_value_plural', { n: hours })}
-                    </Text>
-                  </View>
-                ) : null}
-              </>
-            )}
-            {createdOn ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="info" size={13} color={c.mutedStrong} />
-                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                  {t('jobd_created', { date: createdOn })}
-                </Text>
-              </View>
-            ) : null}
-            {providerAssigned && serverJob.assigned_provider_id != null ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-check" size={13} color={c.mutedStrong} />
-                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                  {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
-                  {assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : ''}
-                </Text>
-              </View>
-            ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="user-x" size={13} color={c.mutedStrong} />
-                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                  {t('jobd_not_assigned')}
-                </Text>
-              </View>
-            )}
-            {completedOn ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="check-circle" size={13} color={c.mutedStrong} />
-                <Text style={[styles.metaLineStrong, { color: c.mutedStrong }]}>
-                  {t('jobd_completed_on', { date: completedOn })}
-                </Text>
-              </View>
-            ) : null}
-          </View>
 
           {/* View bids — the CLIENT's way into the Bids screen, which lists this
               job's incoming offers (GET /api/v1/jobs/{job_id}/bids). Gated by
@@ -2310,8 +2311,8 @@ const styles = StyleSheet.create({
   metaLine: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'left' },
   metaLineStrong: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textAlign: 'left' },
   hero: {
-    borderBottomLeftRadius: 26,
-    borderBottomRightRadius: 26,
+    // FULL-BLEED green block: no rounded bottom corners (the curve is what
+    // let white notches show beside the full-width fade strip below).
     paddingHorizontal: 20,
     paddingBottom: 18,
   },
@@ -2324,7 +2325,20 @@ const styles = StyleSheet.create({
     marginTop: 6,
     opacity: 0.85,
   },
-  heroFade: { height: 26 },
+  heroFade: { height: 56 },
+  // ── Info tile grid (heading + value, 2 columns) ──────────────────────────
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  infoTile: {
+    width: '48%',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
+    justifyContent: 'center',
+  },
+  infoTileFull: { width: '100%' },
+  infoHeading: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  infoValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   bodyLine: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20, textAlign: 'left' },
   milestoneTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
 });

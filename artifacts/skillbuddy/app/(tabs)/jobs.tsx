@@ -21,10 +21,12 @@ import EmptyState from '@/components/EmptyState';
 import NearbyJobsFeed from '@/components/NearbyJobsFeed';
 import MyBidsFeed from '@/components/MyBidsFeed';
 import JobsFilterSheet from '@/components/JobsFilterSheet';
+import TabGreenHeader from '@/components/TabGreenHeader';
 import {
   EMPTY_JOB_FILTERS,
   activeFilterCount,
   activeFilterIds,
+  filterJobsBySearch,
   isClientProfileMissing,
   jobStatusLabelKey,
   removeFilter,
@@ -41,17 +43,29 @@ import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
  * The client's job list, backed by GET /api/v1/jobs.
  *
  * The list endpoint returns a bare array of the LIGHT job summary, so each card
- * renders only those fields; tapping a card opens the details screen, which is
- * the screen that loads GET /api/v1/jobs/{job_id}.
+ * renders only those fields; tapping a card opens the details screen, which
+ * is the screen that loads GET /api/v1/jobs/{job_id}.
  *
  * Pagination is offset-based (limit 20), and a page shorter than the limit ends
  * the list — there is no total count to read (see hooks/useJobList).
  *
- * FILTERS: one compact row — a Filters button carrying the number of active
- * filters, plus one removable chip per active filter. The filters themselves live
- * in a single bottom sheet (components/JobsFilterSheet) built with the same sheet
- * component as every other picker, and the sheet edits a local draft so opening
- * it can never change the list.
+ * HEADER (FIX): the SAME green TabGreenHeader the Services tab uses — green
+ * behind the status bar, rounded bottom, light status-bar icons, "Jobs /
+ * My Jobs" on the left, the white "Post a Job" pill on the right, and the
+ * white search bar + square filter button underneath (client mode only). The
+ * filter button opens the SAME JobsFilterSheet as before.
+ *
+ * SEARCH: debounced 300 ms, client-side over the loaded pages, matching the
+ * job title and the READABLE, translated status label — combined with (never
+ * replacing) the server-side filters, because the filters already shaped
+ * `jobs` before search runs. A search with no hits shows its own "No jobs
+ * found" state, distinct from the fetch-error card.
+ *
+ * FILTERS: one slim row below the header — the active-filter chips (each
+ * removable), a Reset action, and the result count. The filters themselves
+ * live in a single bottom sheet (components/JobsFilterSheet) built with the
+ * same sheet component as every other picker, and the sheet edits a local
+ * draft so opening it can never change the list.
  *
  * STATES: a 200 with an empty array is an EMPTY state (with and without filters),
  * and an error card appears only for a real failure — with a message that matches
@@ -61,6 +75,8 @@ import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
  *   Available  GET /api/v1/providers/me/nearby-jobs (components/NearbyJobsFeed)
  *   My Bids    GET /api/v1/bids/mine                (components/MyBidsFeed)
  * "Active" stays HIDDEN: no endpoint lists a provider's active jobs yet.
+ * Provider mode uses the same green header (title + subtitle), but no search,
+ * no Post button and no client filters — its own chip row below drives it.
  */
 
 /**
@@ -84,6 +100,10 @@ function JobsScreen() {
   const { activeRole } = useRole();
   const [providerTab, setProviderTab] = useState<ProviderTab>('available');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  /** What the user typed — updates instantly so every keystroke is visible. */
+  const [searchText, setSearchText] = useState('');
+  /** The filtering query — a 300 ms-debounced copy of searchText. */
+  const [query, setQuery] = useState('');
   const providerMode = activeRole === 'PROVIDER';
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
@@ -112,12 +132,33 @@ function JobsScreen() {
     if (!isAuthenticated) router.replace('/(auth)/login' as any);
   }, [authLoading, isAuthenticated, router]);
 
+  // Search debounce — same 300 ms rhythm as the Services tab.
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(searchText), 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
   const filtered = hasActiveFilters(filters);
   const filterCount = activeFilterCount(filters);
   const filterIds = activeFilterIds(filters);
+  const searchActive = query.trim().length > 0;
+
   // ONE decision for the whole screen: a 200 + [] is an empty state (never an
   // error), and an error card only appears when nothing is on screen.
   const view = resolveJobsViewState({ status, jobCount: jobs.length, hasFilters: filtered });
+
+  /**
+   * The visible rows: the server-filtered list narrowed by the search text.
+   * The label resolver injects the READABLE translated status label (the same
+   * one the cards show), keeping the filter rule a pure helper in lib/jobList.
+   */
+  const searched = useMemo(() => {
+    if (!searchActive) return jobs;
+    return filterJobsBySearch(jobs, query, (statusValue) => {
+      const key = jobStatusLabelKey(statusValue);
+      return key ? t(key) : String(statusValue ?? '');
+    });
+  }, [jobs, query, searchActive, t]);
 
   /** The label of one active-filter chip (translated, never a raw enum). */
   const filterChipLabel = (id: JobFilterId): string => {
@@ -129,6 +170,17 @@ function JobsScreen() {
       return filters.requestType === 'URGENT' ? t('jobs_urgent') : t('jobs_regular');
     }
     return t('jobs_filter_bidding');
+  };
+
+  const clearSearch = () => {
+    setSearchText('');
+    setQuery('');
+  };
+
+  /** One action for the Reset button and the search-empty state. */
+  const clearAll = () => {
+    clearSearch();
+    setFilters(EMPTY_JOB_FILTERS);
   };
 
   const openJob = (job: JobListItem) => {
@@ -227,25 +279,44 @@ function JobsScreen() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: c.text }]}>{t('jobs_title')}</Text>
-          <Text style={[styles.subtitle, { color: c.mutedForeground }]}>
-            {providerMode ? t('nearby_header_subtitle') : t('jobs_my_jobs')}
-          </Text>
-        </View>
-        {providerMode ? null : (
-          <TouchableOpacity
-            style={[styles.postBtn, { backgroundColor: c.primary }]}
-            onPress={() => router.push('/job/post' as any)}
-            accessibilityRole="button"
-          >
-            <Feather name="plus" size={16} color={c.primaryForeground} />
-            <Text style={[styles.postBtnText, { color: c.primaryForeground }]}>{t('post_a_job')}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+    <View style={[styles.root, { backgroundColor: c.background }]}>
+      {/* ── SHARED green header — the same surface the Services tab uses ──── */}
+      <TabGreenHeader
+        title={t('jobs_title')}
+        subtitle={providerMode ? t('nearby_header_subtitle') : t('jobs_my_jobs')}
+        right={
+          providerMode ? null : (
+            <TouchableOpacity
+              style={styles.postBtn}
+              onPress={() => router.push('/job/post' as any)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Feather name="plus" size={16} color={c.headerBg} />
+              <Text style={[styles.postBtnText, { color: c.headerBg }]}>{t('post_a_job')}</Text>
+            </TouchableOpacity>
+          )
+        }
+        search={
+          providerMode
+            ? null
+            : {
+                value: searchText,
+                onChange: setSearchText,
+                onClear: clearSearch,
+                placeholder: t('jobs_search_placeholder'),
+              }
+        }
+        filter={
+          providerMode
+            ? null
+            : {
+                count: filterCount,
+                onPress: () => setFilterSheetOpen(true),
+                label: t('jobs_filter_title'),
+              }
+        }
+      />
 
       {providerMode ? (
         <>
@@ -287,43 +358,11 @@ function JobsScreen() {
         </>
       ) : (
         <>
-          {/* ONE compact filter row: the Filters button (+ active count) and the
-              active filters as removable chips. The row wraps, so it can never
+          {/* ONE slim summary row: the active-filter chips (each removable) with
+              a Reset action, and the result count. It wraps, so it can never
               push anything off-screen however long a translated label is. */}
-          <View style={[styles.filterBlock, { borderBottomColor: c.border }]}>
-            <View style={styles.filterRow}>
-              <TouchableOpacity
-                style={[
-                  styles.filterBtn,
-                  {
-                    backgroundColor: filterCount > 0 ? c.primary : c.muted,
-                    borderColor: filterCount > 0 ? c.primary : c.border,
-                  },
-                ]}
-                onPress={() => setFilterSheetOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel={t('jobs_filter_title')}
-              >
-                <Feather
-                  name="sliders"
-                  size={14}
-                  color={filterCount > 0 ? c.primaryForeground : c.mutedForeground}
-                />
-                <Text
-                  style={[
-                    styles.filterBtnText,
-                    { color: filterCount > 0 ? c.primaryForeground : c.text },
-                  ]}
-                >
-                  {t('jobs_filters_button')}
-                </Text>
-                {filterCount > 0 ? (
-                  <View style={[styles.badge, { backgroundColor: c.primaryForeground }]}>
-                    <Text style={[styles.badgeText, { color: c.primary }]}>{filterCount}</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-
+          <View style={[styles.summaryRow, { borderBottomColor: c.border }]}>
+            <View style={styles.summaryChips}>
               {filterIds.length === 0 ? (
                 <Text style={[styles.allJobs, { color: c.mutedForeground }]}>
                   {t('jobs_all_jobs_quiet')}
@@ -347,7 +386,22 @@ function JobsScreen() {
                   </TouchableOpacity>
                 ))
               )}
+              {filterCount > 0 || searchActive ? (
+                <TouchableOpacity
+                  onPress={clearAll}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('jobs_search_clear')}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Text style={[styles.resetLink, { color: c.primary }]}>
+                    {t('jobs_filter_reset')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
+            <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
+              {t('jobs_result_count', { n: searched.length })}
+            </Text>
           </View>
 
           {view === 'loading' ? (
@@ -358,7 +412,7 @@ function JobsScreen() {
             errorCard
           ) : (
             <FlatList
-              data={jobs}
+              data={searched}
               keyExtractor={(job) => String(job.id)}
               contentContainerStyle={{
                 padding: 20,
@@ -378,21 +432,29 @@ function JobsScreen() {
                 />
               }
               ListEmptyComponent={
-                view === 'empty-filtered' ? (
-                  <EmptyState
-                    icon="filter"
-                    title={t('jobs_empty_filtered_title')}
-                    subtitle={t('jobs_empty_filtered_sub')}
-                    actionLabel={t('jobs_filter_reset')}
-                    onAction={() => setFilters(EMPTY_JOB_FILTERS)}
-                  />
-                ) : (
+                view === 'empty' ? (
                   <EmptyState
                     icon="briefcase"
                     title={t('jobs_empty_title')}
                     subtitle={t('jobs_empty_hint')}
                     actionLabel={t('post_a_job')}
                     onAction={() => router.push('/job/post' as any)}
+                  />
+                ) : searchActive ? (
+                  <EmptyState
+                    icon="search"
+                    title={t('jobs_search_empty_title')}
+                    subtitle={t('jobs_search_empty_sub')}
+                    actionLabel={t('jobs_search_clear')}
+                    onAction={clearAll}
+                  />
+                ) : (
+                  <EmptyState
+                    icon="filter"
+                    title={t('jobs_empty_filtered_title')}
+                    subtitle={t('jobs_empty_filtered_sub')}
+                    actionLabel={t('jobs_filter_reset')}
+                    onAction={() => setFilters(EMPTY_JOB_FILTERS)}
                   />
                 )
               }
@@ -422,53 +484,38 @@ function JobsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    borderBottomWidth: 1,
-  },
-  title: { fontFamily: 'Manrope_700Bold', fontSize: 22 },
-  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 12, marginTop: 2 },
+  // White "Post a Job" pill on the green header (a green button would
+  // disappear on green) — same action as before.
   postBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
   },
   postBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
-  filterBlock: { borderBottomWidth: 1, paddingVertical: 10, gap: 8 },
-  filterRow: {
+
+  // Slim summary row below the header.
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  summaryChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    paddingHorizontal: 20,
     alignItems: 'center',
+    flex: 1,
   },
-  filterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  filterBtnText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
-  badge: {
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { fontFamily: 'Manrope_700Bold', fontSize: 10 },
+  resetLink: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  resultCount: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   allJobs: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
   activeChip: {
     flexDirection: 'row',
@@ -481,8 +528,19 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   activeChipText: { fontFamily: 'Manrope_500Medium', fontSize: 12, flexShrink: 1 },
+
+  // Provider chip row (unchanged).
+  filterBlock: { borderBottomWidth: 1, paddingVertical: 10, gap: 8 },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+
   stateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   stateCard: {
     alignItems: 'center',

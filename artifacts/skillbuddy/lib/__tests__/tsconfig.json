@@ -57,6 +57,8 @@
     "./postDetails.test.ts",
     "./postAddress.test.ts",
     "./translations.test.ts",
-    "./jobStatus.test.ts"
+    "./jobStatus.test.ts",
+    "./colorStops.test.ts",
+    "./fetchRetry.test.ts"
   ]
 }

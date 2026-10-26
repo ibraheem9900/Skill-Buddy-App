@@ -242,6 +242,39 @@ export function removeFilter(filters: JobListFilters, id: JobFilterId): JobListF
   return { ...filters, onlyActivelyBidding: false };
 }
 
+/* ── Search: one pure rule the Jobs screen filters with ───────────────────── */
+
+/**
+ * Client-side search over the already-loaded (and server-filtered) list.
+ *
+ * Matches the job TITLE and the READABLE, translated status label — the same
+ * label the cards and chips show — case-insensitively. The label resolver is
+ * injected so this stays pure: the screen passes `t(jobStatusLabelKey(status))`,
+ * tests pass a fixed mapper.
+ *
+ * An empty/blank query returns the list untouched. The active server filters
+ * are already applied to `jobs` by the time this runs, so search COMBINES with
+ * them instead of replacing them.
+ */
+export function filterJobsBySearch(
+  jobs: JobListItem[],
+  rawQuery: string,
+  statusTextOf: (status: JobApiStatus) => string
+): JobListItem[] {
+  const q = (rawQuery ?? '').trim().toLowerCase();
+  if (q.length === 0) return jobs;
+  return jobs.filter((job) => {
+    const title = (job.title ?? '').toLowerCase();
+    let statusText = '';
+    try {
+      statusText = (statusTextOf(job.status) ?? '').toLowerCase();
+    } catch {
+      statusText = '';
+    }
+    return title.includes(q) || statusText.includes(q);
+  });
+}
+
 /* ── Why the list is empty, and why a load failed ─────────────────────────── */
 
 /**
