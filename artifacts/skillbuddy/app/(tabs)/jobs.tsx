@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Platform,
   RefreshControl,
@@ -34,6 +35,13 @@ import {
   type JobFilterId,
 } from '@/lib/jobList';
 import useJobList, { hasActiveFilters } from '@/hooks/useJobList';
+import {
+  addHiddenId,
+  filterHiddenJobs,
+  readHiddenJobIds,
+  removeHiddenId,
+  writeHiddenJobIds,
+} from '@/lib/hiddenJobs';
 import { useRole } from '@/context/RoleContext';
 import type { JobListItem } from '@/types';
 import type { TranslationKey } from '@/context/LanguageContext';
@@ -96,7 +104,7 @@ function JobsScreen() {
   const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { activeRole } = useRole();
   const [providerTab, setProviderTab] = useState<ProviderTab>('available');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -104,6 +112,18 @@ function JobsScreen() {
   const [searchText, setSearchText] = useState('');
   /** The filtering query — a 300 ms-debounced copy of searchText. */
   const [query, setQuery] = useState('');
+  /**
+   * REMOVED JOBS (client list): finished jobs the user removed, hidden on this
+   * device for THIS user id. Local-only by design — there is no remove-job
+   * endpoint (see lib/jobRemoval for the evidence and the backend spec).
+   */
+  const userId = user?.id ?? null;
+  const [hiddenJobIds, setHiddenJobIds] = useState<number[]>([]);
+  /** The card currently fading out (its row is dropped right after). */
+  const [removingJobId, setRemovingJobId] = useState<number | null>(null);
+  /** A short confirmation (or error) message shown above the tab bar. */
+  const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const providerMode = activeRole === 'PROVIDER';
   const TAB_HEIGHT = Platform.OS === 'web' ? 84 : 60;
 
@@ -138,6 +158,71 @@ function JobsScreen() {
     return () => clearTimeout(timer);
   }, [searchText]);
 
+  /** Load this user's removed-job ids (an account switch reads its own list). */
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId) {
+      setHiddenJobIds([]);
+      return;
+    }
+    void readHiddenJobIds(userId).then((ids) => {
+      if (!cancelled) setHiddenJobIds(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  /** Show a short-lived message (a failed removal gets the error tone). */
+  const showToast = useCallback((text: string, tone: 'ok' | 'error' = 'ok') => {
+    setToast({ text, tone });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  /**
+   * Remove a finished job from THIS list.
+   *
+   * The card fades out first (180 ms), then the id is added to the hidden list
+   * and persisted. A failed write restores the id AND the card, and says so — a
+   * removal must never look successful when it was not stored.
+   */
+  const confirmRemoveJob = useCallback(
+    (job: JobListItem) => {
+      Alert.alert(t('jobs_remove_confirm_title'), t('jobs_remove_confirm_msg'), [
+        { text: t('action_cancel'), style: 'cancel' },
+        {
+          text: t('jobs_remove_confirm_ok'),
+          style: 'destructive',
+          onPress: () => {
+            setRemovingJobId(job.id);
+            setTimeout(() => {
+              const previous = hiddenJobIds;
+              const next = addHiddenId(previous, job.id);
+              setHiddenJobIds(next);
+              setRemovingJobId(null);
+              void writeHiddenJobIds(userId, next).then((stored) => {
+                if (stored) {
+                  showToast(t('jobs_removed_toast'));
+                } else {
+                  setHiddenJobIds(removeHiddenId(next, job.id));
+                  showToast(t('jobs_remove_failed'), 'error');
+                }
+              });
+            }, 180);
+          },
+        },
+      ]);
+    },
+    [hiddenJobIds, showToast, t, userId]
+  );
+
   const filtered = hasActiveFilters(filters);
   const filterCount = activeFilterCount(filters);
   const filterIds = activeFilterIds(filters);
@@ -159,6 +244,16 @@ function JobsScreen() {
       return key ? t(key) : String(statusValue ?? '');
     });
   }, [jobs, query, searchActive, t]);
+
+  /**
+   * What the list actually renders: the fetched, filtered, searched rows MINUS
+   * the jobs this user has removed. The counter reads from this, so it always
+   * matches the cards on screen.
+   */
+  const visibleJobs = useMemo(
+    () => filterHiddenJobs(searched, hiddenJobIds),
+    [searched, hiddenJobIds]
+  );
 
   /** The label of one active-filter chip (translated, never a raw enum). */
   const filterChipLabel = (id: JobFilterId): string => {
@@ -400,7 +495,7 @@ function JobsScreen() {
               ) : null}
             </View>
             <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
-              {t('jobs_result_count', { n: searched.length })}
+              {t('jobs_result_count', { n: visibleJobs.length })}
             </Text>
           </View>
 
@@ -412,7 +507,7 @@ function JobsScreen() {
             errorCard
           ) : (
             <FlatList
-              data={searched}
+              data={visibleJobs}
               keyExtractor={(job) => String(job.id)}
               contentContainerStyle={{
                 padding: 20,
@@ -432,7 +527,11 @@ function JobsScreen() {
                 />
               }
               ListEmptyComponent={
-                view === 'empty' ? (
+                // `view === 'empty'` is the fetched-empty case; the second
+                // condition is a list the user emptied HIMSELF by removing
+                // finished jobs — same "no jobs" state, never an error.
+                view === 'empty' ||
+                (visibleJobs.length === 0 && !searchActive && !filtered) ? (
                   <EmptyState
                     icon="briefcase"
                     title={t('jobs_empty_title')}
@@ -461,11 +560,40 @@ function JobsScreen() {
               ListFooterComponent={footer()}
               renderItem={({ item, index }) => (
                 <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 60).duration(350)}>
-                  <JobCard job={item} onPress={() => openJob(item)} />
+                  <JobCard
+                    job={item}
+                    onPress={() => openJob(item)}
+                    onRemove={() => confirmRemoveJob(item)}
+                    removing={removingJobId === item.id}
+                  />
                 </Animated.View>
               )}
             />
           )}
+
+          {/* A short confirmation above the tab bar: removed-jobs feedback. */}
+          {toast ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.toast,
+                {
+                  backgroundColor: c.card,
+                  borderColor: toast.tone === 'error' ? c.destructive : c.primary,
+                  bottom: TAB_HEIGHT + insets.bottom + 12,
+                },
+              ]}
+            >
+              <Feather
+                name={toast.tone === 'error' ? 'alert-circle' : 'check-circle'}
+                size={14}
+                color={toast.tone === 'error' ? c.destructive : c.primary}
+              />
+              <Text style={[styles.toastText, { color: c.text }]} numberOfLines={2}>
+                {toast.text}
+              </Text>
+            </View>
+          ) : null}
 
           <JobsFilterSheet
             visible={filterSheetOpen}
@@ -554,6 +682,19 @@ const styles = StyleSheet.create({
   stateText: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center' },
   retryBtn: { marginTop: 4, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 22 },
   retryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  toast: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  toastText: { fontFamily: 'Manrope_500Medium', fontSize: 12, flex: 1 },
   footer: { paddingVertical: 16, alignItems: 'center' },
   footerText: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
 });

@@ -47,7 +47,7 @@ export default function NearbyJobCard({ job, categoryName, serviceName, onPress 
     <TouchableOpacity
       style={[
         styles.card,
-        { backgroundColor: c.card, borderColor: urgent ? c.urgent : c.border },
+        { backgroundColor: c.card, borderColor: urgent ? c.urgentBorder : c.border },
       ]}
       onPress={onPress}
       activeOpacity={0.85}
@@ -58,17 +58,17 @@ export default function NearbyJobCard({ job, categoryName, serviceName, onPress 
           style={[
             styles.badge,
             {
-              backgroundColor: urgent ? c.urgentLight : c.primaryLight,
-              borderColor: urgent ? c.urgent : c.primary,
+              backgroundColor: urgent ? c.urgentBg : c.primaryLight,
+              borderColor: urgent ? c.urgentBorder : c.primary,
             },
           ]}
         >
           <Feather
             name={urgent ? 'clock' : 'calendar'}
             size={11}
-            color={urgent ? c.urgent : c.primary}
+            color={urgent ? c.urgentText : c.primary}
           />
-          <Text style={[styles.badgeText, { color: urgent ? c.urgent : c.primary }]}>
+          <Text style={[styles.badgeText, { color: urgent ? c.urgentText : c.primary }]}>
             {urgent ? t('jobs_urgent') : t('jobs_regular')}
           </Text>
         </View>

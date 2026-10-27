@@ -63,7 +63,7 @@ export default function BidResultBanner() {
         accessibilityRole="button"
         accessibilityLabel={t('mybids_result_dismiss')}
       >
-        <View style={[styles.icon, { backgroundColor: accepted ? c.successLight : c.urgentLight }]}>
+        <View style={[styles.icon, { backgroundColor: accepted ? c.successLight : c.destructiveLight }]}>
           <Feather
             name={accepted ? 'check-circle' : 'x-circle'}
             size={16}

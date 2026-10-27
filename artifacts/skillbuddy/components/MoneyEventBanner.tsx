@@ -59,7 +59,7 @@ export default function MoneyEventBanner({ topOffset = 0 }: { topOffset?: number
     content.tone === 'success'
       ? c.success
       : content.tone === 'warning'
-        ? c.urgent
+        ? c.destructive
         : content.tone === 'danger'
           ? c.destructive
           : c.primary;
@@ -67,7 +67,7 @@ export default function MoneyEventBanner({ topOffset = 0 }: { topOffset?: number
     content.tone === 'success'
       ? c.successLight
       : content.tone === 'warning' || content.tone === 'danger'
-        ? c.urgentLight
+        ? c.destructiveLight
         : c.surface;
 
   const open = () => {

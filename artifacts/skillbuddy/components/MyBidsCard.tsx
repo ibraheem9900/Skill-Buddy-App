@@ -67,7 +67,7 @@ export default function MyBidsCard({ bid, title, titleFailed = false, onPress }:
         return { bg: c.successLight, fg: c.success };
       case 'REJECTED':
         // `urgentLight` is the palette's destructive tint (constants/colors.ts).
-        return { bg: c.urgentLight, fg: c.destructive };
+        return { bg: c.destructiveLight, fg: c.destructive };
       case 'PENDING':
         return { bg: c.primaryLight, fg: c.primary };
       default:

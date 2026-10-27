@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -9,6 +9,7 @@ import {
   parseExpectedHours,
   resolveBiddingEndsAt,
 } from '@/lib/jobList';
+import { canRemoveJob } from '@/lib/jobRemoval';
 import type { JobListItem } from '@/types';
 import CountdownTimer from './CountdownTimer';
 
@@ -27,16 +28,45 @@ import CountdownTimer from './CountdownTimer';
 export default function JobCard({
   job,
   onPress,
+  onRemove,
+  removing = false,
 }: {
   job: JobListItem;
   onPress: () => void;
+  /**
+   * Removes a FINISHED job from this list (local hide — no such endpoint exists,
+   * see lib/jobRemoval). Omitted = no button, so a caller without a store never
+   * renders a dead control.
+   */
+  onRemove?: () => void;
+  /** True while the removal is being persisted (disables the button). */
+  removing?: boolean;
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
 
+  /**
+   * The removal fade: when the screen marks this card as `removing`, the card
+   * fades out (180 ms, the platform's own Animated — no new dependency) before
+   * the row is dropped from the list.
+   */
+  const fade = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!removing) return;
+    Animated.timing(fade, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [fade, removing]);
+
   const urgent = job.is_urgent;
-  const accent = urgent ? c.urgent : c.success;
-  const accentLight = urgent ? c.urgentLight : c.successLight;
+  // URGENT wears the web-matched amber (c.urgentText/c.urgentBg — see
+  // constants/colors); the destructive red stays for Expired / Cancelled.
+  const accent = urgent ? c.urgentText : c.success;
+  const accentLight = urgent ? c.urgentBg : c.successLight;
+  /** The status rule from lib/jobRemoval — terminal jobs only. */
+  const removable = !!onRemove && canRemoveJob(job);
 
   const statusKey = jobStatusLabelKey(job.status);
   // The shared tone rule (lib/jobList) keeps this chip's colour identical to
@@ -57,10 +87,12 @@ export default function JobCard({
   );
 
   return (
+    <Animated.View style={{ opacity: fade }}>
     <TouchableOpacity
       style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
       onPress={onPress}
       activeOpacity={0.8}
+      disabled={removing}
     >
       <View style={styles.topRow}>
         <View style={[styles.urgencyChip, { backgroundColor: accentLight }]}>
@@ -76,7 +108,7 @@ export default function JobCard({
               {
                 backgroundColor:
                   statusTone === 'destructive'
-                    ? c.urgentLight
+                    ? c.destructiveLight
                     : statusTone === 'success'
                       ? c.successLight
                       : c.muted,
@@ -144,7 +176,33 @@ export default function JobCard({
           compact
         />
       ) : null}
+
+      {/* REMOVE: only for FINISHED jobs (terminal status, or bidding closed on
+          an OPEN job) and only when the screen passed a handler. Shown as a
+          compact full-width soft-red outline at the foot of the card, so it can
+          never be mistaken for a primary action. */}
+      {removable ? (
+        <TouchableOpacity
+          style={[
+            styles.removeBtn,
+            { borderColor: c.destructive, opacity: removing ? 0.5 : 1 },
+          ]}
+          onPress={onRemove}
+          disabled={removing}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={t('jobs_remove')}
+        >
+          {removing ? (
+            <ActivityIndicator size="small" color={c.destructive} />
+          ) : (
+            <Feather name="trash-2" size={14} color={c.destructive} />
+          )}
+          <Text style={[styles.removeText, { color: c.destructive }]}>{t('jobs_remove')}</Text>
+        </TouchableOpacity>
+      ) : null}
     </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -159,4 +217,15 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  removeBtn: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+  },
+  removeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 });

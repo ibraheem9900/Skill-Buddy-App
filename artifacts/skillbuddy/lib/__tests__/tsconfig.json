@@ -13,7 +13,10 @@
     "baseUrl": "../..",
     "paths": { "@/*": ["./*"] },
     "types": [],
-    "lib": ["es2020"]
+    // dom is here ONLY so the geocoding module's plain `fetch`/
+    // `URLSearchParams`/`Response` types resolve in this dependency-free
+    // harness; it adds no runtime dependency and no React Native types.
+    "lib": ["es2020", "dom"]
   },
   "files": [
     "./jobAddressUpdate.test.ts",
@@ -58,7 +61,10 @@
     "./postAddress.test.ts",
     "./translations.test.ts",
     "./jobStatus.test.ts",
-    "./colorStops.test.ts",
-    "./fetchRetry.test.ts"
+    "./fetchRetry.test.ts",
+    "./countdown.test.ts",
+    "./addressFormat.test.ts",
+    "./hiddenJobs.test.ts",
+    "./geocode.test.ts"
   ]
 }

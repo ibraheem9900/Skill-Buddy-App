@@ -398,7 +398,7 @@ function ProfileScreen() {
                 <View
                   style={[
                     styles.menuIcon,
-                    { backgroundColor: item.color ? c.urgentLight : c.accent },
+                    { backgroundColor: item.color ? c.destructiveLight : c.accent },
                   ]}
                 >
                   <Feather name={item.icon} size={18} color={item.color ?? c.primary} />

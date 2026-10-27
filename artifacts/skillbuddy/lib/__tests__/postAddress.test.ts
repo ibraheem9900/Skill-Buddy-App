@@ -101,16 +101,54 @@ eq('city id comes from the nested object', values.cityId, 3);
 eq('text fields are carried as trimmed strings', values.streetAddress, 'Main street');
 eq('a null formatted address becomes an empty string', values.formattedAddress, '');
 
-eq('the card line falls back to house + street', addressLine(address()), '12 Main street');
+// FIX (stale address): the card line is composed from the CURRENT fields by the
+// shared formatter, and the stored legacy `formatted_address` never wins — the
+// old assertions here encoded the bug (it showed the OLD address next to the new
+// field values on the same screen).
 eq(
-  'the saved formatted address wins when present',
+  'the card line is composed from the current fields',
+  addressLine(address()),
+  '12 Main street, 10111 Tallinn, Harju, Estonia'
+);
+eq(
+  'a stored formatted_address does NOT win over the current fields',
   addressLine(address({ formatted_address: '12 Main street, 10111 Tallinn' })),
+  '12 Main street, 10111 Tallinn, Harju, Estonia'
+);
+eq(
+  'the stored value is used only when there are no field values at all',
+  addressLine(
+    address({
+      formatted_address: '12 Main street, 10111 Tallinn',
+      house_number: null,
+      street_address: null,
+      postal_code: null,
+      city: null,
+      county: null,
+      country: null,
+    })
+  ),
   '12 Main street, 10111 Tallinn'
 );
 eq(
-  'with no text at all it falls back to the city',
+  'with no street it composes from whatever fields remain',
   addressLine(
     address({ formatted_address: '  ', house_number: null, street_address: null, city: { id: 3, name: 'Tallinn' } })
+  ),
+  '10111 Tallinn, Harju, Estonia'
+);
+eq(
+  'a city-only address renders just the city',
+  addressLine(
+    address({
+      formatted_address: null,
+      house_number: null,
+      street_address: null,
+      postal_code: null,
+      county: null,
+      country: null,
+      city: { id: 3, name: 'Tallinn' },
+    })
   ),
   'Tallinn'
 );

@@ -3,6 +3,7 @@ import { AppState, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { formatCountdown } from '@/lib/countdown';
 
 interface Props {
   endsAt: number; // epoch ms
@@ -11,17 +12,14 @@ interface Props {
   compact?: boolean;
 }
 
-function formatRemaining(ms: number): string {
-  if (ms <= 0) return '00:00';
-  const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) {
-    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
-  }
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
+/**
+ * The ONE formatter for every countdown in the app (lib/countdown).
+ *
+ * FIX: this component used to format inline and render `MM:SS` for anything
+ * under an hour — the job card showed "59:44" for a job with 2h 59m 44s left
+ * while Job Details showed the hours, because the two screens formatted
+ * separately. There is nothing to format here any more.
+ */
 
 export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: Props) {
   const { colors: c } = useTheme();
@@ -66,16 +64,23 @@ export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: P
     };
   }, [endsAt, onExpire]);
 
-  const accent = urgency === 'urgent' ? c.urgent : c.success;
-  const accentLight = urgency === 'urgent' ? c.urgentLight : c.successLight;
   const expired = remaining <= 0;
+  // A RUNNING urgent countdown wears the web-matched amber "urgent" tokens
+  // (see constants/colors: urgentBg/urgentText/urgentBorder); an EXPIRED one
+  // stays red — "Expired" is a destructive state, not an urgency level.
+  const accent = expired ? c.destructive : urgency === 'urgent' ? c.urgentText : c.success;
+  const accentLight = expired
+    ? c.destructiveLight
+    : urgency === 'urgent'
+      ? c.urgentBg
+      : c.successLight;
 
   if (compact) {
     return (
       <View style={[styles.compactWrap, { backgroundColor: accentLight }]}>
         <Feather name="clock" size={12} color={accent} />
         <Text style={[styles.compactText, { color: accent }]}>
-          {expired ? t('countdown_expired') : formatRemaining(remaining)}
+          {expired ? t('countdown_expired') : formatCountdown(remaining)}
         </Text>
       </View>
     );
@@ -88,7 +93,7 @@ export default function CountdownTimer({ endsAt, urgency, onExpire, compact }: P
         {urgency === 'urgent' ? t('countdown_urgent') : t('countdown_closes')}
       </Text>
       <Text style={[styles.time, { color: accent }]}>
-        {expired ? t('countdown_expired') : formatRemaining(remaining)}
+        {expired ? t('countdown_expired') : formatCountdown(remaining)}
       </Text>
     </View>
   );

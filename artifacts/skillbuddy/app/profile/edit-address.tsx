@@ -24,6 +24,8 @@ import useAddresses from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
 import { authApi } from '@/services/api';
 import { markNearbyStale } from '@/lib/nearbyStale';
+import { resolveFormattedAddressForSave } from '@/lib/addressFormat';
+import { geocodeAddress, needsGeocoding } from '@/lib/geocode';
 import {
   addressFormFrom,
   buildAddressWriteBody,
@@ -346,7 +348,7 @@ export default function EditAddressScreen() {
   );
 
   /** The form's values in the shared module's shape (validation + body agree). */
-  const formValues = (): AddressFormValues => ({
+  const formValues = (coords?: { latitude: string; longitude: string }): AddressFormValues => ({
     countryId,
     countyId,
     cityId,
@@ -355,8 +357,8 @@ export default function EditAddressScreen() {
     postalCode,
     landmark,
     formattedAddress,
-    latitude,
-    longitude,
+    latitude: coords?.latitude ?? latitude,
+    longitude: coords?.longitude ?? longitude,
   });
 
   /**
@@ -365,22 +367,31 @@ export default function EditAddressScreen() {
    * the pre-filled/updated picks; the coordinates are the shared module's parsed
    * PAIR (both numbers, or both empty).
    */
-  const buildPayload = () => {
-    const composedStreet = [houseNumber.trim(), streetAddress.trim()].filter(Boolean).join(' ');
-    const composed = [
-      composedStreet || null,
-      city?.name ?? null,
-      county?.name ?? null,
-      country?.name ?? null,
-    ]
-      .filter(Boolean)
-      .join(', ');
+  const buildPayload = (coords?: { latitude: string; longitude: string }) => {
+    // FIX (stale address, write side): the form pre-fills `formatted_address`
+    // from the server, and the old code re-sent that value unchanged — so the
+    // server's legacy string kept the OLD address forever, no matter how the
+    // fields changed. The shared rule now replaces an untouched/blank legacy
+    // value with the line composed from the CURRENT fields, while a value the
+    // user actually typed is kept. See lib/addressFormat.
     const body = buildAddressWriteBody({
-      ...formValues(),
+      ...formValues(coords),
       countryId: countryId!,
       countyId: countyId!,
       cityId: cityId!,
-      formattedAddress: formattedAddress.trim() || composed,
+      formattedAddress:
+        resolveFormattedAddressForSave({
+          typed: formattedAddress,
+          storedLegacy: source?.formatted_address ?? null,
+          fields: {
+            house_number: houseNumber,
+            street_address: streetAddress,
+            postal_code: postalCode,
+            city,
+            county,
+            country,
+          },
+        }) ?? '',
     });
     return { ...body, is_default: isDefault };
   };
@@ -405,7 +416,31 @@ export default function EditAddressScreen() {
     setSaving(true);
     setFieldErrors({});
     try {
-      await update(addressId, buildPayload());
+      // GEOCODING STOPGAP (lib/geocode): an address saved WITHOUT coordinates is
+      // re-sent with coordinates resolved from its own text via OpenStreetMap
+      // Nominatim — the stored pair on this account is Lahore (31.53, 74.37) for
+      // a Tallinn address, which is why the provider is invisible to the nearby
+      // feed. It is silent, rate-limited (1 req/s) and NEVER blocks the save: no
+      // result simply means the address is saved as before. Long-term this is a
+      // backend job — see the delivery report for the exact request.
+      let resolvedCoords: { latitude: string; longitude: string } | undefined;
+      if (needsGeocoding(latitude, longitude)) {
+        const resolved = await geocodeAddress({
+          house_number: houseNumber,
+          street_address: streetAddress,
+          postal_code: postalCode,
+          city: city?.name ?? null,
+          county: county?.name ?? null,
+          country: country?.name ?? null,
+        });
+        if (resolved) {
+          resolvedCoords = {
+            latitude: String(resolved.latitude),
+            longitude: String(resolved.longitude),
+          };
+        }
+      }
+      await update(addressId, buildPayload(resolvedCoords));
       // 200 — the SERVER response already replaced the shared cache; back
       // to the detail screen which re-reads it on focus. The nearby feed ranks
       // jobs by these coordinates, so it is marked stale for its next focus.

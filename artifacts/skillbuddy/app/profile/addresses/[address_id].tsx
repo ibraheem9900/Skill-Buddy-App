@@ -16,6 +16,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import useAddresses, { parseCoordinate } from '@/hooks/useAddresses';
+import { formatAddressLine, formatAddressRegion } from '@/lib/addressFormat';
+import { markNearbyStale } from '@/lib/nearbyStale';
 import type { AddressResponse } from '@/types';
 
 /** Formats an ISO date-time for display — never the raw string. */
@@ -25,14 +27,16 @@ const formatDate = (iso?: string | null) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 };
 
-/** Best-effort one-line title: formatted_address, then house+street, else a
- * generic label (schema fields are nullable). */
+/**
+ * FIX (stale address): the card's title is composed from the CURRENT fields by
+ * the ONE shared formatter. It used to prefer `formatted_address` — the legacy
+ * single-string field the server does NOT recompute — which is exactly why this
+ * card showed the OLD address ("Akademia tee 7A 24, …") while the Address
+ * section right below it showed the new values from the same response.
+ */
 const addressTitle = (a: AddressResponse) => {
-  const formatted = a.formatted_address?.trim();
-  if (formatted) return formatted;
-  const street = [a.house_number, a.street_address].filter(Boolean).join(' ').trim();
-  if (street) return street;
-  return null;
+  const line = formatAddressLine(a);
+  return line.length > 0 ? line : null;
 };
 
 /**
@@ -87,6 +91,11 @@ export default function AddressDetailScreen() {
             const wasDefault = !!address.is_default;
             try {
               await remove(address.id); // syncs the shared cache after 204
+              // FIX (checklist refresh): the provider's visibility checklist reads
+              // this address, so a deletion must make the nearby feed re-read it
+              // on its next focus — same flag the list screen and the edit screen
+              // already set after every write.
+              markNearbyStale();
               if (wasDefault) {
                 Alert.alert(t('addr_title'), t('addr_del_default_note'));
               }
@@ -161,9 +170,7 @@ export default function AddressDetailScreen() {
   }
 
   const title = address ? addressTitle(address) : null;
-  const regionLine = address
-    ? [address.city?.name, address.county?.name, address.country?.name].filter(Boolean).join(', ')
-    : '';
+  const regionLine = address ? formatAddressRegion(address) : '';
   const lat = address ? parseCoordinate(address.latitude, 'lat') : null;
   const lng = address ? parseCoordinate(address.longitude, 'lng') : null;
 
@@ -282,11 +289,19 @@ export default function AddressDetailScreen() {
             <Text style={[styles.sectionLabel, { color: c.mutedForeground }]}>{t('addr_d_meta')}</Text>
             <View style={[styles.metaCard, { backgroundColor: c.card, borderColor: c.border }]}>
               <View style={styles.metaRow}>
-                <Text style={[styles.metaLabel, { color: c.mutedForeground }]}>{t('addr_added')}</Text>
+                {/* FIX (placeholder): the label used to render t('addr_added')
+                    with NO vars, so the literal "{date}" stayed on screen while
+                    the date sat in the value column next to it. The label is now
+                    placeholder-free and the date is the row's value. */}
+                <Text style={[styles.metaLabel, { color: c.mutedForeground }]}>
+                  {t('addr_added_label')}
+                </Text>
                 <Text style={[styles.metaValue, { color: c.text }]}>{formatDate(address.created_at)}</Text>
               </View>
               <View style={styles.metaRow}>
-                <Text style={[styles.metaLabel, { color: c.mutedForeground }]}>{t('addr_updated')}</Text>
+                <Text style={[styles.metaLabel, { color: c.mutedForeground }]}>
+                  {t('addr_updated_label')}
+                </Text>
                 <Text style={[styles.metaValue, { color: c.text }]}>{formatDate(address.updated_at)}</Text>
               </View>
             </View>

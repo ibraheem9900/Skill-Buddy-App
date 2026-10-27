@@ -119,8 +119,8 @@ export default function WalletScreen() {
               const positive = amount >= 0;
               return (
                 <View key={String(tx.id)} style={[styles.txRow, { borderBottomColor: c.border }]}>
-                  <View style={[styles.txIcon, { backgroundColor: positive ? c.successLight : c.urgentLight }]}>
-                    <Feather name={positive ? 'plus' : 'minus'} size={14} color={positive ? c.success : c.urgent} />
+                  <View style={[styles.txIcon, { backgroundColor: positive ? c.successLight : c.destructiveLight }]}>
+                    <Feather name={positive ? 'plus' : 'minus'} size={14} color={positive ? c.success : c.destructive} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.txDesc, { color: c.text }]}>
@@ -131,7 +131,7 @@ export default function WalletScreen() {
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={[styles.txChange, { color: positive ? c.success : c.urgent }]}>
+                    <Text style={[styles.txChange, { color: positive ? c.success : c.destructive }]}>
                       {positive ? '+' : ''}€{formatMoney(tx.amount)}
                     </Text>
                     <Text style={[styles.txMeta, { color: c.mutedForeground }]}>
@@ -146,8 +146,8 @@ export default function WalletScreen() {
               const positive = points >= 0;
               return (
                 <View key={String(tx.id)} style={[styles.txRow, { borderBottomColor: c.border }]}>
-                  <View style={[styles.txIcon, { backgroundColor: positive ? c.successLight : c.urgentLight }]}>
-                    <Feather name={positive ? 'plus' : 'minus'} size={14} color={positive ? c.success : c.urgent} />
+                  <View style={[styles.txIcon, { backgroundColor: positive ? c.successLight : c.destructiveLight }]}>
+                    <Feather name={positive ? 'plus' : 'minus'} size={14} color={positive ? c.success : c.destructive} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.txDesc, { color: c.text }]}>
@@ -158,7 +158,7 @@ export default function WalletScreen() {
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={[styles.txChange, { color: positive ? c.success : c.urgent }]}>
+                    <Text style={[styles.txChange, { color: positive ? c.success : c.destructive }]}>
                       {positive ? '+' : ''}{points}
                     </Text>
                     <Text style={[styles.txMeta, { color: c.mutedForeground }]}>{tx.balance_after}</Text>

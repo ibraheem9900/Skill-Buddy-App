@@ -20,6 +20,7 @@ import BackButton from '@/components/BackButton';
 import useAddresses, { parseCoordinate } from '@/hooks/useAddresses';
 import { markNearbyStale } from '@/lib/nearbyStale';
 import { addressLocationStatus } from '@/lib/providerAddress';
+import { formatAddressLine, formatAddressRegion } from '@/lib/addressFormat';
 import type { AddressResponse } from '@/types';
 
 /** Formats an ISO date-time for display — never renders the raw string. */
@@ -29,15 +30,12 @@ const formatDate = (iso?: string | null) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 };
 
-/** Best-effort one-line title for an address: formatted_address first, then
- * house+street assembled, then a generic label (schema fields are all
- * nullable — the endpoint can return an address with no text fields). */
+/** The card's one-line title, composed from the CURRENT fields by the shared
+ * formatter (see lib/addressFormat) — never from the legacy `formatted_address`,
+ * which the server does not recompute and which therefore goes stale. */
 const addressTitle = (a: AddressResponse) => {
-  const formatted = a.formatted_address?.trim();
-  if (formatted) return formatted;
-  const street = [a.house_number, a.street_address].filter(Boolean).join(' ').trim();
-  if (street) return street;
-  return null;
+  const line = formatAddressLine(a);
+  return line.length > 0 ? line : null;
 };
 
 /**
@@ -132,9 +130,7 @@ export default function AddressesScreen() {
   );
 
   const title = address ? addressTitle(address) : null;
-  const regionLine = address
-    ? [address.city?.name, address.county?.name, address.country?.name].filter(Boolean).join(', ')
-    : '';
+  const regionLine = address ? formatAddressRegion(address) : '';
 
   return (
     <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top }]}>

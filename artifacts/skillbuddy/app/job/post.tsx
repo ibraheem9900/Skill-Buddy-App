@@ -1346,9 +1346,9 @@ export default function PostJobScreen() {
           title={t('post_urgent')}
           description={t('post_urgent_desc')}
           // The web app's gold token (--warning = oklch(0.78 0.16 75) = #F2A618).
-          accent={c.gold}
-          accentSoft={c.goldLight}
-          onAccent={c.goldForeground}
+          accent={c.urgentText}
+          accentSoft={c.urgentBg}
+          onAccent={c.urgentText}
           idle={c.muted}
           border={c.border}
           titleColor={c.text}

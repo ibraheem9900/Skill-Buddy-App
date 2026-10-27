@@ -53,7 +53,7 @@ function ResidencePermitRow() {
         ? '#FFF6E8'
         : status === 'not_submitted'
           ? c.muted
-          : c.urgentLight;
+          : c.destructiveLight;
 
   return (
     <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -146,7 +146,7 @@ function FaceVerificationRow() {
         ? '#FFF6E8'
         : status === 'not_submitted'
           ? c.muted
-          : c.urgentLight;
+          : c.destructiveLight;
 
   return (
     <View style={[styles.docCard, { backgroundColor: c.card, borderColor: c.border }]}>

@@ -1173,9 +1173,9 @@ export default function JobBidsScreen() {
         <Text style={[styles.jobTitle, { color: c.text }]}>{job?.title ?? ''}</Text>
         <View style={styles.jobMetaRow}>
           {job?.is_urgent ? (
-            <View style={[styles.urgentTag, { backgroundColor: c.urgentLight }]}>
-              <Feather name="zap" size={12} color={c.urgent} />
-              <Text style={[styles.urgentText, { color: c.urgent }]}>{t('cbids_urgent')}</Text>
+            <View style={[styles.urgentTag, { backgroundColor: c.urgentBg, borderColor: c.urgentBorder, borderWidth: 1 }]}>
+              <Feather name="zap" size={12} color={c.urgentText} />
+              <Text style={[styles.urgentText, { color: c.urgentText }]}>{t('cbids_urgent')}</Text>
             </View>
           ) : (
             <View style={[styles.urgentTag, { backgroundColor: c.successLight }]}>

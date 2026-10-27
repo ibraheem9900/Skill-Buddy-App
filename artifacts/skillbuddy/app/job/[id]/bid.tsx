@@ -1059,15 +1059,15 @@ export default function PlaceBidScreen() {
             <View
               style={[
                 styles.closedBanner,
-                { backgroundColor: c.urgentLight, borderColor: c.urgent, alignItems: 'flex-start' },
+                { backgroundColor: c.destructiveLight, borderColor: c.destructive, alignItems: 'flex-start' },
               ]}
             >
-              <Feather name="alert-circle" size={14} color={c.urgent} />
+              <Feather name="alert-circle" size={14} color={c.destructive} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.closedText, { color: c.urgent }]}>
+                <Text style={[styles.closedText, { color: c.destructive }]}>
                   {t('nearby_unavailable_title')}
                 </Text>
-                <Text style={[styles.closedText, { color: c.urgent }]}>
+                <Text style={[styles.closedText, { color: c.destructive }]}>
                   {t('nearby_unavailable_sub')}
                 </Text>
               </View>

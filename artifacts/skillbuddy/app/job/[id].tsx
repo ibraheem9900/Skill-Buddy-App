@@ -4,8 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
-import { interpolateColorStops } from '@/lib/colorStops';
 import { StatusBar } from 'expo-status-bar';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
@@ -40,6 +38,7 @@ import {
 } from '@/lib/jobList';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
 import { canAddJobAddress } from '@/lib/jobAddress';
+import { formatAddressLine } from '@/lib/addressFormat';
 import { canClientCancelJob } from '@/lib/jobCancel';
 import {
   canProviderCancelJob,
@@ -138,6 +137,23 @@ import type { Bid, BidProvider } from '@/types';
 
 type SortMode = 'recommended' | 'lowPrice' | 'highRating' | 'distance' | 'badge';
 
+/**
+ * Split a list into pairs, so a grid renders as rows of two.
+ *
+ * WHY (alignment fix): the info tiles and the action buttons must span EXACTLY
+ * the same content width as the full-width buttons and the cards. Percentage
+ * widths plus margins could not guarantee that — the right edge stopped a few dp
+ * short — while two flex:1 children with a fixed gap inside one row always fill
+ * that row precisely. An odd list leaves one child in the last row, which
+ * `flex: 1` stretches to the full width.
+ */
+function chunkPairs<T>(items: readonly T[]): T[][] {
+  const rows: T[][] = [];
+  for (let index = 0; index < items.length; index += 2) {
+    rows.push(items.slice(index, index + 2));
+  }
+  return rows;
+}
 
 export default function BiddingDashboardScreen() {
   // `providerId` is optional and only ever comes from the offers/bids list the
@@ -1067,7 +1083,18 @@ export default function BiddingDashboardScreen() {
     // layout stays tidy). Everything below continues from a short fade that
     // blends the hero into the screen background.
     const serverHeader = (title: string, subtitle: string | null = null) => (
-      <View style={[styles.hero, { backgroundColor: c.heroCard }]}>
+      // FIX (Job Details header): a SIMPLE SOLID green header — the primary
+      // green token (c.headerBg, the exact colour the Services/Jobs headers
+      // use) with rounded bottom corners, extending behind the status bar. The
+      // green-to-white fade and its interpolated gradient stops are gone
+      // entirely: the transition read as a blue-ish band and made the screen
+      // look dated.
+      <View
+        style={[
+          styles.hero,
+          { backgroundColor: c.headerBg, borderBottomColor: c.border },
+        ]}
+      >
         {/* FIX (back button): sit ~14dp BELOW the safe-area inset so the
             button no longer hugs the status bar — matching the position the
             other standard screens (e.g. Edit Job Address) use. */}
@@ -1199,7 +1226,7 @@ export default function BiddingDashboardScreen() {
     const statusTone: JobStatusTone = jobStatusTone(serverJob.status);
     const statusBadge =
       statusTone === 'destructive'
-        ? { bg: c.urgentLight, fg: c.destructive }
+        ? { bg: c.destructiveLight, fg: c.destructive }
         : statusTone === 'success'
           ? { bg: c.successLight, fg: c.success }
           : { bg: c.muted, fg: c.mutedForeground };
@@ -1300,14 +1327,41 @@ export default function BiddingDashboardScreen() {
         key: 'type',
         heading: t('jobd_tile_type'),
         value: (
-          <Text style={infoValueStyle} numberOfLines={2}>
-            {[
-              t(serverJob.request_type === 'URGENT' ? 'jobs_urgent' : 'jobs_regular'),
-              t(
-                serverJob.booking_type === 'MULTI_DAY' ? 'booking_multi_day' : 'booking_one_time'
-              ),
-            ].join(' · ')}
-          </Text>
+          <View style={{ gap: 4 }}>
+            {/* An URGENT job's type chip wears the web-matched amber tokens
+                (urgentBg/urgentText/urgentBorder); a REGULAR one keeps the
+                plain value text. The booking type is unchanged. */}
+            {serverJob.request_type === 'URGENT' ? (
+              <View
+                style={[
+                  styles.sortChip,
+                  {
+                    backgroundColor: c.urgentBg,
+                    borderColor: c.urgentBorder,
+                    borderWidth: 1,
+                    alignSelf: 'flex-start',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 5,
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                  },
+                ]}
+              >
+                <Feather name="zap" size={11} color={c.urgentText} />
+                <Text style={[styles.sortChipText, { color: c.urgentText }]}>
+                  {t('jobs_urgent')}
+                </Text>
+              </View>
+            ) : (
+              <Text style={infoValueStyle} numberOfLines={1}>
+                {t('jobs_regular')}
+              </Text>
+            )}
+            <Text style={[styles.infoHeading, { color: c.mutedForeground }]} numberOfLines={2}>
+              {t(serverJob.booking_type === 'MULTI_DAY' ? 'booking_multi_day' : 'booking_one_time')}
+            </Text>
+          </View>
         ),
       },
     ];
@@ -1366,7 +1420,6 @@ export default function BiddingDashboardScreen() {
         value: <Text style={infoValueStyle}>{completedOn}</Text>,
       });
     }
-    const infoTilesOdd = infoTiles.length % 2 === 1;
 
     // Visibility comes from the BACKEND's permission flags only. The one extra
     // condition on each convert action is direction: "Convert to Regular" is never
@@ -1390,18 +1443,11 @@ export default function BiddingDashboardScreen() {
       convertToRegular: 'clock',
       convertToUrgent: 'zap',
     };
-    const addressLine = addr
-      ? [
-          addr.formatted_address,
-          [addr.street_address, addr.house_number].filter(Boolean).join(' '),
-          addr.city?.name,
-          addr.county?.name,
-          addr.country?.name,
-          addr.postal_code,
-        ]
-          .filter((part) => !!part && String(part).trim().length > 0)
-          .join(', ')
-      : null;
+    // FIX (stale address): the job's address card is composed from the job
+    // address's CURRENT fields by the shared formatter — the legacy
+    // `formatted_address` string is only a last resort, never the first choice.
+    const jobAddressLine = addr ? formatAddressLine(addr) : '';
+    const addressLine = jobAddressLine.length > 0 ? jobAddressLine : null;
     // latitude/longitude exist on the payload, but this screen has no map, so
     // they are deliberately not rendered — no fake map and no placeholder pin.
 
@@ -1454,21 +1500,14 @@ export default function BiddingDashboardScreen() {
       <View style={[styles.root, { backgroundColor: c.background }]}>
         <StatusBar style={statusBarLight ? 'light' : 'auto'} />
         {serverHeader(serverJob.title, description)}
-        {/* The fade: OPAQUE stops interpolated in RGB between the hero green
-            and the exact page background — the first stop IS the hero colour
-            (no seam) and nothing ever passes through 'transparent'
-            (rgba(0,0,0,0) is what mixed with black and read as mud-gray). */}
-        <LinearGradient
-          colors={interpolateColorStops(c.heroCard, c.background, 6)}
-          style={styles.heroFade}
-        />
 
         <ScrollView
           contentContainerStyle={{
             padding: 20,
-            // First section sits 10dp under the fade — no white gap, same
-            // horizontal padding as the rest of the content.
-            paddingTop: 10,
+            // FIX (no white gap): the first section starts right below the
+            // rounded header — 16dp of breathing room, the same horizontal
+            // padding as the rest of the content.
+            paddingTop: 16,
             paddingBottom: insets.bottom + 20,
           }}
           showsVerticalScrollIndicator={false}
@@ -1512,22 +1551,28 @@ export default function BiddingDashboardScreen() {
               is odd. Every VALUE is exactly what the old lines showed; only
               the layout changed. The grid starts right after the fade (the
               root has no extra top padding), so there is no white gap. */}
-          <View
-            style={[styles.infoGrid, { marginTop: isJobPausedStatus(serverJob) ? 14 : 0 }]}
-          >
-            {infoTiles.map((tile, index) => (
-              <View
-                key={tile.key}
-                style={[
-                  styles.infoTile,
-                  { backgroundColor: c.card, borderColor: c.border },
-                  infoTilesOdd && index === infoTiles.length - 1 ? styles.infoTileFull : null,
-                ]}
-              >
-                <Text style={[styles.infoHeading, { color: c.mutedForeground }]}>
-                  {tile.heading}
-                </Text>
-                {tile.value}
+          <View style={[styles.infoGrid, { marginTop: isJobPausedStatus(serverJob) ? 14 : 0 }]}>
+            {/* FIX (alignment): rows of two flex:1 tiles — the same fixed 10dp
+                gap as the buttons below, and no percentage widths, so the left
+                and right edges of the tiles line up exactly with the buttons
+                and the cards. An odd last tile is a row of its own, which the
+                single flex:1 makes full width. */}
+            {chunkPairs(infoTiles).map((row, rowIndex) => (
+              <View key={`row-${rowIndex}`} style={styles.infoRow}>
+                {row.map((tile) => (
+                  <View
+                    key={tile.key}
+                    style={[
+                      styles.infoTile,
+                      { backgroundColor: c.card, borderColor: c.border },
+                    ]}
+                  >
+                    <Text style={[styles.infoHeading, { color: c.mutedForeground }]}>
+                      {tile.heading}
+                    </Text>
+                    {tile.value}
+                  </View>
+                ))}
               </View>
             ))}
           </View>
@@ -1865,19 +1910,18 @@ export default function BiddingDashboardScreen() {
               can_restart_timer / can_convert_to_regular / can_convert_to_urgent
               exactly as returned — never re-derived from status or dates. */}
           {actions.length > 0 ? (
-            <View style={{ marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ marginTop: 14, gap: 8 }}>
               {/* FIX (layout): Edit / Restart Timer / Convert … render as a 2-column
                   grid of equal secondary buttons; "Cancel Job" is pulled out to the
                   end as the single full-width destructive outline. Show/hide
                   conditions and routes are unchanged. */}
-              {actions
-                .filter((action) => action !== 'cancel')
-                .map((action, index, mappedActions) => {
-                  // Layout fix: an ODD count used to leave the last secondary
-                  // button alone at half width; stretch that last row to the
-                  // full width so the grid never shows an orphan.
-                  const spansFullRow =
-                    mappedActions.length % 2 === 1 && index === mappedActions.length - 1;
+              {chunkPairs(actions.filter((action) => action !== 'cancel')).map((row, rowIndex) => (
+                <View key={`actions-${rowIndex}`} style={styles.actionRow}>
+                  {row.map((action) => {
+                  // FIX (alignment): every secondary button is flex:1 inside a
+                  // fixed 8dp-gap row, so a two-button row fills the SAME content
+                  // width as the full-width buttons (percentage widths + margins
+                  // used to stop a few dp short on the right).
                   const tint = c.text;
                   // Disabled for the duration of the call so a double tap cannot fire
                   // the same state-changing action twice (each hook rejects a second
@@ -1897,11 +1941,8 @@ export default function BiddingDashboardScreen() {
                       key={action}
                       style={[
                         styles.restartBtn,
-                        {
-                          borderColor: c.border,
-                          width: spansFullRow ? '100%' : '48%',
-                          marginTop: 0,
-                        },
+                        styles.actionBtnFlex,
+                        { borderColor: c.border, marginTop: 0 },
                       ]}
                       onPress={() => runAction(action)}
                       disabled={busy}
@@ -1920,12 +1961,14 @@ export default function BiddingDashboardScreen() {
                       </Text>
                     </TouchableOpacity>
                   );
-                })}
+                  })}
+                </View>
+              ))}
               {actions.includes('cancel') ? (
                 <TouchableOpacity
                   style={[
                     styles.restartBtn,
-                    { borderColor: c.destructive, width: '100%', marginTop: 0 },
+                    { borderColor: c.destructive, width: '100%', marginTop: 8 },
                   ]}
                   onPress={() => runAction('cancel')}
                   activeOpacity={0.85}
@@ -2311,10 +2354,14 @@ const styles = StyleSheet.create({
   metaLine: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'left' },
   metaLineStrong: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, textAlign: 'left' },
   hero: {
-    // FULL-BLEED green block: no rounded bottom corners (the curve is what
-    // let white notches show beside the full-width fade strip below).
+    // FULL-BLEED green block with ROUNDED BOTTOM CORNERS (the same 22dp the
+    // Services/Jobs green header uses). No fade strip below it any more, so
+    // there is nothing for a corner to clash with — and no gradient code left
+    // on this screen.
     paddingHorizontal: 20,
     paddingBottom: 18,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
   },
   heroBackRow: { marginBottom: 12 },
   heroTitle: { fontFamily: 'Manrope_700Bold', fontSize: 20, lineHeight: 26 },
@@ -2325,19 +2372,26 @@ const styles = StyleSheet.create({
     marginTop: 6,
     opacity: 0.85,
   },
-  heroFade: { height: 56 },
-  // ── Info tile grid (heading + value, 2 columns) ──────────────────────────
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  // ── Info tile grid (heading + value; rows of two, EQUAL widths) ──────────
+  // FIX (alignment): percentage widths plus margins made the right-hand column
+  // stop a few dp short of the full-width buttons below. The grid is now rows
+  // of two flex:1 tiles separated by a fixed 10dp gap, so the tiles, the buttons
+  // and the cards all share exactly the same content width.
+  infoGrid: { gap: 10 },
+  infoRow: { flexDirection: 'row', gap: 10 },
   infoTile: {
-    width: '48%',
+    flex: 1,
+    minWidth: 0,
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,
     gap: 4,
     justifyContent: 'center',
   },
-  infoTileFull: { width: '100%' },
   infoHeading: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
+  // Action buttons: equal halves of one row, full width when alone.
+  actionRow: { flexDirection: 'row', gap: 8 },
+  actionBtnFlex: { flex: 1, minWidth: 0 },
   infoValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   bodyLine: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20, textAlign: 'left' },
   milestoneTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },

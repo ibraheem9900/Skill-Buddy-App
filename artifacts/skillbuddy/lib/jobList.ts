@@ -16,6 +16,7 @@ import type {
   ListJobsParams,
   ValidationErrorDetail,
 } from '@/types';
+import { parseApiDeadlineMs } from '@/lib/countdown';
 
 /** Server default and the value the app pages with. */
 export const JOBS_PAGE_SIZE = 20;
@@ -126,8 +127,14 @@ export function resolveBiddingEndsAt(
   if (!job) return null;
 
   if (typeof job.bidding_ends_at === 'string' && job.bidding_ends_at.length > 0) {
-    const parsed = Date.parse(job.bidding_ends_at);
-    if (Number.isFinite(parsed)) return parsed;
+    // FIX (countdown): parsed through the shared UTC rule, NOT Date.parse.
+    // GET /api/v1/jobs returns `bidding_ends_at` WITHOUT a timezone marker, and
+    // Date.parse reads marker-less digits as DEVICE-LOCAL — in Estonia (UTC+2)
+    // that moved the deadline two hours earlier, so the card counted down
+    // "59:44" for a job with 2h 59m 44s left (Job Details, which parses the
+    // same string as UTC, showed the truth). See lib/countdown.parseApiDeadlineMs.
+    const parsed = parseApiDeadlineMs(job.bidding_ends_at);
+    if (parsed !== null) return parsed;
   }
 
   if (

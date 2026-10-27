@@ -27,6 +27,7 @@
  */
 
 import type { AddressResponse, ValidationErrorDetail } from '@/types';
+import { formatAddressLine, formatAddressRegion } from '@/lib/addressFormat';
 
 /** The address fields the wizard collects and sends. */
 export interface PostAddressForm {
@@ -122,20 +123,18 @@ export function jobAddressFrom(address: AddressResponse): JobAddressValues {
  * fallback is the normal path, not an error path.
  */
 export function addressLine(address: AddressResponse): string {
-  const formatted = text(address.formatted_address);
-  if (formatted) return formatted;
-  const street = [text(address.house_number), text(address.street_address)]
-    .filter((part) => part.length > 0)
-    .join(' ');
-  if (street) return street;
-  return text(address.city?.name);
+  // FIX (stale address): built from the CURRENT fields by the ONE shared
+  // formatter, never from `formatted_address` — the server keeps that legacy
+  // string as it was last sent, so preferring it showed the OLD address next to
+  // the new field values on the same screen. See lib/addressFormat.
+  return formatAddressLine(address);
 }
 
 /** `City, County, Country` — the muted second line. */
 export function regionLine(address: AddressResponse): string {
-  return [text(address.city?.name), text(address.county?.name), text(address.country?.name)]
-    .filter((part) => part.length > 0)
-    .join(', ');
+  // The shared region line (city, county, country) — same formatter the address
+  // screens use, so every surface renders an address the same way.
+  return formatAddressRegion(address);
 }
 
 /** The editable form opened by Edit (everything documented, nothing invented). */

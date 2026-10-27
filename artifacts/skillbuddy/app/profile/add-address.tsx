@@ -23,6 +23,8 @@ import useAddresses from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
 import { authApi } from '@/services/api';
 import { markNearbyStale } from '@/lib/nearbyStale';
+import { geocodeAddress, needsGeocoding } from '@/lib/geocode';
+import { resolveFormattedAddressForSave } from '@/lib/addressFormat';
 import {
   buildAddressWriteBody,
   validateAddressForm,
@@ -264,7 +266,7 @@ export default function AddAddressScreen() {
 
   /** The form's values in the shared module's shape (used for validation and
    * for the body, so the two can never disagree about the coordinates). */
-  const formValues = (): AddressFormValues => ({
+  const formValues = (coords?: { latitude: string; longitude: string }): AddressFormValues => ({
     countryId,
     countyId,
     cityId,
@@ -273,8 +275,10 @@ export default function AddAddressScreen() {
     postalCode,
     landmark,
     formattedAddress,
-    latitude,
-    longitude,
+    // The resolved (geocoded) pair when the save path passed one; otherwise the
+    // form's own values. Never a mix: a half pair is rejected by the validator.
+    latitude: coords?.latitude ?? latitude,
+    longitude: coords?.longitude ?? longitude,
   });
 
   /**
@@ -283,7 +287,7 @@ export default function AddAddressScreen() {
    * pair), and composes formatted_address when the user left it blank.
    * `is_default` is this screen's own extra field.
    */
-  const buildPayload = () => {
+  const buildPayload = (coords?: { latitude: string; longitude: string }) => {
     const composedStreet = [houseNumber.trim(), streetAddress.trim()].filter(Boolean).join(' ');
     const composed = [
       composedStreet || null,
@@ -294,11 +298,23 @@ export default function AddAddressScreen() {
       .filter(Boolean)
       .join(', ');
     const body = buildAddressWriteBody({
-      ...formValues(),
+      ...formValues(coords),
       countryId: countryId!,
       countyId: countyId!,
       cityId: cityId!,
-      formattedAddress: formattedAddress.trim() || composed,
+      formattedAddress:
+        resolveFormattedAddressForSave({
+          typed: formattedAddress,
+          storedLegacy: null,
+          fields: {
+            house_number: houseNumber,
+            street_address: streetAddress,
+            postal_code: postalCode,
+            city,
+            county,
+            country,
+          },
+        }) ?? '',
     });
     return { ...body, is_default: isDefault };
   };
@@ -325,7 +341,31 @@ export default function AddAddressScreen() {
     setLoading(true);
     setFieldErrors({});
     try {
-      await create(buildPayload());
+      // GEOCODING STOPGAP (lib/geocode): an address saved WITHOUT coordinates is
+      // re-sent with coordinates resolved from its own text via OpenStreetMap
+      // Nominatim — the stored pair on this account is Lahore (31.53, 74.37) for
+      // a Tallinn address, which is why the provider is invisible to the nearby
+      // feed. It is silent, rate-limited (1 req/s) and NEVER blocks the save: no
+      // result simply means the address is saved as before. Long-term this is a
+      // backend job — see the delivery report for the exact request.
+      let resolvedCoords: { latitude: string; longitude: string } | undefined;
+      if (needsGeocoding(latitude, longitude)) {
+        const resolved = await geocodeAddress({
+          house_number: houseNumber,
+          street_address: streetAddress,
+          postal_code: postalCode,
+          city: city?.name ?? null,
+          county: county?.name ?? null,
+          country: country?.name ?? null,
+        });
+        if (resolved) {
+          resolvedCoords = {
+            latitude: String(resolved.latitude),
+            longitude: String(resolved.longitude),
+          };
+        }
+      }
+      await create(buildPayload(resolvedCoords));
       // 201 — the server-returned address is already in the shared cache;
       // back to the list, which renders it immediately.
       // A new/changed address decides what the nearby feed may list and where
