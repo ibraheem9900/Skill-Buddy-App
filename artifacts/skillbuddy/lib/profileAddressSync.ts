@@ -95,7 +95,9 @@ export function composeProfileFormattedAddress(form: ProfileAddressForm): string
  */
 export function buildProfileAddressPayload(
   form: ProfileAddressForm,
-  formattedAddress?: string | null
+  formattedAddress?: string | null,
+  /** Resolved by lib/coordinates — the address's own point, never the GPS. */
+  coordinates?: { latitude: number; longitude: number } | null
 ): AddressCreatePayload {
   const street = normalize(form.streetAddress);
   const house = normalize(form.houseNumber);
@@ -104,6 +106,11 @@ export function buildProfileAddressPayload(
   const formatted = normalize(formattedAddress) || composeProfileFormattedAddress(form);
 
   return {
+    // Only when a real pair was resolved; otherwise the field is omitted (never
+    // zero-filled) so the server keeps whatever it has.
+    ...(coordinates
+      ? { latitude: coordinates.latitude, longitude: coordinates.longitude }
+      : {}),
     country_id: form.countryId,
     county_id: form.countyId,
     city_id: form.cityId,

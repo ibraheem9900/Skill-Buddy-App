@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { ProviderDashboardSummary } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Provider dashboard summary state (GET /api/v1/providers/dashboard):
@@ -24,6 +25,12 @@ export type ProviderDashboardStatus = 'idle' | 'loading' | 'ready' | 'none' | 'e
 
 let cache: ProviderDashboardSummary | null = null;
 let cacheStatus: ProviderDashboardStatus = 'idle';
+
+// Account switch / logout: the provider summary is per account.
+registerSessionReset(() => {
+  cache = null;
+  cacheStatus = 'idle';
+});
 
 export function useProviderDashboard() {
   const { t } = useLanguage();

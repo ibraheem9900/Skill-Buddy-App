@@ -23,7 +23,13 @@ import useAddresses from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
 import { authApi } from '@/services/api';
 import { markNearbyStale } from '@/lib/nearbyStale';
-import { geocodeAddress, needsGeocoding } from '@/lib/geocode';
+import { resolveCoordinates } from '@/lib/coordinates';
+import {
+  addressFieldKeyboard,
+  addressFieldMaxLength,
+  addressFieldReturnKey,
+  isAddressField,
+} from '@/lib/addressFields';
 import { resolveFormattedAddressForSave } from '@/lib/addressFormat';
 import {
   buildAddressWriteBody,
@@ -214,7 +220,7 @@ export default function AddAddressScreen() {
       >
         <TextInput
           style={[styles.input, { color: c.text, textAlignVertical: opts?.multiline ? 'top' : 'center' }]}
-          placeholder={t('addr_c_placeholder')}
+          placeholder={t(keyName === 'house_number' ? 'addr_c_house_ph' : 'addr_c_placeholder')}
           placeholderTextColor={c.mutedForeground}
           value={value}
           onChangeText={(v) => {
@@ -224,7 +230,19 @@ export default function AddAddressScreen() {
           onFocus={() => setFocusedField(keyName)}
           onBlur={() => setFocusedField(null)}
           multiline={opts?.multiline}
-          keyboardType={opts?.decimal ? 'decimal-pad' : opts?.numeric ? 'numeric' : 'default'}
+          // FIX (address keyboards): House = TEXT ("Akadeemia tee 11/2"),
+          // Apartment = numeric by default — lib/addressFields owns the setting.
+          keyboardType={
+            isAddressField(keyName)
+              ? addressFieldKeyboard(keyName)
+              : opts?.decimal
+                ? 'decimal-pad'
+                : opts?.numeric
+                  ? 'numeric'
+                  : 'default'
+          }
+          maxLength={isAddressField(keyName) ? addressFieldMaxLength(keyName) : undefined}
+          returnKeyType={isAddressField(keyName) ? addressFieldReturnKey(keyName) : 'default'}
           autoCapitalize="none"
           editable={!loading}
         />
@@ -348,23 +366,24 @@ export default function AddAddressScreen() {
       // feed. It is silent, rate-limited (1 req/s) and NEVER blocks the save: no
       // result simply means the address is saved as before. Long-term this is a
       // backend job — see the delivery report for the exact request.
-      let resolvedCoords: { latitude: string; longitude: string } | undefined;
-      if (needsGeocoding(latitude, longitude)) {
-        const resolved = await geocodeAddress({
-          house_number: houseNumber,
-          street_address: streetAddress,
-          postal_code: postalCode,
-          city: city?.name ?? null,
-          county: county?.name ?? null,
-          country: country?.name ?? null,
-        });
-        if (resolved) {
-          resolvedCoords = {
-            latitude: String(resolved.latitude),
-            longitude: String(resolved.longitude),
-          };
-        }
-      }
+      // THE shared resolver (lib/coordinates): reuse a stored pair, otherwise
+      // geocode the address's own text with one retry. It never uses the device
+      // GPS and never blocks the save — no result simply means the address is
+      // saved as before (the backend geocoding request is in the report).
+      const resolvedPoint = await resolveCoordinates({
+        house_number: houseNumber,
+        street_address: streetAddress,
+        postal_code: postalCode,
+        city: city?.name ?? null,
+        county: county?.name ?? null,
+        country: country?.name ?? null,
+      });
+      const resolvedCoords = resolvedPoint
+        ? {
+            latitude: String(resolvedPoint.latitude),
+            longitude: String(resolvedPoint.longitude),
+          }
+        : undefined;
       await create(buildPayload(resolvedCoords));
       // 201 — the server-returned address is already in the shared cache;
       // back to the list, which renders it immediately.
@@ -558,7 +577,7 @@ export default function AddAddressScreen() {
 
         {/* House / Building Number FIRST, Apartment / Office Number below it. */}
         {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
-        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
+        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress, { numeric: true })}
         {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, { numeric: true })}
 
         <View style={[styles.defaultRow, { backgroundColor: c.card, borderColor: c.border }]}>

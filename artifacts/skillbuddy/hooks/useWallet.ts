@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authApi } from '@/services/api';
 import { classifyDataFailure, type DataFailure } from '@/lib/dataState';
+import { registerSessionReset } from '@/lib/sessionReset';
 import type {
   CreditTransactionResponse,
   CreditWalletResponse,
@@ -107,6 +108,16 @@ export function useCreditWallet() {
 
 let providerCache: { wallet: ProviderWalletResponse; transactions: ProviderWalletTransactionResponse[] } | null = null;
 let providerStatus: WalletStatus = 'idle';
+
+// Account switch / logout: BOTH wallets (credit points and provider earnings)
+// belong to the account that loaded them. A balance from the previous account
+// is exactly the kind of leak this batch fixes.
+registerSessionReset(() => {
+  creditCache = null;
+  creditStatus = 'idle';
+  providerCache = null;
+  providerStatus = 'idle';
+});
 
 export function useProviderWallet() {
   const [status, setStatus] = useState<WalletStatus>(providerStatus);

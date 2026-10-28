@@ -110,21 +110,27 @@ export function validateJobAddress(
  *
  * The ids are integers from the cascade. `formatted_address` falls back to a
  * composed line when the user left it blank, so the address is always
- * describable. latitude/longitude are deliberately absent (see the file
- * header) — `Object.keys` therefore never contains them.
+ * describable. latitude/longitude are the point resolved by lib/coordinates
+ * (reuse the saved address's pair, otherwise geocode its text) — they are what
+ * makes the job visible to nearby providers, and are omitted only when the
+ * caller could not establish them.
  */
 export function buildCreateJobAddressRequest(
   values: JobAddressValues & {
     countryId: number;
     countyId: number;
     cityId: number;
-  }
+  },
+  coordinates?: { latitude: number; longitude: number } | null
 ): JobAddressCreate {
   const street = text(values.streetAddress);
   const house = text(values.houseNumber);
   const postal = text(values.postalCode);
 
   return {
+    ...(coordinates
+      ? { latitude: coordinates.latitude, longitude: coordinates.longitude }
+      : {}),
     country_id: values.countryId,
     county_id: values.countyId,
     city_id: values.cityId,

@@ -18,6 +18,12 @@ import { authApi } from '@/services/api';
 import useCountries from '@/hooks/useCountries';
 import type { AddressRegionResponse } from '@/types';
 import type { AddressField, PostAddressForm } from '@/lib/postAddress';
+import {
+  addressFieldKeyboard,
+  addressFieldMaxLength,
+  addressFieldReturnKey,
+  isAddressField,
+} from '@/lib/addressFields';
 
 /**
  * "Add new address" / "Edit address" — a separate full-screen surface that
@@ -231,7 +237,17 @@ export default function AddressFormModal({
       setLocalError(t('post_addr_err_street'));
       return;
     }
-    onSubmit(form);
+    // Pass the selected NAMES along (ids stay the wire format): the shared
+    // coordinate resolver needs the city/county/country text to geocode a new
+    // address, and this modal is the only place that has the lists.
+    const nameOf = (list: AddressRegionResponse[] | null, id: number | null) =>
+      id == null ? null : list?.find((row) => row.id === id)?.name ?? null;
+    onSubmit({
+      ...form,
+      countryName: nameOf(countries, form.countryId),
+      countyName: nameOf(counties, form.countyId),
+      cityName: nameOf(cities, form.cityId),
+    });
   };
 
   const inputFor = (
@@ -258,10 +274,14 @@ export default function AddressFormModal({
         value={value}
         onChangeText={onChangeText}
         placeholder={t(placeholderKey)}
+        // FIX (address keyboards): House = TEXT, Apartment = numeric, postal
+        // unchanged — all from the single setting in lib/addressFields.
+        keyboardType={isAddressField(field) ? addressFieldKeyboard(field) : 'default'}
+        maxLength={options?.maxLength ?? (isAddressField(field) ? addressFieldMaxLength(field) : undefined)}
+        returnKeyType={isAddressField(field) ? addressFieldReturnKey(field) : 'default'}
         placeholderTextColor={c.mutedForeground}
         multiline={options?.multiline}
         textAlignVertical={options?.multiline ? 'top' : 'center'}
-        maxLength={options?.maxLength}
         autoCapitalize="words"
       />
       {fieldErrors[field] ? (
@@ -341,14 +361,14 @@ export default function AddressFormModal({
               on edit), so buildAddressPost keeps re-sending it exactly as the
               server has it — the schema demands none of these fields. */}
           {inputFor('house_number', form.houseNumber, (text) => set('houseNumber', text), 'post_addr_house_ph', {
-            maxLength: 20,
+            maxLength: 100,
           })}
           {inputFor(
             'street_address',
             form.streetAddress,
             (text) => set('streetAddress', text),
             'post_addr_apartment_ph',
-            { maxLength: 255 }
+            { maxLength: 50 }
           )}
           {inputFor('postal_code', form.postalCode, (text) => set('postalCode', text), 'post_addr_postal_ph', {
             maxLength: 20,

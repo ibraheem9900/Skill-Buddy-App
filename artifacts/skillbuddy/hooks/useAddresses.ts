@@ -1,7 +1,16 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
 import { authApi } from '@/services/api';
 import type { AddressResponse, AddressCreatePayload, AddressUpdatePayload } from '@/types';
+import { normalizeAddressList } from '@/lib/postAddress';
+import {
+  addressOwnerId,
+  cacheBelongsToUser,
+  confirmedAddressId,
+  isAddressUsable,
+} from '@/lib/addressOwnership';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * The signed-in user's saved address (GET /api/v1/addresses):
@@ -11,23 +20,43 @@ import type { AddressResponse, AddressCreatePayload, AddressUpdatePayload } from
  *              the screen's "no address yet" state)
  *  - error     network/5xx — retryable
  *
+ * ── ACCOUNT SAFETY (the cross-account address bug) ────────────────────────
+ * The cache is MODULE-LEVEL (there is no react-query in this app), so it used
+ * to outlive a logout: account A's address — including its id — was still
+ * "ready" when account B opened Address Details, and the PUT then wrote A's row
+ * with B's token. Three rules now make that impossible:
+ *
+ *   1. every cached entry is STAMPED with the account it was read for
+ *      (`cacheOwnerId`); an entry that does not belong to the signed-in account
+ *      is treated as absent, never rendered, never written to;
+ *   2. `update()` / `remove()` confirm the id against the CURRENT account's own
+ *      server list before touching it (refetch once when the cache cannot
+ *      confirm it) and throw `AddressOwnershipError` when it is not there;
+ *   3. `registerSessionReset` clears the cache on logout / login / account
+ *      switch (see lib/sessionReset and AuthContext.clearSession).
+ *
  * RESPONSE SHAPE (live OpenAPI Schema tab): the 200 body is a SINGLE
  * AddressResponse object ($ref AddressResponse, "type": "object") — NOT an
  * array and NOT a wrapper, despite the plural endpoint name. No parameters
- * exist (token-scoped). Because sibling endpoints (POST/GET-single/PUT/
- * DELETE /api/v1/addresses/{id}) and the web precedent suggest one-per-user
- * data that may still evolve, load() defensively normalizes a bare array or
- * { addresses: [...] } wrapper body down to its first element instead of
- * trusting only the documented shape.
+ * exist (token-scoped). lib/postAddress.normalizeAddressList tolerates a bare
+ * array / wrapper too, and this hook keeps the first entry, so a future
+ * multi-address backend needs no change here.
  *
- * Cache discipline: module-level cache + fetch on screen entry (caller gates
- * on auth) + pull-to-refresh via refresh(). Create/Update/Delete Address
- * (POST/PUT/DELETE siblings) keep this in sync through
- * create()/update()/getById()/remove()/setAddress()/clear(): they replace/drop the cached object from SERVER
- * truth (no optimistic guesses), and refetching is always available via
- * refresh().
+ * Cache discipline: fetch on screen entry (caller gates on auth) +
+ * pull-to-refresh via refresh(). Create/Update/Delete keep this in sync from
+ * SERVER truth (no optimistic guesses) and invalidate the cache on failure.
  */
 export type AddressesStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/** A write that was refused because the id is not this account's address. */
+export class AddressOwnershipError extends Error {
+  reason: 'signed-out' | 'unverified' | 'not-owned';
+  constructor(reason: 'signed-out' | 'unverified' | 'not-owned') {
+    super(`Address not owned by the signed-in account (${reason})`);
+    this.name = 'AddressOwnershipError';
+    this.reason = reason;
+  }
+}
 
 /**
  * Parses the schema's latitude/longitude values SAFELY: they are documented
@@ -46,115 +75,201 @@ export function parseCoordinate(raw: string | number | null | undefined, kind: '
 }
 
 let cache: AddressResponse | null = null;
+/** The account the cached row was read for (`String(user.id)`), never shared. */
+let cacheOwnerId: string | null = null;
 let cacheStatus: AddressesStatus = 'idle';
+
+function clearCache(): void {
+  cache = null;
+  cacheOwnerId = null;
+  cacheStatus = 'idle';
+}
+
+registerSessionReset(clearCache);
+
+/** First row of whatever GET /addresses returned (see the shape note above). */
+function normalizeSingle(data: unknown): AddressResponse | null {
+  return normalizeAddressList(data)[0] ?? null;
+}
 
 export function useAddresses() {
   const { t } = useLanguage();
-  const [status, setStatus] = useState<AddressesStatus>(cacheStatus);
-  const [address, setAddressState] = useState<AddressResponse | null>(cache);
+  const { user } = useAuth();
+  const ownerId = addressOwnerId(user?.id);
+  const [status, setStatus] = useState<AddressesStatus>(() =>
+    cacheBelongsToUser(cacheOwnerId, ownerId) ? cacheStatus : 'idle'
+  );
+  const [address, setAddressState] = useState<AddressResponse | null>(() =>
+    cacheBelongsToUser(cacheOwnerId, ownerId) ? cache : null
+  );
   const [errorMessage, setErrorMessage] = useState<TranslationKey | null>(null);
   const inFlight = useRef(false);
 
-  const apply = useCallback((next: AddressResponse | null) => {
-    cache = next;
-    cacheStatus = 'ready';
-    setAddressState(cache);
-    setStatus('ready');
-  }, []);
+  /**
+   * The cache is cleared on logout by lib/sessionReset, but an account SWITCH
+   * inside the same process (logout is optional in some flows) can also land
+   * here: as soon as the signed-in account changes, the old row is useless.
+   */
+  useEffect(() => {
+    if (cacheBelongsToUser(cacheOwnerId, ownerId)) return;
+    clearCache();
+    setAddressState(null);
+    setStatus('idle');
+    setErrorMessage(null);
+  }, [ownerId]);
+
+  const apply = useCallback(
+    (next: AddressResponse | null) => {
+      cache = next;
+      cacheOwnerId = ownerId;
+      cacheStatus = 'ready';
+      setAddressState(next);
+      setStatus('ready');
+    },
+    [ownerId]
+  );
 
   /**
    * POST /api/v1/addresses — creates the address from the form's payload.
    * On the confirmed 201 the SERVER-returned AddressResponse replaces the
    * cached entry (source of truth — no locally-guessed object, no client-
-   * side patching of other addresses: if is_default moved server-side, the
-   * next full refetch shows it). On failure the cache is invalidated so the
-   * next screen entry refetches fresh server state. Errors propagate to the
-   * caller for 422 field mapping / offline handling.
+   * side patching: if is_default moved server-side, the next full refetch
+   * shows it). On failure the cache is invalidated so the next screen entry
+   * refetches fresh server state. Errors propagate to the caller for 422 field
+   * mapping / offline handling.
    */
-  const create = useCallback(async (payload: AddressCreatePayload): Promise<AddressResponse> => {
-    try {
-      const { data } = await authApi.createAddress(payload);
-      apply(data);
-      return data;
-    } catch (err) {
-      // Cache may be stale after a failed create (e.g. is_default moved) —
-      // force the next screen entry to refetch from the server.
-      cacheStatus = 'idle';
-      throw err;
-    }
-  }, [apply]);
-
-  const load = useCallback(async (force = false) => {
-    if (inFlight.current) return;
-    if (!force && cacheStatus === 'ready') return; // cached — no re-fetch
-    inFlight.current = true;
-    setStatus('loading');
-    try {
-      const { data } = await authApi.getAddresses();
-      // Defensive normalization (see doc comment): documented shape is ONE
-      // object; tolerate a bare-array/wrapper body by taking its first item.
-      let next: AddressResponse | null = null;
-      if (Array.isArray(data)) {
-        next = (data[0] as AddressResponse) ?? null;
-      } else if (data && typeof data === 'object') {
-        const wrapper = data as { addresses?: unknown };
-        next = Array.isArray(wrapper.addresses)
-          ? ((wrapper.addresses[0] as AddressResponse) ?? null)
-          : (data as AddressResponse);
+  const create = useCallback(
+    async (payload: AddressCreatePayload): Promise<AddressResponse> => {
+      if (!ownerId) throw new AddressOwnershipError('signed-out');
+      try {
+        const { data } = await authApi.createAddress(payload);
+        apply(data);
+        return data;
+      } catch (err) {
+        cacheStatus = 'idle';
+        throw err;
       }
-      apply(next);
-    } catch {
-      cacheStatus = 'error';
-      setStatus('error');
-      setErrorMessage('addr_err_network');
-    } finally {
-      inFlight.current = false;
-    }
-  }, [apply]);
+    },
+    [apply, ownerId]
+  );
+
+  const load = useCallback(
+    async (force = false) => {
+      if (inFlight.current) return;
+      if (!ownerId) {
+        clearCache();
+        setAddressState(null);
+        setStatus('idle');
+        return;
+      }
+      // Never serve (or extend) a row that belongs to another account.
+      if (!cacheBelongsToUser(cacheOwnerId, ownerId)) {
+        cache = null;
+        cacheOwnerId = null;
+        setAddressState(null);
+      }
+      if (!force && cacheStatus === 'ready' && cacheBelongsToUser(cacheOwnerId, ownerId)) return;
+      inFlight.current = true;
+      setStatus('loading');
+      try {
+        const { data } = await authApi.getAddresses();
+        // The account can change while this request is in flight; discard the
+        // reply rather than stamping it with the wrong owner.
+        if (!cacheBelongsToUser(cacheOwnerId, ownerId) && cacheOwnerId !== null) return;
+        apply(normalizeSingle(data));
+      } catch {
+        cacheStatus = 'error';
+        setStatus('error');
+        setErrorMessage('addr_err_network');
+      } finally {
+        inFlight.current = false;
+      }
+    },
+    [apply, ownerId]
+  );
 
   /**
    * GET ONE address by id (GET /api/v1/addresses/{address_id}).
    *
-   * CACHE-FIRST (per the agreed single-item-lookup discipline): the cached
-   * address (from GET /api/v1/addresses) carries every field the single
-   * endpoint returns (same $ref AddressResponse per the live schema), so a
-   * matching id returns it with ZERO network. The network call fires only
-   * when the cache is not ready or holds a different id (deep-link /
-   * booking-summary case). Returns null on 404 (undocumented — web
-   * precedent "already gone"), sets errorMessage otherwise, and rethrows
-   * only for unexpected failures. 422 (invalid id) surfaces as not-found.
+   * OWNERSHIP-FIRST: the cached row answers only when it is THIS account's and
+   * its id matches. Otherwise the server is asked and its answer is accepted
+   * only when the returned id is the requested one — a foreign id can never be
+   * adopted into the cache. Returns null on 404 / mismatch (nothing to show for
+   * this account), sets errorMessage on a network failure and rethrows only for
+   * unexpected failures. 422 (invalid id) surfaces as not-found.
    */
-  const getById = useCallback(async (addressId: number): Promise<AddressResponse | null> => {
-    if (cache && cache.id === addressId) return cache; // cached — no network at all
-    if (cacheStatus !== 'ready') {
+  const getById = useCallback(
+    async (addressId: number): Promise<AddressResponse | null> => {
+      if (!ownerId) return null;
+      if (isAddressUsable(cache, cacheOwnerId, ownerId, addressId)) return cache;
       try {
         const { data } = await authApi.getAddress(addressId);
-        return data;
+        const fresh = data ?? null;
+        // Refuse a row that is not the requested id (or not an address at all).
+        if (!fresh || fresh.id !== addressId) return null;
+        cache = fresh;
+        cacheOwnerId = ownerId;
+        cacheStatus = 'ready';
+        return fresh;
       } catch (err: any) {
-        const status = err?.response?.status;
-        if (status === 404) return null; // undocumented — treat as gone
+        const httpStatus = err?.response?.status;
+        if (httpStatus === 404 || httpStatus === 403 || httpStatus === 422) return null;
         setErrorMessage('addr_err_network');
         throw err;
       }
-    }
-    return null; // cache ready but holds a different id → caller decides
-  }, []);
+    },
+    [ownerId]
+  );
 
   /**
-   * PUT /api/v1/addresses/{address_id} — updates the address. The caller
-   * sends the FULL AddressUpdate body (PUT full-replace semantics — every
-   * field explicit, never a partial diff). On the confirmed 200 the
-   * SERVER-returned AddressResponse replaces the cached entry (source of
-   * truth — is_default changes are never patched client-side; the server's
-   * response is what the list/detail render, and if the server auto-unset
-   * another address's default that state arrives with the next full
-   * refetch). NOTHING changes on failure (no optimistic update) and the
-   * cache is invalidated so the next screen entry refetches fresh server
-   * state. Errors propagate to the caller for 422 field mapping / offline
-   * handling.
+   * Resolve the address a write may target: the cached row when it is this
+   * account's and matches, otherwise ONE fresh read of this account's own list.
+   * Returns null when the list does not contain the id — the caller refuses.
+   */
+  const confirmOwnership = useCallback(
+    async (addressId: number): Promise<AddressResponse | null> => {
+      if (!ownerId) throw new AddressOwnershipError('signed-out');
+      if (isAddressUsable(cache, cacheOwnerId, ownerId, addressId)) return cache;
+      let fresh: AddressResponse[];
+      try {
+        const { data } = await authApi.getAddresses();
+        fresh = normalizeAddressList(data);
+      } catch {
+        throw new AddressOwnershipError('unverified');
+      }
+      if (confirmedAddressId(fresh, addressId) === null) {
+        // Keep only what this account actually owns.
+        cache = fresh[0] ?? null;
+        cacheOwnerId = ownerId;
+        cacheStatus = 'ready';
+        setAddressState(cache);
+        throw new AddressOwnershipError('not-owned');
+      }
+      const owned = fresh.find((row) => row.id === addressId) ?? null;
+      cache = owned;
+      cacheOwnerId = ownerId;
+      cacheStatus = 'ready';
+      setAddressState(owned);
+      return owned;
+    },
+    [ownerId]
+  );
+
+  /**
+   * PUT /api/v1/addresses/{address_id} — updates the address. The caller sends
+   * the FULL AddressUpdate body (PUT full-replace semantics — every field
+   * explicit, never a partial diff).
+   *
+   * The id must be confirmed against THIS account's list first (see
+   * confirmOwnership): an id that cannot be confirmed is never written to, so a
+   * stale id from the previous account throws `AddressOwnershipError` instead
+   * of changing somebody else's address. On the confirmed 200 the SERVER
+   * response replaces the cache; nothing changes on failure (no optimistic
+   * update) and the cache is invalidated so the next entry refetches.
    */
   const update = useCallback(
     async (addressId: number, payload: AddressUpdatePayload): Promise<AddressResponse> => {
+      await confirmOwnership(addressId);
       try {
         const { data } = await authApi.updateAddress(addressId, payload);
         apply(data);
@@ -164,61 +279,69 @@ export function useAddresses() {
         throw err;
       }
     },
-    [apply],
+    [apply, confirmOwnership]
   );
 
   /**
-   * DELETE /api/v1/addresses/{address_id} — removes the address. NO
-   * optimistic removal: the cached entry drops ONLY after the confirmed
-   * 204 (or a 404 "already gone" sync per web precedent) — on network
-   * failure/422 everything rethrows so the address survives with a
-   * retry-able error, and the cache is invalidated for a fresh refetch.
-   * The 204 has NO body — the service layer never parses JSON on success.
+   * DELETE /api/v1/addresses/{address_id} — removes the address. NO optimistic
+   * removal: the cached entry drops ONLY after the confirmed 204 (or a 404
+   * "already gone" sync per web precedent). The id is ownership-confirmed first,
+   * exactly like update().
    *
-   * DEFAULT-ADDRESS EDGE (server behavior not documented — cannot be
-   * confirmed without credentials): the 204 returns no content, so whether
-   * the backend auto-promotes another address is only observable via a
-   * refetch. Callers get back the pre-delete snapshot and MUST NOT guess —
-   * after deleting a default address, surface the flag and let the next
-   * full refetch reveal server truth (no client-side auto-promotion).
+   * DEFAULT-ADDRESS EDGE (server behavior not documented — cannot be confirmed
+   * without credentials): the 204 returns no content, so whether the backend
+   * auto-promotes another address is only observable via a refetch. Callers get
+   * back the pre-delete snapshot and MUST NOT guess — after deleting a default
+   * address, let the next full refetch reveal server truth.
    */
-  const remove = useCallback(async (addressId: number): Promise<{ wasDefault: boolean; hadAddress: boolean }> => {
-    const snapshot = cache && cache.id === addressId ? cache : null;
-    try {
-      await authApi.deleteAddress(addressId);
-      // Confirmed 204 (or already-gone 404 path in the service) — drop the
-      // cached row so the list/detail render the empty state immediately.
-      if (cache && cache.id === addressId) {
-        cache = null;
-        cacheStatus = 'ready';
-        setAddressState(null);
-        setStatus('ready');
+  const remove = useCallback(
+    async (addressId: number): Promise<{ wasDefault: boolean; hadAddress: boolean }> => {
+      const snapshot = await confirmOwnership(addressId);
+      try {
+        await authApi.deleteAddress(addressId);
+        if (cache && cache.id === addressId) {
+          cache = null;
+          cacheOwnerId = ownerId;
+          cacheStatus = 'ready';
+          setAddressState(null);
+          setStatus('ready');
+        }
+        return { wasDefault: !!snapshot?.is_default, hadAddress: !!snapshot };
+      } catch (err) {
+        cacheStatus = 'idle';
+        throw err;
       }
-      return { wasDefault: !!snapshot?.is_default, hadAddress: !!snapshot };
-    } catch (err) {
-      cacheStatus = 'idle';
-      throw err;
-    }
-  }, []);
+    },
+    [confirmOwnership, ownerId]
+  );
 
   /**
-   * Local-state sync for the Create/Update Address siblings (POST/PUT): the
-   * caller passes the SERVER-returned AddressResponse (never a locally
-   * guessed object) and the cached entry is replaced in place — the list
-   * screen and any other consumer of this hook see it immediately. A full
-   * refetch via refresh() stays available for belt-and-braces callers.
+   * Local-state sync for Create/Update: the caller passes the SERVER-returned
+   * AddressResponse (never a locally guessed object) and the cache is replaced
+   * in place. A full refetch via refresh() stays available.
    */
   const setAddress = useCallback((next: AddressResponse) => apply(next), [apply]);
 
   /**
-   * Local-state sync for the Delete Address sibling (DELETE /api/v1/
-   * addresses/{id}): drops the cached entry ONLY after the caller's
-   * confirmed success, rendering the empty state. Errors are handled by the
-   * caller (nothing changes here on failure).
+   * Local-state sync for Delete: drops the cached entry ONLY after the caller's
+   * confirmed success, rendering the empty state.
    */
   const clear = useCallback(() => apply(null), [apply]);
 
-  return { status, address, errorMessage, load, refresh: () => load(true), create, update, getById, remove, setAddress, clear, t };
+  return {
+    status,
+    address,
+    errorMessage,
+    load,
+    refresh: () => load(true),
+    create,
+    update,
+    getById,
+    remove,
+    setAddress,
+    clear,
+    t,
+  };
 }
 
 export default useAddresses;

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { FavoriteItemResponse, ServiceListItem } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Client favorites state (GET /api/v1/clients/favorites):
@@ -47,6 +48,13 @@ export function joinFavoriteWithService(
 let cache: FavoriteItemResponse[] = [];
 let cachedTotal = 0;
 let cacheStatus: ClientFavoritesStatus = 'idle';
+
+// Account switch / logout: a client's favorites are per account.
+registerSessionReset(() => {
+  cache = [];
+  cachedTotal = 0;
+  cacheStatus = 'idle';
+});
 
 export function useClientFavorites() {
   const { t } = useLanguage();

@@ -34,6 +34,15 @@ export interface PostAddressForm {
   countryId: number | null;
   countyId: number | null;
   cityId: number | null;
+  /**
+   * The selected names, filled by the modal from the same geo lists it shows.
+   * They are NOT part of the API body (the wire takes ids); they exist so the
+   * shared coordinate resolver can geocode a NEW address from its own text
+   * (lib/coordinates) without a second lookup of the ids.
+   */
+  countryName?: string | null;
+  countyName?: string | null;
+  cityName?: string | null;
   /** Mapped onto the documented `street_address` (see the Add form's label). */
   streetAddress: string;
   houseNumber: string;

@@ -68,6 +68,10 @@ const TEST_FILES = [
   'addressFormat.test.js',
   'hiddenJobs.test.js',
   'geocode.test.js',
+  'addressOwnership.test.js',
+  'addressFields.test.js',
+  'sessionReset.test.js',
+  'coordinates.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

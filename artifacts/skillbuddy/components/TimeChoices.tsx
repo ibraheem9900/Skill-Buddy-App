@@ -24,29 +24,59 @@ import { toggleSlot, toggleAnytime } from '@/lib/postWizard';
  *
  * Used by the Post-a-Job wizard (single day and the active multi-day) and by
  * Edit Job, so the two screens can never disagree about the options.
+ *
+ * MULTI-SELECT: pass `selected` + `onToggle` to let ONE day carry several
+ * windows (a multiple-day task can have more than one visit per day). The
+ * press handler then reports the tapped window and the wizard's shared
+ * `toggleTaskSlot` decides add / remove / Anytime exclusivity. Without those
+ * props the component keeps its original single-choice behaviour.
  */
 export default function TimeChoices({
   choice,
   day,
   onChange,
   disabled = false,
+  selected,
+  onToggle,
 }: {
   choice: TimeChoice | null;
   /** The day the choice belongs to (today refuses started windows). */
   day: Date | null;
   onChange: (next: TimeChoice | null) => void;
   disabled?: boolean;
+  /** Multi-select mode: every window this day already carries. */
+  selected?: TimeChoice[];
+  /** Multi-select mode: the tapped window (add or remove). */
+  onToggle?: (time: TimeChoice) => void;
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const meridiem = { am: t('post_sched_am'), pm: t('post_sched_pm') };
+  const multi = selected !== undefined && onToggle !== undefined;
+  const isChosen = (slotChoice: TimeChoice): boolean =>
+    multi
+      ? selected!.some((entry) =>
+          slotChoice.kind === 'anytime'
+            ? entry.kind === 'anytime'
+            : entry.kind === 'slot' && entry.key === slotChoice.key
+        )
+      : slotChoice.kind === 'anytime'
+        ? choice?.kind === 'anytime'
+        : choice?.kind === 'slot' && choice.key === slotChoice.key;
+  const press = (slotChoice: TimeChoice) => {
+    if (multi) {
+      onToggle!(slotChoice);
+      return;
+    }
+    onChange(slotChoice.kind === 'anytime' ? toggleAnytime(choice) : toggleSlot(choice, slotChoice.key));
+  };
 
   return (
     <View>
       <View style={styles.grid}>
         {FIXED_SLOTS.map((slot) => {
           const slotChoice: TimeChoice = { kind: 'slot', key: slot.key };
-          const active = choice?.kind === 'slot' && choice.key === slot.key;
+          const active = isChosen(slotChoice);
           const started = hasSlotStarted(slotChoice, day);
           const off = disabled || started;
           return (
@@ -60,7 +90,7 @@ export default function TimeChoices({
                   opacity: started ? 0.45 : disabled ? 0.55 : 1,
                 },
               ]}
-              onPress={() => onChange(toggleSlot(choice, slot.key))}
+              onPress={() => press(slotChoice)}
               disabled={off}
               accessibilityRole="button"
               accessibilityState={{ selected: active, disabled: off }}
@@ -90,12 +120,15 @@ export default function TimeChoices({
 
         <AnytimeSlot
           choice={choice}
+          active={isChosen({ kind: 'anytime', start: { hour: 8, minute: 0 }, end: { hour: 23, minute: 0 } })}
           day={day}
           disabled={disabled}
           label={t('post_time_anytime')}
           startedLabel={t('post_time_slot_started')}
           meridiem={meridiem}
-          onChange={onChange}
+          onPress={() =>
+            press({ kind: 'anytime', start: { hour: 8, minute: 0 }, end: { hour: 23, minute: 0 } })
+          }
         />
       </View>
     </View>
@@ -109,23 +142,24 @@ export default function TimeChoices({
  */
 function AnytimeSlot({
   choice,
+  active,
   day,
   disabled,
   label,
   startedLabel,
   meridiem,
-  onChange,
+  onPress,
 }: {
   choice: TimeChoice | null;
+  active: boolean;
   day: Date | null;
   disabled: boolean;
   label: string;
   startedLabel: string;
   meridiem: { am: string; pm: string };
-  onChange: (next: TimeChoice | null) => void;
+  onPress: () => void;
 }) {
   const { colors: c } = useTheme();
-  const active = choice?.kind === 'anytime';
   const started = hasSlotStarted(choice, day);
   const off = disabled || started;
   return (
@@ -138,7 +172,7 @@ function AnytimeSlot({
           opacity: started ? 0.45 : disabled ? 0.55 : 1,
         },
       ]}
-      onPress={() => onChange(toggleAnytime(choice))}
+      onPress={onPress}
       disabled={off}
       accessibilityRole="button"
       accessibilityState={{ selected: active, disabled: off }}

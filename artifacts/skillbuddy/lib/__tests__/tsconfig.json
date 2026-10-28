@@ -65,6 +65,10 @@
     "./countdown.test.ts",
     "./addressFormat.test.ts",
     "./hiddenJobs.test.ts",
-    "./geocode.test.ts"
+    "./geocode.test.ts",
+    "./addressOwnership.test.ts",
+    "./addressFields.test.ts",
+    "./sessionReset.test.ts",
+    "./coordinates.test.ts"
   ]
 }

@@ -4,8 +4,16 @@ import { useAuth } from '@/context/AuthContext';
 import { useRole } from '@/context/RoleContext';
 import { useLanguage } from '@/context/LanguageContext';
 import type { Service } from '@/types';
+import { userScopedKey } from '@/lib/addressOwnership';
 
-const BOOKMARKS_KEY = 'sb_bookmarks';
+/**
+ * Per-account storage key. The old global 'sb_bookmarks' let one account's
+ * saved services (and the hearts that mark them) show up on the next account
+ * after a logout — the same class of leak as the address cache. The id is part
+ * of the key now, and the list is RELOADED whenever the signed-in account
+ * changes.
+ */
+const BOOKMARKS_BASE = 'sb_bookmarks';
 
 /**
  * Extract the numeric backend service_id from a service id. Accepts the
@@ -40,16 +48,30 @@ export function BookmarkProvider({ children }: { children: React.ReactNode }) {
   const { activeRole } = useRole();
   const { t } = useLanguage();
 
+  const storageKey = userScopedKey(BOOKMARKS_BASE, user?.id);
+
+  // Load THIS account's list; a signed-out/other-account run starts empty. The
+  // `active` flag drops a reply that arrives after the account changed again.
   useEffect(() => {
-    AsyncStorage.getItem(BOOKMARKS_KEY)
-      .then((raw) => { if (raw) setBookmarks(JSON.parse(raw)); })
-      .catch(() => {});
-  }, []);
+    let active = true;
+    setBookmarks([]);
+    AsyncStorage.getItem(storageKey)
+      .then((raw) => {
+        if (!active) return;
+        setBookmarks(raw ? (JSON.parse(raw) as Service[]) : []);
+      })
+      .catch(() => {
+        if (active) setBookmarks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [storageKey]);
 
   const save = useCallback((items: Service[]) => {
     setBookmarks(items);
-    AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(items)).catch(() => {});
-  }, []);
+    AsyncStorage.setItem(storageKey, JSON.stringify(items)).catch(() => {});
+  }, [storageKey]);
 
   const isBookmarked = useCallback((id: string) => bookmarks.some((b) => b.id === id), [bookmarks]);
 
@@ -60,7 +82,7 @@ export function BookmarkProvider({ children }: { children: React.ReactNode }) {
       const exists = prev.some((b) => b.id === service.id);
       nowSaved = !exists;
       const next = exists ? prev.filter((b) => b.id !== service.id) : [...prev, service];
-      AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next)).catch(() => {});
+      AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
       return next;
     });
 
@@ -81,7 +103,7 @@ export function BookmarkProvider({ children }: { children: React.ReactNode }) {
         // call failed (422 invalid service_id, network, 401 after refresh).
         setBookmarks((prev) => {
           const next = prev.filter((b) => b.id !== service.id);
-          AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next)).catch(() => {});
+          AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
           return next;
         });
         const detail = err?.response?.data?.detail;
@@ -99,16 +121,16 @@ export function BookmarkProvider({ children }: { children: React.ReactNode }) {
         setSavingToServer(false);
       }
     })();
-  }, [user, activeRole, t]);
+  }, [user, activeRole, t, storageKey]);
 
   const removeBookmark = useCallback((serviceId: string) => {
     setBookmarks((prev) => {
       if (!prev.some((b) => b.id === serviceId)) return prev;
       const next = prev.filter((b) => b.id !== serviceId);
-      AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next)).catch(() => {});
+      AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
       return next;
     });
-  }, []);
+  }, [storageKey]);
 
   return (
     <BookmarkContext.Provider value={{ bookmarks, isBookmarked, toggleBookmark, removeBookmark, savingToServer }}>

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { ProviderProfile } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Provider profile state machine:
@@ -20,6 +21,13 @@ export type ProviderProfileStatus = 'idle' | 'loading' | 'ready' | 'none' | 'err
 
 let cache: ProviderProfile | null = null;
 let cacheStatus: ProviderProfileStatus = 'idle';
+
+// Account switch / logout: the provider profile (and its approval state) is
+// per account.
+registerSessionReset(() => {
+  cache = null;
+  cacheStatus = 'idle';
+});
 
 export function useProviderProfile() {
   const { t } = useLanguage();

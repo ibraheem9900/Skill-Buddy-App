@@ -25,6 +25,13 @@ import useCounties from '@/hooks/useCounties';
 import useCities from '@/hooks/useCities';
 import { authApi } from '@/services/api';
 import { firstErrorMessage } from '@/lib/jobList';
+import { resolveCoordinates } from '@/lib/coordinates';
+import {
+  addressFieldKeyboard,
+  addressFieldMaxLength,
+  addressFieldReturnKey,
+  isAddressField,
+} from '@/lib/addressFields';
 import {
   buildCreateJobAddressRequest,
   canAddJobAddress,
@@ -182,17 +189,40 @@ export default function AddJobAddressScreen() {
       return;
     }
 
-    // The ids are non-null once validated.
-    const payload = buildCreateJobAddressRequest({
-      ...values,
-      countryId: cascade.countryId!,
-      countyId: cascade.countyId!,
-      cityId: cascade.cityId!,
-    });
-
     inFlight.current = true;
     setSubmitting(true);
     setFormError(null);
+
+    // COORDINATES: the job's address needs a real point or no provider within
+    // the radius can ever see the job (the feed is distance-matched). Resolve
+    // it from the address text (lib/coordinates) and refuse to save a job
+    // address without one — with a message the user can retry.
+    const coordinates = await resolveCoordinates({
+      house_number: houseNumber,
+      street_address: streetAddress,
+      postal_code: postalCode,
+      city: city?.name ?? null,
+      county: county?.name ?? null,
+      country: country?.name ?? null,
+    });
+    if (!coordinates) {
+      inFlight.current = false;
+      setSubmitting(false);
+      setFormError(t('post_addr_no_coords'));
+      return;
+    }
+
+    // The ids are non-null once validated.
+    const payload = buildCreateJobAddressRequest(
+      {
+        ...values,
+        countryId: cascade.countryId!,
+        countyId: cascade.countyId!,
+        cityId: cascade.cityId!,
+      },
+      coordinates
+    );
+
     try {
       const { data: createdAddress } = await authApi.createJobAddress(job.id, payload);
       // The 201 body IS the address object, so it is adopted directly — the
@@ -378,14 +408,18 @@ export default function AddJobAddressScreen() {
           styles.input,
           { backgroundColor: c.input, color: c.text, borderColor: fieldErrors[field] ? c.destructive : c.border },
         ]}
-        placeholder={t('addr_c_placeholder')}
+        placeholder={t(field === 'house_number' ? 'addr_c_house_ph' : 'addr_c_placeholder')}
         placeholderTextColor={c.mutedForeground}
         value={value}
         onChangeText={(v) => {
           onChange(v);
           clearError(field);
         }}
-        keyboardType={numeric ? 'number-pad' : 'default'}
+        // FIX (address keyboards): House is TEXT, Apartment numeric — ONE
+        // setting in lib/addressFields; letters are never stripped.
+        keyboardType={isAddressField(field) ? addressFieldKeyboard(field) : numeric ? 'number-pad' : 'default'}
+        maxLength={isAddressField(field) ? addressFieldMaxLength(field) : undefined}
+        returnKeyType={isAddressField(field) ? addressFieldReturnKey(field) : 'default'}
       />
       {fieldErrors[field] ? (
         <Text style={[styles.error, { color: c.destructive }]}>{fieldErrors[field]}</Text>
@@ -462,7 +496,7 @@ export default function AddJobAddressScreen() {
         )}
 
         {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
-        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
+        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress, true)}
         {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, true)}
         {textField('landmark', 'addr_c_landmark', landmark, setLandmark)}
         {textField(

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * The location the user picked on the /location screen.
@@ -22,6 +23,13 @@ export interface SelectedLocation {
 
 let selected: SelectedLocation | null = null;
 const listeners = new Set<() => void>();
+
+// Account switch / logout: the chosen posting location is user data too — it
+// seeds the Post-a-Job address and must not follow the next account.
+registerSessionReset(() => {
+  selected = null;
+  emit();
+});
 
 function emit() {
   for (const listener of listeners) listener();

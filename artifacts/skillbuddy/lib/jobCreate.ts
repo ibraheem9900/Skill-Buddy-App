@@ -189,6 +189,14 @@ export interface JobFormValues {
   postalCode: string;
   landmark: string;
   formattedAddress: string;
+  /**
+   * The job address's point (resolved by lib/coordinates — reuse the saved
+   * address's pair, otherwise geocode its text). The provider feed is matched by
+   * DISTANCE, so a job without a point is invisible to every provider; the
+   * wizard refuses to post one (see persistValues).
+   */
+  latitude?: number | null;
+  longitude?: number | null;
   /** true → draft (Save as draft); false → publish straight away. */
   isDraft: boolean;
   /**
@@ -347,8 +355,8 @@ export function resolveMilestones(values: JobFormValues): JobMilestoneCreate[] {
  * `serviceId` / geo ids are narrowed to non-null here — the API requires
  * service_id and address, and the ids must be real server ids.
  *
- * latitude/longitude are OMITTED (there is no map picker in the app) rather
- * than zero-filled, matching the address screens' rule.
+ * latitude/longitude come from lib/coordinates (the saved address's own pair,
+ * or a geocode of its text) — never from the device GPS and never a zero-fill.
  */
 export function buildCreateJobRequest(
   values: JobFormValues & {
@@ -382,6 +390,10 @@ export function buildCreateJobRequest(
         : 'REGULAR';
 
   const address: JobAddressCreate = {
+    // The point makes the job visible to nearby providers; null when the caller
+    // could not establish one (the wizard blocks that case before we get here).
+    latitude: values.latitude ?? null,
+    longitude: values.longitude ?? null,
     country_id: values.countryId,
     county_id: values.countyId,
     city_id: values.cityId,

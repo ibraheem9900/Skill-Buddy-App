@@ -15,6 +15,7 @@ import {
 import { classifyJobActionFailure, type JobActionFailure } from '@/lib/jobAction';
 import { applyBidResultToMyBid, type ProviderBidResult } from '@/lib/bidResults';
 import type { BidResponse, BidStatus, BidUpdateRequest, ValidationErrorDetail } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * THIS provider's bid on ONE job (GET /api/v1/jobs/{job_id}/bids/mine).
@@ -83,6 +84,9 @@ interface CacheEntry {
 }
 
 const cache = new Map<number, CacheEntry>();
+
+// Account switch / logout: a provider's own bid on a job is per account.
+registerSessionReset(() => cache.clear());
 
 function readCache(jobId: number, ownerId: string | null): MyBidLookup | null {
   const entry = cache.get(jobId);

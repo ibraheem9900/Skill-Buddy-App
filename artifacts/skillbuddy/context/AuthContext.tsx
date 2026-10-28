@@ -9,6 +9,7 @@ import {
   setUserRefreshedHandler,
 } from '@/services/api';
 import type { User } from '@/types';
+import { resetUserSession } from '@/lib/sessionReset';
 
 const ONBOARDING_KEY = 'sb_onboarding_seen';
 
@@ -132,6 +133,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchUser]);
 
   const login = useCallback(async (email: string, password: string) => {
+    // ACCOUNT SWITCH: every user-scoped module cache (addresses, profile,
+    // favorites, wallets, job detail, My Bids …) is dropped BEFORE the new
+    // session starts, so no screen can read — or write — the previous
+    // account's rows. See lib/sessionReset for the full bug story.
+    resetUserSession();
     const { data } = await authApi.login(email, password);
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
@@ -148,6 +154,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Local-only wipe — shared by logout() and by server-initiated invalidation
   // flows (logout-all, session expiry) where no further API call makes sense.
   const clearSession = useCallback(async () => {
+    // Same reset as login (and the one that fixes the cross-account address
+    // edit): a signed-out process must not keep any account's cached rows.
+    resetUserSession();
     await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     setUser(null);
@@ -176,6 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const socialLogin = useCallback(async (provider: 'google' | 'apple', idToken: string) => {
+    resetUserSession();
     const { data } = await authApi.socialLogin(provider, idToken);
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);

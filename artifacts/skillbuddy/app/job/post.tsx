@@ -74,10 +74,15 @@ import {
   dayKey,
   firstUntimedTask,
   hasBookableTime as dayHasBookableTime,
+  meetsMultipleDayMinimum,
+  removeTaskDraft,
   syncTasks,
   taskHoursCap,
-  toggleSlot,
+  tasksForDay,
+  toggleTaskSlot,
   validateTasks,
+  MAX_SLOTS_PER_DAY,
+  MIN_DAYS_MULTIPLE,
   type DaySelection,
   type TaskDraft,
 } from '@/lib/postWizard';
@@ -107,6 +112,7 @@ import {
   type PostAddressForm,
 } from '@/lib/postAddress';
 import { buildProfileAddressPayload } from '@/lib/profileAddressSync';
+import { resolveCoordinates } from '@/lib/coordinates';
 import type { AttachmentDraft } from '@/lib/jobAttachments';
 import {
   DESC_WORD_MAX,
@@ -676,8 +682,10 @@ export default function PostJobScreen() {
           const badIndex = firstUntimedTask(tasks, now);
           if (badIndex >= 0) next.time = t('post_err_day_time');
           else {
-            const error = validateTasks(tasks, now);
-            if (error) next.time = t(error);
+            // A MULTI_DAY booking needs MIN_DAYS_MULTIPLE distinct dates (2).
+            const error = validateTasks(tasks, now, { bookingType: 'multi_day' });
+            if (error === 'post_err_dates_min') next.date = t(error);
+            else if (error) next.time = t(error);
           }
         }
       }
@@ -687,6 +695,13 @@ export default function PostJobScreen() {
       // the address step without a time.
       if (tasks.length === 0) next.date = t('post_err_tasks_empty');
       else if (firstUntimedTask(tasks, new Date()) >= 0) next.time = t('post_err_day_time');
+      else {
+        // Deleting tasks must not quietly turn a multiple-day job into a
+        // single-date one: the same validator gates this step.
+        const error = validateTasks(tasks, new Date(), { bookingType: 'multi_day' });
+        if (error === 'post_err_dates_min') next.date = t(error);
+        else if (error) next.time = t(error);
+      }
     }
     if (key === STEP_ADDRESS) {
       const chosen = addresses.find((row) => row.id === selectedAddressId) ?? null;
@@ -708,16 +723,17 @@ export default function PostJobScreen() {
     }
     if (tasks.length === 0) return t('post_err_dates_pick');
     if (firstUntimedTask(tasks, now) >= 0) return t('post_err_day_time');
-    const error = validateTasks(tasks, now);
+    const error = validateTasks(tasks, now, { bookingType: 'multi_day' });
     return error ? t(error) : null;
   }, [stepKey, bookingKind, oneTimeDayKind, timeChoice, tasks, t]);
 
-  /** Live problems on the Tasks step (empty list is the only blocker there). */
+  /** Live problems on the Tasks step (including the two-date minimum). */
   const tasksError = useMemo(() => {
     if (stepKey !== STEP_TASKS) return null;
     if (tasks.length === 0) return t('post_err_tasks_empty');
     if (firstUntimedTask(tasks, new Date()) >= 0) return t('post_err_day_time');
-    return null;
+    const error = validateTasks(tasks, new Date(), { bookingType: 'multi_day' });
+    return error ? t(error) : null;
   }, [stepKey, tasks, t]);
 
   /** Next is blocked exactly when the visible step still has a problem. */
@@ -841,7 +857,22 @@ export default function PostJobScreen() {
     setAddressFieldErrors({});
     setAddressFormError(null);
     try {
-      const payload = buildProfileAddressPayload(form, form.formattedAddress);
+      // COORDINATES (Fix: provider cannot see newly posted jobs): a saved
+      // address is only useful for distance matching when it has a point, so
+      // every address saved from this wizard resolves one — reuse the stored
+      // pair, otherwise geocode the address text (lib/coordinates). A failure
+      // here never blocks saving the address.
+      const coordinates = await resolveCoordinates({
+        latitude: editingAddress?.latitude,
+        longitude: editingAddress?.longitude,
+        house_number: form.houseNumber,
+        street_address: form.streetAddress,
+        postal_code: form.postalCode,
+        city: form.cityName ?? null,
+        county: form.countyName ?? null,
+        country: form.countryName ?? null,
+      });
+      const payload = buildProfileAddressPayload(form, form.formattedAddress, coordinates);
       if (addressModal?.mode === 'edit' && editingAddress) {
         const { data } = await authApi.updateAddress(editingAddress.id, payload);
         setAddresses((prev) => prev.map((row) => (row.id === data.id ? data : row)));
@@ -913,33 +944,49 @@ export default function PostJobScreen() {
     const outcome = applyDayTap(daySelection, day, tasks);
     setDaySelection(outcome.selection);
     setTasks((prev) =>
-      outcome.removedKey
-        ? prev.filter((task) => task.key !== outcome.removedKey)
+      outcome.removedKeys.length > 0
+        ? prev.filter((task) => !outcome.removedKeys.includes(task.key))
         : syncTasks(prev, outcome.selection.days)
     );
     clearError('date');
     clearError('time');
   };
 
-  /** Replace the ACTIVE day's time, re-clamping that task's hours with it. */
-  const applyActiveTime = (time: TimeChoice | null) => {
+  /**
+   * Toggle ONE window of the ACTIVE day (multi-select): add it, remove it, or
+   * replace the day's Anytime. The shared helper owns the cap and the exclusivity
+   * rule, so the grid can never produce a state the validator rejects.
+   */
+  const toggleActiveTime = (time: TimeChoice) => {
     if (!activeTask) return;
-    const index = tasks.findIndex((task) => task.key === activeTask.key);
-    const { tasks: next, loweredFrom } = applyTaskTime(tasks, activeTask.key, time);
-    setTasks(next);
-    if (loweredFrom !== null) {
-      const updated = next.find((task) => task.key === activeTask.key);
-      if (updated) setTaskHoursNotice({ n: index + 1, hours: updated.hours });
-    }
+    const index = tasksForDay(tasks, activeTask.dayKey).findIndex((entry) =>
+      time.kind === 'anytime'
+        ? entry.time?.kind === 'anytime'
+        : entry.time?.kind === 'slot' && entry.time.key === time.key
+    );
+    const outcome = toggleTaskSlot(tasks, activeTask.day, time);
+    if (outcome.action === 'max-slots' || outcome.action === 'max-tasks') return;
+    setTasks(outcome.tasks);
     clearError('time');
     clearError('date');
   };
 
-  /** Delete one task: its day leaves the strip too, and numbering closes up. */
+  /**
+   * Delete ONE task. The day leaves the strip only when it has no other window
+   * left; several windows on the same date are independent cards.
+   */
   const removeTask = (task: TaskDraft) => {
-    const remainingDays = daySelection.days.filter((day) => dayKey(day) !== task.key);
-    setDaySelection(activeAfterDelete(remainingDays, task.key));
-    setTasks(syncTasks(tasks, remainingDays));
+    const remaining = removeTaskDraft(tasks, task.key);
+    const dayStillUsed = remaining.some((entry) => entry.dayKey === task.dayKey);
+    const remainingDays = dayStillUsed
+      ? daySelection.days
+      : daySelection.days.filter((day) => dayKey(day) !== task.dayKey);
+    setDaySelection(
+      dayStillUsed
+        ? { ...daySelection, activeKey: task.dayKey }
+        : activeAfterDelete(remainingDays, task.dayKey)
+    );
+    setTasks(remaining);
     setTaskEditorKey((current) => (current === task.key ? null : current));
     clearError('time');
     clearError('date');
@@ -1081,6 +1128,14 @@ export default function PostJobScreen() {
 
   const submit = async (isDraft: boolean) => {
     if (submitting || publishing || inFlight.current) return;
+    // FINAL gate for a multiple-day booking: two distinct dates, enforced here
+    // as well as on the Date & Time and Tasks steps, so no path (including a
+    // restored draft state) can post a single-date "multiple-day" job.
+    if (bookingKind === 'multi_day' && daySelection.days.length > 0 && !meetsMultipleDayMinimum(tasks)) {
+      setStepErrors({ date: t('post_err_dates_min') });
+      setStep(2);
+      return;
+    }
     const perStep = [validateStep(0), validateStep(1), validateStep(2), validateStep(3)];
     const merged: StepErrors = Object.assign({}, ...perStep);
     if (Object.keys(merged).length > 0) {
@@ -1100,6 +1155,28 @@ export default function PostJobScreen() {
       serviceId == null
     ) {
       setStepErrors({ address: t('post_addr_incomplete') });
+      setStep(3);
+      return;
+    }
+
+    // COORDINATES, PART 2: the JOB carries its own point. Without one the
+    // provider feed (which matches by distance) can never list it, so a job is
+    // NOT posted without coordinates — the address step shows a retryable
+    // error instead of silently creating an invisible job.
+    setSubmitting(isDraft ? 'draft' : 'post');
+    const coordinates = await resolveCoordinates({
+      latitude: chosenAddress.latitude,
+      longitude: chosenAddress.longitude,
+      house_number: address.houseNumber,
+      street_address: address.streetAddress,
+      postal_code: address.postalCode,
+      city: chosenAddress.city?.name ?? null,
+      county: chosenAddress.county?.name ?? null,
+      country: chosenAddress.country?.name ?? null,
+    });
+    if (!coordinates) {
+      setSubmitting(null);
+      setStepErrors({ address: t('post_addr_no_coords') });
       setStep(3);
       return;
     }
@@ -1140,6 +1217,8 @@ export default function PostJobScreen() {
       postalCode: address.postalCode,
       landmark: address.landmark,
       formattedAddress: address.formattedAddress,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
       isDraft,
     });
 
@@ -1550,27 +1629,42 @@ export default function PostJobScreen() {
         months={months}
         disabled={(day) => !dayHasBookableTime(day)}
         status={(day) => {
-          const key = dayKey(day);
-          const task = tasks.find((entry) => entry.key === key);
-          if (!task) return null;
-          return validateTimeChoice(task.time, task.day, new Date()) === null ? 'timed' : 'untimed';
+          const entries = tasksForDay(tasks, dayKey(day));
+          if (entries.length === 0) return null;
+          const allTimed = entries.every(
+            (entry) => validateTimeChoice(entry.time, entry.day, new Date()) === null
+          );
+          return allTimed ? 'timed' : 'untimed';
         }}
+        count={(day) => tasksForDay(tasks, dayKey(day)).filter((entry) => entry.time !== null).length}
       />
       <Text style={[styles.hint, { color: c.mutedForeground, marginTop: 10 }]}>
         {daySelection.days.length === 0
           ? t('post_dates_hint')
           : t('post_days_selected_of', { n: daySelection.days.length, total: 7 })}
       </Text>
+      {daySelection.days.length > 0 && !meetsMultipleDayMinimum(tasks) ? (
+        <Text style={[styles.hint, { color: c.destructive, marginTop: 4 }]}>
+          {t('post_dates_min_multi', { n: MIN_DAYS_MULTIPLE })}
+        </Text>
+      ) : null}
 
       {activeTask ? (
         <>
           <Text style={[styles.label, { color: c.text }]}>
             {t('post_time_for_day', { day: formatDayLabel(activeTask.day, months, weekdays) })}
           </Text>
+          <Text style={[styles.hint, { color: c.mutedForeground, marginBottom: 8 }]}>
+            {t('post_time_multi_hint', { n: MAX_SLOTS_PER_DAY })}
+          </Text>
           <TimeChoices
             choice={activeTask.time}
             day={activeTask.day}
-            onChange={(next) => applyActiveTime(next)}
+            onChange={() => undefined}
+            selected={tasksForDay(tasks, activeTask.dayKey)
+              .map((entry) => entry.time)
+              .filter((entry): entry is TimeChoice => entry !== null)}
+            onToggle={toggleActiveTime}
           />
         </>
       ) : (

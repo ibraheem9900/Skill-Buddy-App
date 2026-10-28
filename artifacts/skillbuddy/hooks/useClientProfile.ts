@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { authApi } from '@/services/api';
 import { classifyDataFailure, type DataFailure } from '@/lib/dataState';
 import type { ClientProfileResponse } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Client activity-profile state (GET /api/v1/clients/profile) — the "My
@@ -27,6 +28,12 @@ export type ClientProfileStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 let cache: ClientProfileResponse | null = null;
 let cacheStatus: ClientProfileStatus = 'idle';
+
+// Account switch / logout: the client profile is per account.
+registerSessionReset(() => {
+  cache = null;
+  cacheStatus = 'idle';
+});
 
 /** Parse the schema's decimal-string `total_amount_spent` safely. */
 export function parseAmountSpent(raw: string | null | undefined): number | null {

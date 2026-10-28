@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '@/context/AuthContext';
+import { userScopedKey } from '@/lib/addressOwnership';
 
 export type ActiveRole = 'CLIENT' | 'PROVIDER';
 
@@ -20,26 +22,43 @@ const RoleContext = createContext<RoleContextType>({
 });
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [activeRole, setActiveRoleState] = useState<ActiveRole>('CLIENT');
 
+  // ACCOUNT SWITCH (same class of bug as the address leak): the role is stored
+  // per user id. A shared key let a provider session's "PROVIDER" mode follow
+  // the next account onto a client-only profile — and back again.
+  const storageKey = userScopedKey(ROLE_KEY, user?.id);
+
   useEffect(() => {
-    AsyncStorage.getItem(ROLE_KEY).then((saved) => {
+    // Start from the neutral role, then load THIS account's saved role. The
+    // reset covers the switch to an account that never chose one.
+    setActiveRoleState('CLIENT');
+    let cancelled = false;
+    AsyncStorage.getItem(storageKey).then((saved) => {
+      if (cancelled) return;
       if (saved === 'CLIENT' || saved === 'PROVIDER') setActiveRoleState(saved);
     });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [storageKey]);
 
-  const setActiveRole = useCallback((role: ActiveRole) => {
-    setActiveRoleState(role);
-    AsyncStorage.setItem(ROLE_KEY, role);
-  }, []);
+  const setActiveRole = useCallback(
+    (role: ActiveRole) => {
+      setActiveRoleState(role);
+      AsyncStorage.setItem(storageKey, role);
+    },
+    [storageKey]
+  );
 
   const toggleRole = useCallback(() => {
     setActiveRoleState((prev) => {
       const next = prev === 'CLIENT' ? 'PROVIDER' : 'CLIENT';
-      AsyncStorage.setItem(ROLE_KEY, next);
+      AsyncStorage.setItem(storageKey, next);
       return next;
     });
-  }, []);
+  }, [storageKey]);
 
   return (
     <RoleContext.Provider value={{ activeRole, isBothRoles: true, setActiveRole, toggleRole }}>

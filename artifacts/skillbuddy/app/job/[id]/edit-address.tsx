@@ -25,6 +25,13 @@ import useCounties from '@/hooks/useCounties';
 import useCities from '@/hooks/useCities';
 import { authApi } from '@/services/api';
 import { firstErrorMessage } from '@/lib/jobList';
+import { resolveCoordinates } from '@/lib/coordinates';
+import {
+  addressFieldKeyboard,
+  addressFieldMaxLength,
+  addressFieldReturnKey,
+  isAddressField,
+} from '@/lib/addressFields';
 import { composeFormattedAddress } from '@/lib/jobCreate';
 import {
   buildUpdateJobAddressRequest,
@@ -254,17 +261,41 @@ export default function EditJobAddressScreen() {
       return;
     }
 
-    // The ids and coordinates are non-null once validated.
+    inFlight.current = true;
+    setSubmitting(true);
+    setFormError(null);
+
+    // COORDINATES: keep the stored pair when it is usable, otherwise geocode
+    // the edited text (lib/coordinates). A job address without a point is
+    // invisible to the nearby feed, so the edit refuses to save one — with a
+    // message the user can retry.
+    const coordinates = await resolveCoordinates({
+      latitude,
+      longitude,
+      house_number: houseNumber,
+      street_address: streetAddress,
+      postal_code: postalCode,
+      city: city?.name ?? null,
+      county: county?.name ?? null,
+      country: country?.name ?? null,
+    });
+    if (!coordinates) {
+      inFlight.current = false;
+      setSubmitting(false);
+      setFormError(t('post_addr_no_coords'));
+      return;
+    }
+
+    // The ids are non-null once validated; the resolved point is explicit.
     const payload = buildUpdateJobAddressRequest({
       ...values,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
       countryId: cascade.countryId!,
       countyId: cascade.countyId!,
       cityId: cascade.cityId!,
     });
 
-    inFlight.current = true;
-    setSubmitting(true);
-    setFormError(null);
     try {
       const { data: updatedAddress } = await authApi.updateJobAddress(job.id, payload);
       // The 200 body IS the address object — adopt it directly. The job's address in
@@ -478,14 +509,19 @@ export default function EditJobAddressScreen() {
             borderColor: fieldErrors[field] ? c.destructive : c.border,
           },
         ]}
-        placeholder={t('addr_c_placeholder')}
+        placeholder={t(field === 'house_number' ? 'addr_c_house_ph' : 'addr_c_placeholder')}
         placeholderTextColor={c.mutedForeground}
         value={value}
         onChangeText={(v) => {
           onChange(v);
           clearError(field);
         }}
-        keyboardType={numeric ? 'number-pad' : 'default'}
+        // FIX (address keyboards): House is TEXT ("Akadeemia tee 11/2"), the
+        // Apartment field is numeric by default. Both come from ONE setting in
+        // lib/addressFields, and neither strips letters.
+        keyboardType={isAddressField(field) ? addressFieldKeyboard(field) : numeric ? 'number-pad' : 'default'}
+        maxLength={isAddressField(field) ? addressFieldMaxLength(field) : undefined}
+        returnKeyType={isAddressField(field) ? addressFieldReturnKey(field) : 'default'}
       />
       {fieldErrors[field] ? (
         <Text style={[styles.error, { color: c.destructive }]}>{fieldErrors[field]}</Text>
@@ -569,8 +605,10 @@ export default function EditJobAddressScreen() {
             — matching the schema, which demands none of them (no required[]). */}
 
         {/* House / Building Number FIRST, Apartment / Office Number below it. */}
-        {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber, true)}
-        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
+        {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
+        {/* Apartment / Office Number: numeric keypad by default (see
+            lib/addressFields) — this is the app's `street_address` field. */}
+        {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress, true)}
         {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, true)}
 
         <TouchableOpacity

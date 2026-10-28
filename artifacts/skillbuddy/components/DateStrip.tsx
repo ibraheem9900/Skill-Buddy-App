@@ -27,6 +27,7 @@ export default function DateStrip({
   months,
   disabled,
   status,
+  count,
 }: {
   selected: Date[];
   /** `YYYY-MM-DD` of the day whose time grid is shown, or null. */
@@ -40,6 +41,8 @@ export default function DateStrip({
   disabled: (day: Date) => boolean;
   /** 'timed' when the day's task has a time, 'untimed' when it still needs one. */
   status: (day: Date) => 'timed' | 'untimed' | null;
+  /** Number of time windows on that day; a small badge appears above 1. */
+  count?: (day: Date) => number;
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
@@ -67,6 +70,7 @@ export default function DateStrip({
           const isActive = activeKey === key;
           const off = disabled(day) && !isSelected;
           const dayStatus = status(day);
+          const dayCount = count ? count(day) : 0;
           const weekday = weekdays[(day.getDay() + 6) % 7] ?? '';
           return (
             <TouchableOpacity
@@ -111,6 +115,20 @@ export default function DateStrip({
                 >
                   {day.getDate()}
                 </Text>
+                {dayCount > 1 ? (
+                  <View
+                    style={[
+                      styles.countBadge,
+                      { backgroundColor: isSelected ? c.primaryForeground : c.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.countText, { color: isSelected ? c.primary : c.primaryForeground }]}
+                    >
+                      {dayCount}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
               <View style={styles.markerSlot}>
                 {dayStatus === 'timed' ? (
@@ -150,6 +168,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pillActive: { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, elevation: 2 },
+  countBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countText: { fontFamily: 'Manrope_700Bold', fontSize: 9 },
   date: { fontFamily: 'Manrope_700Bold', fontSize: 15 },
   markerSlot: { height: 8, alignItems: 'center', justifyContent: 'center' },
   marker: { width: 4, height: 4, borderRadius: 2 },

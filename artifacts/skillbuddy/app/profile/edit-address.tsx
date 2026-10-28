@@ -20,12 +20,18 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
-import useAddresses from '@/hooks/useAddresses';
+import useAddresses, { AddressOwnershipError } from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
 import { authApi } from '@/services/api';
 import { markNearbyStale } from '@/lib/nearbyStale';
 import { resolveFormattedAddressForSave } from '@/lib/addressFormat';
-import { geocodeAddress, needsGeocoding } from '@/lib/geocode';
+import { resolveCoordinates } from '@/lib/coordinates';
+import {
+  addressFieldKeyboard,
+  addressFieldMaxLength,
+  addressFieldReturnKey,
+  isAddressField,
+} from '@/lib/addressFields';
 import {
   addressFormFrom,
   buildAddressWriteBody,
@@ -84,7 +90,7 @@ export default function EditAddressScreen() {
   const addressId = Number(raw);
   const canLoad = !!user && Number.isFinite(addressId) && addressId > 0;
 
-  const { address: cached, getById, update } = useAddresses();
+  const { address: cached, getById, update, refresh } = useAddresses();
 
   // ── Prefill states ──────────────────────────────────────────────────────
   const [prefillState, setPrefillState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
@@ -298,7 +304,7 @@ export default function EditAddressScreen() {
       >
         <TextInput
           style={[styles.input, { color: c.text, textAlignVertical: opts?.multiline ? 'top' : 'center' }]}
-          placeholder={t('addr_c_placeholder')}
+          placeholder={t(keyName === 'house_number' ? 'addr_c_house_ph' : 'addr_c_placeholder')}
           placeholderTextColor={c.mutedForeground}
           value={value}
           onChangeText={(v) => {
@@ -308,7 +314,17 @@ export default function EditAddressScreen() {
           onFocus={() => setFocusedField(keyName)}
           onBlur={() => setFocusedField(null)}
           multiline={opts?.multiline}
-          keyboardType={opts?.numeric ? 'numeric' : 'default'}
+          // FIX (address keyboards): House = TEXT, Apartment = numeric by
+          // default — the single setting in lib/addressFields.
+          keyboardType={
+            isAddressField(keyName)
+              ? addressFieldKeyboard(keyName)
+              : opts?.numeric
+                ? 'numeric'
+                : 'default'
+          }
+          maxLength={isAddressField(keyName) ? addressFieldMaxLength(keyName) : undefined}
+          returnKeyType={isAddressField(keyName) ? addressFieldReturnKey(keyName) : 'default'}
           autoCapitalize="none"
           editable={!saving && prefillState === 'ready'}
         />
@@ -423,23 +439,25 @@ export default function EditAddressScreen() {
       // feed. It is silent, rate-limited (1 req/s) and NEVER blocks the save: no
       // result simply means the address is saved as before. Long-term this is a
       // backend job — see the delivery report for the exact request.
-      let resolvedCoords: { latitude: string; longitude: string } | undefined;
-      if (needsGeocoding(latitude, longitude)) {
-        const resolved = await geocodeAddress({
-          house_number: houseNumber,
-          street_address: streetAddress,
-          postal_code: postalCode,
-          city: city?.name ?? null,
-          county: county?.name ?? null,
-          country: country?.name ?? null,
-        });
-        if (resolved) {
-          resolvedCoords = {
-            latitude: String(resolved.latitude),
-            longitude: String(resolved.longitude),
-          };
-        }
-      }
+      // THE shared resolver (lib/coordinates): the stored pair is REUSED when
+      // it is usable, otherwise the address's own text is geocoded (one retry).
+      // Never the device GPS; never blocks the save.
+      const resolvedPoint = await resolveCoordinates({
+        latitude,
+        longitude,
+        house_number: houseNumber,
+        street_address: streetAddress,
+        postal_code: postalCode,
+        city: city?.name ?? null,
+        county: county?.name ?? null,
+        country: country?.name ?? null,
+      });
+      const resolvedCoords = resolvedPoint
+        ? {
+            latitude: String(resolvedPoint.latitude),
+            longitude: String(resolvedPoint.longitude),
+          }
+        : undefined;
       await update(addressId, buildPayload(resolvedCoords));
       // 200 — the SERVER response already replaced the shared cache; back
       // to the detail screen which re-reads it on focus. The nearby feed ranks
@@ -448,6 +466,14 @@ export default function EditAddressScreen() {
       Alert.alert(t('addr_e_success_title'), t('addr_e_success_msg'));
       router.back();
     } catch (err: any) {
+      // OWNERSHIP GUARD (cross-account address bug): the hook refuses to write
+      // an id that is not in the signed-in account's own fresh list. Nothing was
+      // sent — say so plainly and reload this account's address.
+      if (err instanceof AddressOwnershipError) {
+        setFormError(t('addr_err_not_owned'));
+        void refresh();
+        return;
+      }
       const status = err?.response?.status;
       if (!err?.response) {
         setFormError(t('addr_c_err_network'));
@@ -687,7 +713,7 @@ export default function EditAddressScreen() {
 
           {/* House / Building Number FIRST, Apartment / Office Number below it. */}
           {textField('house_number', 'addr_c_house', houseNumber, setHouseNumber)}
-          {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress)}
+          {textField('street_address', 'addr_c_street', streetAddress, setStreetAddress, { numeric: true })}
           {textField('postal_code', 'addr_c_postal', postalCode, setPostalCode, { numeric: true })}
 
           <View style={[styles.defaultRow, { backgroundColor: c.card, borderColor: c.border }]}>

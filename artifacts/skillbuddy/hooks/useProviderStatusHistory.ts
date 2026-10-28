@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { ProviderStatusResponse } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Provider status history state (GET /api/v1/providers/status-history):
@@ -23,6 +24,12 @@ export type StatusHistoryState = 'idle' | 'loading' | 'ready' | 'error';
 
 let cache: ProviderStatusResponse[] | null = null;
 let cacheState: StatusHistoryState = 'idle';
+
+// Account switch / logout: the status trail is per account.
+registerSessionReset(() => {
+  cache = null;
+  cacheState = 'idle';
+});
 
 export function useProviderStatusHistory() {
   const { t } = useLanguage();

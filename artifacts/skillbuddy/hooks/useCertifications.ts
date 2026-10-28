@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { CertificationResponse } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * Provider certifications state (GET /api/v1/certifications):
@@ -26,6 +27,14 @@ export type CertificationsStatus = 'idle' | 'loading' | 'ready' | 'error';
 let cache: CertificationResponse[] = [];
 let cachedTotal = 0;
 let cacheStatus: CertificationsStatus = 'idle';
+
+// Account switch / logout: certifications belong to the account that listed
+// them (see lib/sessionReset). The hook refetches on its next mount.
+registerSessionReset(() => {
+  cache = [];
+  cachedTotal = 0;
+  cacheStatus = 'idle';
+});
 
 export function useCertifications() {
   const { t } = useLanguage();

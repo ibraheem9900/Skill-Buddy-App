@@ -180,11 +180,22 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
+/**
+ * One query's outcome. "miss" (the server answered, it just does not know this
+ * address) is worth a fallback query; "error" (the request never got an answer)
+ * is not — the city centre would fail the same way, so the caller retries once
+ * at the resolver level instead of burning a second request while offline.
+ */
+type QueryOutcome =
+  | { status: 'hit'; result: GeocodeResult }
+  | { status: 'miss' }
+  | { status: 'error' };
+
 async function requestOnce(
   params: string,
   fetchImpl: typeof fetch,
   timeoutMs: number
-): Promise<GeocodeResult | null> {
+): Promise<QueryOutcome> {
   try {
     const response = await withTimeout(
       fetchImpl(`${NOMINATIM_SEARCH_URL}?${params}`, {
@@ -197,13 +208,14 @@ async function requestOnce(
       }),
       timeoutMs
     );
-    if (!response || !response.ok) return null;
+    if (!response) return { status: 'error' };
+    if (!response.ok) return { status: 'error' };
     const body = await response.json();
-    return parseNominatimResponse(body);
+    const parsed = parseNominatimResponse(body);
+    return parsed ? { status: 'hit', result: parsed } : { status: 'miss' };
   } catch {
-    // Network failure, a JSON parse error, an aborted request: all the same to
-    // the caller — it saves the address without coordinates.
-    return null;
+    // Network failure, a JSON parse error, an aborted request: all the same.
+    return { status: 'error' };
   }
 }
 
@@ -235,8 +247,11 @@ export async function geocodeAddress(
     const wait = limiter.waitMs(now());
     if (wait > 0) await sleep(wait);
     limiter.markSent(now());
-    const result = await requestOnce(params, fetchImpl, timeoutMs);
-    if (result) return result;
+    const outcome = await requestOnce(params, fetchImpl, timeoutMs);
+    if (outcome.status === 'hit') return outcome.result;
+    // A network-level failure ends the attempt here: the fallback query would
+    // fail identically. The resolver retries the whole lookup once.
+    if (outcome.status === 'error') return null;
   }
   return null;
 }

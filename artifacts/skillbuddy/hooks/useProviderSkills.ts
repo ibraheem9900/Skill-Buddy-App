@@ -3,6 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import { markNearbyStale } from '@/lib/nearbyStale';
+import { registerSessionReset } from '@/lib/sessionReset';
 import {
   buildSkillCreateBody,
   buildSkillUpdateBody,
@@ -62,6 +63,10 @@ export function resetProviderSkillsCache(): void {
   cache = { ownerId: null, skills: null };
   cacheStatus = 'idle';
 }
+
+// Registered with the global session reset so a logout clears the skills even
+// when no skills screen is mounted (lib/sessionReset).
+registerSessionReset(resetProviderSkillsCache);
 
 export function useProviderSkills() {
   const { user } = useAuth();

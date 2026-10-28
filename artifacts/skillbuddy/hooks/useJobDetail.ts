@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { authApi } from '@/services/api';
 import { firstErrorMessage } from '@/lib/jobList';
 import type { JobResponse } from '@/types';
+import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
  * ONE job in FULL (GET /api/v1/jobs/{job_id}).
@@ -36,6 +37,10 @@ export type JobDetailStatus =
   | 'error';
 
 const cache = new Map<number, JobResponse>();
+
+// Account switch / logout: job rows are fetched with the caller's token, so a
+// cached job id from another account must never be served.
+registerSessionReset(() => cache.clear());
 
 /** Drop a cached job (call after a mutation so the next open re-reads it). */
 export function invalidateJobDetail(jobId?: number): void {

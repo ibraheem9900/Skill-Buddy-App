@@ -73,6 +73,8 @@ export type BookingErrorKey =
   | 'post_err_dates_pick'
   | 'post_err_dates_past'
   | 'post_err_dates_max'
+  /** MULTI_DAY needs at least two distinct dates (MIN_DAYS_MULTIPLE). */
+  | 'post_err_dates_min'
   | 'post_err_time_window'
   /** An Anytime start that leaves no whole hour before 11:00 PM. */
   | 'post_err_time_late'
