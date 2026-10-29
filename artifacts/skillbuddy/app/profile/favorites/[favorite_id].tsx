@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +21,8 @@ import { authApi } from '@/services/api';
 import { joinFavoriteWithService, useClientFavorites } from '@/hooks/useClientFavorites';
 import useServices from '@/hooks/useServices';
 import { formatServiceHourlyPrice } from '@/lib/servicePrice';
+import RemoteImage from '@/components/RemoteImage';
+import { resolveServiceImage } from '@/lib/serviceImage';
 import type { FavoriteItemResponse } from '@/types';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
@@ -223,7 +224,13 @@ export default function FavoriteDetailScreen() {
               activeOpacity={service ? 0.75 : 1}
             >
               {service ? (
-                <Image source={{ uri: service.thumbnail_url ?? undefined }} style={styles.serviceImage} />
+                <RemoteImage
+                  uri={resolveServiceImage(service)}
+                  style={styles.serviceImage}
+                  fallbackIcon="image"
+                  fallbackIconSize={22}
+                  accessibilityLabel={service.title}
+                />
               ) : (
                 <View style={[styles.serviceImage, styles.serviceImageFallback]}>
                   <MaterialCommunityIcons name="tag-outline" size={22} color={c.mutedForeground} />

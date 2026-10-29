@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,6 +21,8 @@ import { useBookmarks } from '@/context/BookmarkContext';
 import useClientFavorites, { joinFavoriteWithService } from '@/hooks/useClientFavorites';
 import useServices from '@/hooks/useServices';
 import { formatServiceHourlyPrice } from '@/lib/servicePrice';
+import RemoteImage from '@/components/RemoteImage';
+import { resolveServiceImage } from '@/lib/serviceImage';
 
 /**
  * My Favorites (GET /api/v1/clients/favorites) — the client's saved services.
@@ -161,7 +162,13 @@ export default function FavoritesScreen() {
                   activeOpacity={0.75}
                 >
                   {service ? (
-                    <Image source={{ uri: service.thumbnail_url ?? undefined }} style={styles.thumb} />
+                    <RemoteImage
+                      uri={resolveServiceImage(service)}
+                      style={styles.thumb}
+                      fallbackIcon="image"
+                      fallbackIconSize={18}
+                      accessibilityLabel={service.title}
+                    />
                   ) : (
                     <View style={[styles.thumb, styles.thumbFallback]}>
                       <MaterialCommunityIcons name="tag-outline" size={18} color={c.mutedForeground} />
