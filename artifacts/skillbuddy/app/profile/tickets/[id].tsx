@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { htmlToPlainText } from '@/lib/htmlText';
 import { TICKETS } from '@/data/ticketStore';
 import BackButton from '@/components/BackButton';
 
@@ -51,7 +52,7 @@ export default function TicketDetailScreen() {
 
         <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <Text style={[styles.category, { color: c.text }]}>{ticket.category}</Text>
-          <Text style={[styles.desc, { color: c.mutedForeground }]}>{ticket.description}</Text>
+          <Text style={[styles.desc, { color: c.mutedForeground }]}>{htmlToPlainText(ticket.description)}</Text>
 
           {ticket.jobId && (
             <View style={[styles.fieldBlock, { borderTopColor: c.border }]}>

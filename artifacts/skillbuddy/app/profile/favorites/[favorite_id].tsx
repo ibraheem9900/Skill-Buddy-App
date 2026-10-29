@@ -21,7 +21,7 @@ import BackButton from '@/components/BackButton';
 import { authApi } from '@/services/api';
 import { joinFavoriteWithService, useClientFavorites } from '@/hooks/useClientFavorites';
 import useServices from '@/hooks/useServices';
-import { formatServicePrice } from '@/lib/servicePrice';
+import { formatServiceHourlyPrice } from '@/lib/servicePrice';
 import type { FavoriteItemResponse } from '@/types';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
@@ -233,9 +233,9 @@ export default function FavoriteDetailScreen() {
                 <Text style={[styles.serviceTitle, { color: c.text }]} numberOfLines={1}>
                   {service ? service.title : t('cf_unknown_service', { id: favorite.service_id })}
                 </Text>
-                {service && formatServicePrice(service) ? (
+                {service && formatServiceHourlyPrice(service, t('price_from_prefix')) ? (
                   <Text style={[styles.serviceSub, { color: c.mutedForeground }]} numberOfLines={1}>
-                    {formatServicePrice(service)}
+                    {formatServiceHourlyPrice(service, t('price_from_prefix'))}
                   </Text>
                 ) : null}
                 <Text style={[styles.serviceIdLine, { color: c.mutedForeground }]}>

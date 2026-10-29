@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { htmlToPlainText } from '@/lib/htmlText';
 import { useRole } from '@/context/RoleContext';
 import BackButton from '@/components/BackButton';
 import EmptyState from '@/components/EmptyState';
@@ -523,7 +524,7 @@ export default function ProfessionalInfoScreen() {
                     <MaterialCommunityIcons name="text-account" size={18} color={c.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.skillLabel, { color: c.mutedForeground }]}>{t('prov_bio')}</Text>
-                      <Text style={[styles.skillValue, { color: c.text }]}>{profile.bio}</Text>
+                      <Text style={[styles.skillValue, { color: c.text }]}>{htmlToPlainText(profile.bio)}</Text>
                     </View>
                   </View>
                 ) : null}

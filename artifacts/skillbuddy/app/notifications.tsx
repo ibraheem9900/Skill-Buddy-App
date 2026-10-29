@@ -6,6 +6,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { htmlToFlowText } from '@/lib/htmlText';
 import EmptyState from '@/components/EmptyState';
 import type { Notification } from '@/types';
 
@@ -30,12 +31,12 @@ function NotifItem({ item, index, c }: { item: Notification; index: number; c: a
             <Text
               style={[styles.itemTitle, { color: c.text }, !item.isRead && { fontFamily: 'Manrope_700Bold' }]}
             >
-              {item.title}
+              {htmlToFlowText(item.title)}
             </Text>
             <Text style={[styles.itemTime, { color: c.mutedForeground }]}>{item.time}</Text>
           </View>
           <Text style={[styles.itemMsg, { color: c.mutedForeground }]} numberOfLines={3}>
-            {item.message}
+            {htmlToFlowText(item.message)}
           </Text>
         </View>
         {!item.isRead && <View style={[styles.unreadDot, { backgroundColor: c.primary }]} />}

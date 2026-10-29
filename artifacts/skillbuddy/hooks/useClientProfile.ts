@@ -35,19 +35,9 @@ registerSessionReset(() => {
   cacheStatus = 'idle';
 });
 
-/** Parse the schema's decimal-string `total_amount_spent` safely. */
-export function parseAmountSpent(raw: string | null | undefined): number | null {
-  if (raw === null || raw === undefined || raw === '') return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** Format the parsed amount as EUR currency for display (never the raw string). */
-export function formatAmountSpent(raw: string | null | undefined): string {
-  const n = parseAmountSpent(raw);
-  if (n === null) return '—';
-  return `€${n.toLocaleString('en-EU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
+// The decimal-string parser now lives in lib/amounts.ts so pure helpers can use
+// it; re-exported here so the app's existing imports keep working unchanged.
+export { formatAmountSpent, parseAmountSpent } from '@/lib/amounts';
 
 export function useClientProfile() {
   const [status, setStatus] = useState<ClientProfileStatus>(cacheStatus);

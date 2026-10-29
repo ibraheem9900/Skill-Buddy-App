@@ -72,6 +72,9 @@ const TEST_FILES = [
   'addressFields.test.js',
   'sessionReset.test.js',
   'coordinates.test.js',
+  'htmlText.test.js',
+  'servicePrice.test.js',
+  'carousel.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

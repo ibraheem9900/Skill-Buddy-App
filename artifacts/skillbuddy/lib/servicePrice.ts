@@ -17,7 +17,7 @@
  * price style, `€${n.toFixed(2)}`, exactly as components/ServiceCard.tsx
  * renders service prices.
  */
-import { parseAmountSpent } from '@/hooks/useClientProfile';
+import { parseAmountSpent } from '@/lib/amounts';
 
 /**
  * Parsed price bound as a number, or null when the value is absent/unusable.
@@ -44,6 +44,75 @@ export function parseServicePrice(raw: string | null | undefined): number | null
 export function formatPriceAmount(raw: string | null | undefined): string | null {
   const n = parseServicePrice(raw);
   return n === null ? null : `€${n.toFixed(2)}`;
+}
+
+/**
+ * Hourly price labels (Fix 1d).
+ *
+ * Every service price in this catalog is PER HOUR (boss: "Kindly write the
+ * price as €15.00/h - €25.00/h"). The API exposes NO unit field — verified
+ * against the live OpenAPI and a live GET /api/v1/services (the keys are only
+ * price_from/price_to/price_range) — so nothing in the data says "fixed price"
+ * and appending /h cannot mislabel a documented unit. If a unit field ever
+ * appears, this is the one place to branch on it.
+ *
+ *   both bounds  → "€15.00/h – €25.00/h" (single value when equal)
+ *   minimum only → "From €15.00/h" (the label is translated by the caller)
+ *   maximum only → "€25.00/h"
+ *   neither      → null
+ */
+export interface HourlyPriceOptions {
+  /** Currency symbol, default "€". */
+  currency?: string;
+  /** Translated "From" prefix for a minimum-only range. */
+  fromLabel?: string;
+}
+
+function numericPrice(value: string | number | null | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  return parseServicePrice(value);
+}
+
+/** "€15.00/h – €25.00/h" from two bounds (strings or numbers). */
+export function formatHourlyPriceRange(
+  min: string | number | null | undefined,
+  max: string | number | null | undefined,
+  options: HourlyPriceOptions = {}
+): string | null {
+  const from = numericPrice(min);
+  const to = numericPrice(max);
+  if (from === null && to === null) return null;
+
+  const currency = options.currency ?? '€';
+  const hourly = (n: number) => `${currency}${n.toFixed(2)}/h`;
+
+  if (from !== null && to !== null) {
+    return from === to ? hourly(from) : `${hourly(from)} – ${hourly(to)}`;
+  }
+  if (from !== null) {
+    const prefix = options.fromLabel ?? 'From';
+    return `${prefix} ${hourly(from)}`;
+  }
+  return hourly(to as number);
+}
+
+/**
+ * Hourly label for a server service item, with the server's own `price_range`
+ * as a LAST resort. That fallback is shown exactly as the server wrote it: a
+ * label whose unit we do not know must never get an invented "/h".
+ */
+export function formatServiceHourlyPrice(
+  item: {
+    price_from?: string | null;
+    price_to?: string | null;
+    price_range?: string | null;
+  },
+  fromLabel?: string
+): string | null {
+  const range = formatHourlyPriceRange(item.price_from, item.price_to, { fromLabel });
+  if (range) return range;
+  const label = typeof item.price_range === 'string' ? item.price_range.trim() : '';
+  return label.length > 0 ? label : null;
 }
 
 /**

@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -22,12 +21,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { formatServicePrice } from '@/lib/servicePrice';
-import { sanitizeRichText } from '@/lib/sanitizeRichText';
+import { formatServiceHourlyPrice } from '@/lib/servicePrice';
+import { htmlToFlowText, htmlToPlainText } from '@/lib/htmlText';
 import { prepareMedia, pickThumbnail, type PreparedMedia } from '@/lib/serviceMedia';
 import useServiceDetail from '@/hooks/useServiceDetail';
 import MediaVideo from '@/components/MediaVideo';
-import RatingStars from '@/components/RatingStars';
+import RemoteImage from '@/components/RemoteImage';
 import BrandedLoader from '@/components/BrandedLoader';
 
 const W = Dimensions.get('window').width;
@@ -94,19 +93,23 @@ export default function ServiceDetailScreen() {
   // ── Server-derived display fields (never fabricate provider/rating/unit) ──
   const displayTitle = serverService?.title ?? '';
   const displayCategory = serverService?.category_name ?? '';
-  const serverPrice = serverService ? formatServicePrice(serverService) : null;
+  // HOURLY price (Fix 1d): every catalog service is priced per hour, so the
+  // header reads "€15.00/h – €25.00/h" via the one shared formatter.
+  const serverPrice = serverService
+    ? formatServiceHourlyPrice(serverService, t('price_from_prefix'))
+    : null;
   const isActive = serverService ? serverService.is_active : true;
 
-  // Rich text: server fields may carry HTML — sanitized to clean text (RN has
-  // no DOM; raw tags would render literally). Local mock descriptions are
-  // plain strings and go through the original path unchanged.
+  // Rich text: server fields carry HTML (`<p>`, `<li>`, `&nbsp;`) — converted
+  // by the app's ONE helper so the Details screen keeps real paragraph breaks
+  // and bullet points instead of showing the tags.
   const serverDesc =
-    isServer && serverService ? sanitizeRichText(serverService.description) : null;
+    isServer && serverService ? htmlToPlainText(serverService.description) : '';
   const serverWhatToExpect =
-    isServer && serverService ? sanitizeRichText(serverService.what_to_expect) : null;
+    isServer && serverService ? htmlToPlainText(serverService.what_to_expect) : '';
   const serverInclusions =
     isServer && serverService
-      ? (serverService.inclusion_options ?? []).map((o) => o.name)
+      ? (serverService.inclusion_options ?? []).map((o) => htmlToFlowText(o.name))
       : null;
 
   const scrollY = useSharedValue(0);
@@ -224,10 +227,13 @@ export default function ServiceDetailScreen() {
         <Animated.Text style={[styles.floatingTitle, { color: c.text }, floatingTitleStyle]} numberOfLines={1}>
           {displayTitle}
         </Animated.Text>
-        {/* Bookmark affordance removed with the local catalog: the stored
-            bookmark shape came from the local fixtures (favorites now join the
-            server catalog in the favorites screen). */}
-        <View style={styles.iconBtn} />
+        {/* Fix 1e: this slot used to render an EMPTY white circle — the
+            leftover spacer of the bookmark button that was removed with the
+            local catalog. It was not a favourite or share control, and it did
+            nothing when tapped (it was a plain View with no handler), so it is
+            now an invisible spacer: no fake button. The back button and the
+            title stay where they were. */}
+        <View style={styles.headerSpacer} />
       </View>
 
       <Animated.ScrollView
@@ -253,7 +259,13 @@ export default function ServiceDetailScreen() {
                   controls={false}
                 />
               ) : (
-                <Image source={{ uri: heroItem.url }} style={styles.heroImage} contentFit="cover" />
+                <RemoteImage
+                  uri={heroItem.url}
+                  style={styles.heroImage}
+                  fallbackIcon="image"
+                  fallbackIconSize={44}
+                  accessibilityLabel={displayTitle}
+                />
               )
             ) : (
               <View style={[styles.heroImage, styles.heroFallback, { backgroundColor: c.muted }]}>
@@ -283,13 +295,14 @@ export default function ServiceDetailScreen() {
                       controls={false}
                     />
                   ) : (
-                    <Image
-                      source={{ uri: item.url }}
+                    <RemoteImage
+                      uri={item.url}
                       style={[
                         styles.thumb,
                         isSelectedThumb(index) && { borderWidth: 2, borderColor: c.primary },
                       ]}
-                      contentFit="cover"
+                      fallbackIcon="image"
+                      fallbackIconSize={16}
                     />
                   )}
                 </TouchableOpacity>
@@ -395,7 +408,12 @@ export default function ServiceDetailScreen() {
                     {item.kind === 'video' ? (
                       <MediaVideo url={item.url} style={styles.galleryItem} cover controls />
                     ) : (
-                      <Image source={{ uri: item.url }} style={styles.galleryItem} contentFit="cover" />
+                      <RemoteImage
+                        uri={item.url}
+                        style={styles.galleryItem}
+                        fallbackIcon="image"
+                        fallbackIconSize={28}
+                      />
                     )}
                   </TouchableOpacity>
                 ))}
@@ -491,6 +509,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  // Invisible counterweight for the back button — keeps the floating title
+  // centered WITHOUT drawing the dead white circle that used to sit here.
+  headerSpacer: { width: 38, height: 38 },
   thumbStrip: { position: 'absolute', bottom: 12 },
   thumb: { width: 56, height: 56, borderRadius: 10 },
   body: { flex: 1 },

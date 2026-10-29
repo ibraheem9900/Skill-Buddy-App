@@ -39,6 +39,8 @@ import {
 } from '@/lib/bookingFields';
 import ServerServiceRow from '@/components/ServerServiceRow';
 import ServerCategoryTile from '@/components/ServerCategoryTile';
+import HomeBanners from '@/components/HomeBanners';
+import SpecialOffers from '@/components/SpecialOffers';
 import useServices from '@/hooks/useServices';
 import useCategories from '@/hooks/useCategories';
 import useSelectedLocation from '@/hooks/useSelectedLocation';
@@ -46,18 +48,18 @@ import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
 import UpdateBanner from '@/components/UpdateBanner';
 import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
+import { loadHomeContent, type HomeContent } from '@/lib/homeContent';
+import { formatCompactPoints } from '@/lib/carousel';
+import { recentBookings } from '@/lib/recentBookings';
+import { htmlToFlowText } from '@/lib/htmlText';
 
 // No notifications backend exists yet (the API exposes no /notifications
 // endpoint), so the header bell never shows an unread badge — the previous
 // count came from a local fixture removed with the mock data.
 const UNREAD_COUNT = 0;
 
-// ─── Badge tiers ──────────────────────────────────────────────────────────────
-const BADGE_TIERS = [
-  { tier: 'Bronze', color: '#CD7F32', icon: 'award' as const },
-  { tier: 'Silver', color: '#A0A0A0', icon: 'award' as const },
-  { tier: 'Gold',   color: '#FFB800', icon: 'award' as const },
-];
+/** How many bookings the Home list shows ("Recent Bookings"). */
+const RECENT_BOOKINGS_LIMIT = 3;
 
 // ─── SkillBuddy Specialties ───────────────────────────────────────────────────
 // Titles/descriptions are translation keys (full 5-language coverage).
@@ -66,14 +68,6 @@ const SPECIALTIES = [
   { icon: 'account-check-outline', titleKey: 'home_specialty_2', descKey: 'home_specialty_2_desc' },
   { icon: 'tag-outline',           titleKey: 'home_specialty_3', descKey: 'home_specialty_3_desc' },
   { icon: 'headset',               titleKey: 'home_specialty_4', descKey: 'home_specialty_4_desc' },
-] as const;
-
-// ─── Quick-access tiles ───────────────────────────────────────────────────────
-const QUICK_TILES = [
-  { icon: 'view-grid-outline',    labelKey: 'home_browse_services', route: '/categories' as const },
-  { icon: 'calendar-check-outline', labelKey: 'home_my_bookings',  route: '/(tabs)/profile' as const },
-  { icon: 'message-text-outline', labelKey: 'home_chat',           route: '/(tabs)/inbox' as const },
-  { icon: 'account-outline',      labelKey: 'home_profile',        route: '/(tabs)/profile' as const },
 ] as const;
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -126,6 +120,27 @@ function HomeScreen() {
   const isDark = theme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
 
+  // Home promotional content (the top banner carousel + Special Offers).
+  // NOTHING here is hardcoded in the screen: lib/homeContent is the single
+  // typed seam, and swapping it for GET /api/v1/home/content later means
+  // changing only that function (see the backend spec in the report).
+  const [homeContent, setHomeContent] = useState<HomeContent | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    loadHomeContent()
+      .then((content) => {
+        if (!cancelled) setHomeContent(content);
+      })
+      .catch(() => {
+        // A promotional seam that fails must never break Home: no banners.
+        if (!cancelled) setHomeContent({ banners: [], offers: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+
   // Skeletons only while a request is genuinely in flight — the old fixed
   // 500 ms "loading" timer made every visit look slow for no reason.
   const servicesLoading = svcStatus === 'loading' && apiServices == null;
@@ -137,13 +152,16 @@ function HomeScreen() {
     hasData: creditWallet.status === 'ready',
     failure: creditWallet.failure,
   });
-  const pointsCopy: Record<FailureCopyKind, string> = {
-    network: t('home_points_offline'),
-    timeout: t('home_points_timeout'),
-    server: t('home_points_error'),
-    session: t('home_points_error'),
-    generic: t('home_points_error'),
-  };
+  // Compact "0 pts" pill in the header (next to the bell). The number is the
+  // SAME credit wallet the removed Credit Points card used — never a fixture.
+  // Hidden while loading and while the request failed (no fake zero).
+  const pointsPillLabel =
+    pointsState === 'ready' || pointsState === 'empty' || pointsState === 'unavailable'
+      ? (() => {
+          const compact = formatCompactPoints(creditWallet.balance);
+          return compact === null ? null : t('profile_pts', { n: compact });
+        })()
+      : null;
   const activityState = resolveDataViewState({
     status: clientDash.status,
     hasData: clientDash.summary != null,
@@ -168,6 +186,13 @@ function HomeScreen() {
     session: t('cb_err_session'),
     generic: t('cb_err_generic'),
   };
+  // "Recent Bookings": newest first, at most three (Fix 2a). The endpoint order
+  // is not guaranteed, so ordering happens in one tested helper.
+  const recentList = recentBookings(
+    clientBookings.bookings,
+    (booking) => getBookingDate(booking),
+    RECENT_BOOKINGS_LIMIT
+  );
 
   // Fetch the summary when a signed-in CLIENT enters the dashboard
   React.useEffect(() => {
@@ -228,19 +253,36 @@ function HomeScreen() {
             kept separate from this static header mark. */}
         <View style={styles.logoRow}>
           <LogoImage variant="white" height={30} />
-          <TouchableOpacity
-            style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
-            onPress={() => router.push('/notifications')}
-          >
-            <Feather name="bell" size={18} color="#FFF" />
-            {UNREAD_COUNT > 0 && (
-              <View style={[styles.notifBadge, { borderColor: c.headerBg }]}>
-                <Text style={styles.notifBadgeText}>
-                  {UNREAD_COUNT > 9 ? '9+' : String(UNREAD_COUNT)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {/* Earned credit points, compact, left of the bell. It is the same
+                GET /api/v1/wallet/credits balance the old card showed; it is
+                hidden while loading and tappable only because the points
+                screen already exists (/profile/credit-points). */}
+            {user && activeRole === 'CLIENT' && pointsPillLabel ? (
+              <TouchableOpacity
+                style={styles.pointsPill}
+                onPress={() => router.push('/profile/credit-points' as any)}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('home_credit_points')}: ${pointsPillLabel}`}
+              >
+                <MaterialCommunityIcons name="star" size={12} color="#FFB800" />
+                <Text style={styles.pointsPillText} numberOfLines={1}>{pointsPillLabel}</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.notifBtn, { borderColor: 'rgba(255,255,255,0.3)' }]}
+              onPress={() => router.push('/notifications')}
+            >
+              <Feather name="bell" size={18} color="#FFF" />
+              {UNREAD_COUNT > 0 && (
+                <View style={[styles.notifBadge, { borderColor: c.headerBg }]}>
+                  <Text style={styles.notifBadgeText}>
+                    {UNREAD_COUNT > 9 ? '9+' : String(UNREAD_COUNT)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Location row */}
@@ -290,47 +332,20 @@ function HomeScreen() {
           </Text>
         </Animated.View>
 
-        {/* Credit Points Card — CLIENT only: the balance is the client credit
-            wallet (GET /api/v1/wallet/credits). No wallet endpoint is relevant
-            to a Provider session, so the card is not rendered there. */}
-        {user && activeRole === 'CLIENT' && (
-        <Animated.View entering={FadeInDown.delay(40).duration(380)} style={{ paddingHorizontal: 16, marginTop: 4 }}>
-          <View style={[styles.creditCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <View style={[styles.creditIcon, { backgroundColor: c.primaryLight }]}>
-              <MaterialCommunityIcons name="star-circle-outline" size={22} color={c.primary} />
-            </View>
-            <View style={styles.creditBody}>
-              <Text style={[styles.creditLabel, { color: c.mutedForeground }]}>{t('home_credit_points')}</Text>
-              {pointsState === 'loading' ? (
-                <ActivityIndicator size="small" color={c.primary} style={styles.creditSpinner} />
-              ) : (
-                <Text style={[styles.creditValue, { color: c.text }]}>
-                  {pointsState === 'ready' || pointsState === 'empty'
-                    ? t('profile_pts', { n: creditWallet.balance.toLocaleString() })
-                    : '—'}
-                </Text>
-              )}
-            </View>
-            {pointsState === 'error' ? (
-              <View style={styles.creditNoteWrap}>
-                <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
-                  {pointsCopy[failureCopyKind(creditWallet.failure)]}
-                </Text>
-                <TouchableOpacity onPress={() => void creditWallet.refresh()} hitSlop={6}>
-                  <Text style={[styles.creditRetry, { color: c.primary }]}>{t('cd_retry')}</Text>
-                </TouchableOpacity>
-              </View>
-            ) : pointsState === 'unavailable' ? (
-              <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
-                {t('home_points_not_ready')}
-              </Text>
-            ) : (
-              <Text style={[styles.creditNote, { color: c.mutedForeground }]}>
-                {t('home_earn_note')}
-              </Text>
-            )}
-          </View>
-        </Animated.View>
+        {/* Banner carousel (Fix 3a) — replaced the Credit Points card. Three
+            slides, in the boss's order: Badges → transport → partner. The
+            badges slide reads the LIVE client dashboard total; the other two
+            are TODO(content) placeholders with no logos and no invented
+            claims. Every slide comes from lib/homeContent, never the screen. */}
+        {user && activeRole === 'CLIENT' && homeContent && homeContent.banners.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(40).duration(380)} style={{ paddingHorizontal: 16, marginTop: 4 }}>
+            <HomeBanners
+              banners={homeContent.banners}
+              completedJobs={
+                activityState === 'loading' ? null : clientDash.summary?.total_completed_jobs ?? null
+              }
+            />
+          </Animated.View>
         )}
 
         {/* Client Activity Summary — live GET /api/v1/clients/dashboard data
@@ -419,7 +434,7 @@ function HomeScreen() {
         {user && activeRole === 'CLIENT' && (
           <Animated.View entering={FadeInDown.delay(55).duration(380)} style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_my_bookings')}</Text>
+              <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_recent_bookings')}</Text>
               {bookingsState !== 'loading' && bookingsState !== 'error' && (
                 <Text style={[styles.bookingsCount, { color: c.mutedForeground }]}>
                   {t('cb_count', { n: clientBookings.total })}
@@ -457,8 +472,8 @@ function HomeScreen() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                clientBookings.bookings.slice(0, 3).map((booking, i, arr) => {
-                  const title = getBookingTitle(booking) || t('cb_fallback_title');
+                recentList.map((booking, i) => {
+                  const title = htmlToFlowText(getBookingTitle(booking)) || t('cb_fallback_title');
                   const status = getBookingStatus(booking);
                   const rawDate = getBookingDate(booking);
                   const parsed = rawDate ? new Date(rawDate) : null;
@@ -499,30 +514,10 @@ function HomeScreen() {
           </Animated.View>
         )}
 
-        {/* Quick-access tiles */}
-        <Animated.View entering={FadeInDown.delay(60).duration(380)} style={styles.section}>
-          <View style={styles.quickGrid}>
-            {QUICK_TILES.map((tile) => (
-              <TouchableOpacity
-                key={tile.labelKey}
-                style={[styles.quickTile, { backgroundColor: c.card, borderColor: c.border }]}
-                onPress={() => router.push(tile.route as any)}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.quickIconWrap, { backgroundColor: c.primaryLight }]}>
-                  <MaterialCommunityIcons name={tile.icon as any} size={22} color={c.primary} />
-                </View>
-                <Text style={[styles.quickLabel, { color: c.text }]} numberOfLines={1}>
-                  {t(tile.labelKey)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-
-        {/* Special Offers — removed: the API exposes no offers/promotions
-            endpoint, so the fixture-backed carousel is gone rather than
-            showing invented discounts. */}
+        {/* The row of four quick-action buttons (Browse Services / My Bookings /
+            Chat / Profile) was removed: every one of those destinations is
+            already in the tab bar or on this screen, and the boss called them
+            redundant. Its component, data and styles were removed with it. */}
 
         {/* Categories */}
         <Animated.View entering={FadeInDown.delay(100).duration(380)} style={styles.section}>
@@ -630,42 +625,18 @@ function HomeScreen() {
           />
         </Animated.View>
 
-        {/* Earn Badges */}
-        <Animated.View entering={FadeInDown.delay(160).duration(380)} style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>{t('home_earn_badges')}</Text>
-            <TouchableOpacity>
-              <Text style={[styles.seeAll, { color: c.primary }]}>{t('home_learn_more')}</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={[styles.badgeCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <View style={styles.badgeCardRow}>
-              <View style={styles.badgeCardLeft}>
-                <View style={styles.badgeCardTitleRow}>
-                  <Feather name="award" size={15} color={c.primary} />
-                  <Text style={[styles.badgeCardTitle, { color: c.text }]}>{t('home_unlock_rewards')}</Text>
-                </View>
-                <Text style={[styles.badgeCardSub, { color: c.mutedForeground }]}>
-                  {t('home_badge_sub')}
-                </Text>
-              </View>
-              <View style={styles.badgeTiers}>
-                {BADGE_TIERS.map((b) => (
-                  <View key={b.tier} style={styles.badgeTierItem}>
-                    <Feather name={b.icon} size={22} color={b.color} />
-                    <Text style={[styles.badgeTierLabel, { color: b.color }]}>{b.tier}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-            <View style={[styles.badgeTrack, { backgroundColor: c.border }]}>
-              <View style={[styles.badgeFill, { backgroundColor: c.primary, width: '30%' }]} />
-            </View>
-            <Text style={[styles.badgeProgressLabel, { color: c.mutedForeground }]}>
-              {t('home_badge_progress')}
-            </Text>
-          </View>
-        </Animated.View>
+        {/* The old bottom "Earn Badges" block moved to the TOP of Home as the
+            first banner slide (Fix 3c), so it is not rendered here twice. */}
+
+        {/* Special Offers (Fix 4b) — where the badge block used to be. Three
+            data-driven cards in the SAME AutoSlidingCarousel as the banners,
+            with a peek of the next card. TODO(content): brand-neutral
+            placeholders until the boss's real offers arrive. */}
+        {user && activeRole === 'CLIENT' && homeContent && homeContent.offers.length > 0 ? (
+          <Animated.View entering={FadeInDown.delay(160).duration(380)}>
+            <SpecialOffers offers={homeContent.offers} />
+          </Animated.View>
+        ) : null}
 
         {/* From the Blog — removed: the API exposes no blog endpoint, so the
             fixture posts are gone. The /blog screen itself still exists and
@@ -676,6 +647,8 @@ function HomeScreen() {
           <View style={[styles.inviteCard, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
             <View style={styles.inviteLeft}>
               <MaterialCommunityIcons name="account-multiple-plus-outline" size={28} color={c.primary} />
+              {/* No points badge/amount on the left any more: the reward is a
+                  commission-free month, not points (Fix 4a). */}
               <View style={styles.inviteText}>
                 <Text style={[styles.inviteTitle, { color: c.text }]}>{t('home_invite_title')}</Text>
                 <Text style={[styles.inviteSub, { color: c.mutedForeground }]}>
@@ -726,6 +699,27 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 },
   locationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#FFF' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Compact "0 pts" pill — fixed max width and a single line, so it can never
+  // push the logo or the location row on a narrow screen.
+  pointsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 92,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  pointsPillText: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 12,
+    color: '#FFF',
+    flexShrink: 1,
+  },
   notifBtn: {
     backgroundColor: 'rgba(255,255,255,0.15)',
     width: 38,
@@ -771,35 +765,6 @@ const styles = StyleSheet.create({
 
   // ── Welcome ───────────────────────────────────────────────────────────────
   welcomeText: { fontFamily: 'Manrope_700Bold', fontSize: 20 },
-
-  // ── Credit Points ─────────────────────────────────────────────────────────
-  creditCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  creditIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  creditBody: { flex: 1 },
-  creditLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
-  creditValue: { fontFamily: 'Manrope_700Bold', fontSize: 20, marginTop: 1 },
-  creditNote: { fontFamily: 'Manrope_400Regular', fontSize: 11, textAlign: 'right', lineHeight: 16 },
-  creditNoteWrap: { alignItems: 'flex-end', gap: 2, maxWidth: 130 },
-  creditRetry: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
-  creditSpinner: { height: 20, alignSelf: 'flex-start' },
 
   // ── Client activity summary strip ────────────────────────────────
   activityCard: {
@@ -850,34 +815,6 @@ const styles = StyleSheet.create({
   bookingEmptyText: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
   bookingBrowseText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 
-  // ── Quick tiles ──────────────────────────────────────────────────
-  quickGrid: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  quickTile: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 12,
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  quickIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, textAlign: 'center' },
-
   // ── Sections ──────────────────────────────────────────────────────────────
   section: { marginTop: 20 },
   sectionHeader: {
@@ -925,35 +862,6 @@ const styles = StyleSheet.create({
   },
   specialtyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
   specialtyDesc: { fontFamily: 'Manrope_400Regular', fontSize: 11, lineHeight: 16 },
-
-  // ── Badge card ────────────────────────────────────────────────────────────
-  badgeCard: {
-    marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  badgeCardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  badgeCardLeft: { flex: 1, gap: 4, marginRight: 12 },
-  badgeCardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  badgeCardTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
-  badgeCardSub: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
-  badgeTiers: { flexDirection: 'row', gap: 12 },
-  badgeTierItem: { alignItems: 'center', gap: 3 },
-  badgeTierLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
-  badgeTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  badgeFill: { height: '100%', borderRadius: 3 },
-  badgeProgressLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 6 },
 
   // ── Invite card ───────────────────────────────────────────────────────────
   inviteCard: {

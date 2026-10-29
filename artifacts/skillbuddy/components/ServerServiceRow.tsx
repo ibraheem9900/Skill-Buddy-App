@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
-import { formatServicePrice } from '@/lib/servicePrice';
+import { useLanguage } from '@/context/LanguageContext';
+import RemoteImage from '@/components/RemoteImage';
+import { formatServiceHourlyPrice } from '@/lib/servicePrice';
+import { resolveServiceImage } from '@/lib/serviceImage';
+import { htmlToFlowText } from '@/lib/htmlText';
 import type { ServiceListItem } from '@/types';
 
 /**
@@ -18,11 +20,15 @@ import type { ServiceListItem } from '@/types';
  * `rating` and no single `price`, so feeding it through ServiceCard would
  * mean fabricating a provider name and a star rating for real listings.
  *
- * TAPS: navigating to /service/{id} (the server-backed detail screen fed by
- * GET /api/v1/services/{service_id}); an optional onPress overrides it.
+ * IMAGE: `resolveServiceImage` picks image → thumbnail → first gallery image,
+ * and `RemoteImage` shows a loader while it loads and a tap-to-retry glyph when
+ * it fails or the record has no picture at all (e.g. the duplicate Electrician
+ * row id 15, whose thumbnail_url is null).
  *
- * IMAGE: thumbnail_url is nullable, so a missing/404ing image falls back to
- * a glyph — the row never shows a broken image or an empty box.
+ * TEXT: descriptions are HTML from the API, so they go through
+ * `htmlToFlowText` — one flowing line, never a literal "<p>".
+ *
+ * PRICE: hourly, via the one shared formatter ("€25.00/h – €45.00/h").
  */
 export default function ServerServiceRow({
   service,
@@ -32,11 +38,12 @@ export default function ServerServiceRow({
   onPress?: () => void;
 }) {
   const { colors: c } = useTheme();
+  const { t } = useLanguage();
   const router = useRouter();
-  const [failed, setFailed] = useState(false);
 
-  const price = formatServicePrice(service);
-  const showImage = !!service.thumbnail_url && !failed;
+  const price = formatServiceHourlyPrice(service, t('price_from_prefix'));
+  const description = htmlToFlowText(service.description);
+  const image = resolveServiceImage(service);
 
   return (
     <TouchableOpacity
@@ -44,21 +51,13 @@ export default function ServerServiceRow({
       activeOpacity={0.85}
       onPress={onPress ?? (() => router.push(`/service/${service.id}` as any))}
     >
-      <View style={[styles.thumbWrap, { backgroundColor: c.muted }]}>
-        {showImage ? (
-          <Image
-            source={{ uri: service.thumbnail_url as string }}
-            style={styles.thumb}
-            // Fixed box + cover fit: fills the square with no distortion and
-            // no letterboxing (same treatment as ServiceCard's list image).
-            contentFit="cover"
-            transition={150}
-            onError={() => setFailed(true)}
-          />
-        ) : (
-          <Feather name="image" size={22} color={c.mutedForeground} />
-        )}
-      </View>
+      <RemoteImage
+        uri={image}
+        style={styles.thumbWrap}
+        fallbackIcon="image"
+        fallbackIconSize={22}
+        accessibilityLabel={service.title}
+      />
 
       <View style={styles.body}>
         {service.category_name ? (
@@ -71,9 +70,9 @@ export default function ServerServiceRow({
         <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
           {service.title}
         </Text>
-        {service.description ? (
+        {description ? (
           <Text style={[styles.desc, { color: c.mutedForeground }]} numberOfLines={2}>
-            {service.description}
+            {description}
           </Text>
         ) : null}
         {price ? <Text style={[styles.price, { color: c.primary }]}>{price}</Text> : null}
@@ -95,15 +94,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
   },
-  thumbWrap: {
-    width: 85,
-    height: 85,
-    borderRadius: 12,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  thumb: { width: '100%', height: '100%' },
+  thumbWrap: { width: 85, height: 85, borderRadius: 12 },
   body: { flex: 1, paddingHorizontal: 12, gap: 3 },
   chip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },

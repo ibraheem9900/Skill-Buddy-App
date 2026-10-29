@@ -21,7 +21,7 @@ import BackButton from '@/components/BackButton';
 import { useBookmarks } from '@/context/BookmarkContext';
 import useClientFavorites, { joinFavoriteWithService } from '@/hooks/useClientFavorites';
 import useServices from '@/hooks/useServices';
-import { formatServicePrice } from '@/lib/servicePrice';
+import { formatServiceHourlyPrice } from '@/lib/servicePrice';
 
 /**
  * My Favorites (GET /api/v1/clients/favorites) — the client's saved services.
@@ -171,9 +171,9 @@ export default function FavoritesScreen() {
                     <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
                       {service ? service.title : t('cf_unknown_service', { id: favorite.service_id })}
                     </Text>
-                    {service && formatServicePrice(service) ? (
+                    {service && formatServiceHourlyPrice(service, t('price_from_prefix')) ? (
                       <Text style={[styles.sub, { color: c.mutedForeground }]} numberOfLines={1}>
-                        {formatServicePrice(service)}
+                        {formatServiceHourlyPrice(service, t('price_from_prefix'))}
                       </Text>
                     ) : null}
                     {favorite.notes ? (

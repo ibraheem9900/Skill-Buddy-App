@@ -19,6 +19,7 @@
     "lib": ["es2020", "dom"]
   },
   "files": [
+    "./node-shims.d.ts",
     "./jobAddressUpdate.test.ts",
     "./jobRestartTimer.test.ts",
     "./jobConvert.test.ts",
@@ -69,6 +70,9 @@
     "./addressOwnership.test.ts",
     "./addressFields.test.ts",
     "./sessionReset.test.ts",
-    "./coordinates.test.ts"
+    "./coordinates.test.ts",
+    "./htmlText.test.ts",
+    "./servicePrice.test.ts",
+    "./carousel.test.ts"
   ]
 }

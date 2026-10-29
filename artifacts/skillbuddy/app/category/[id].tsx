@@ -1,46 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
+import RemoteImage from '@/components/RemoteImage';
 import useCategories from '@/hooks/useCategories';
 import useCategoryServices from '@/hooks/useCategoryServices';
-import { formatServicePrice } from '@/lib/servicePrice';
+import { formatServiceHourlyPrice } from '@/lib/servicePrice';
+import { resolveServiceImage } from '@/lib/serviceImage';
+import { htmlToFlowText } from '@/lib/htmlText';
 import type { CategoryDetailResponse, ServiceListItem } from '@/types';
-
-/**
- * Server service thumbnail — COVER FIT into a fixed square box (exactly the
- * app's existing service-image treatment: expo-image + fixed width/height +
- * contentFit="cover", see components/ServiceCard.tsx). thumbnail_url is
- * nullable per the schema and may 404, so a failed/missing image falls back
- * to a glyph — never a broken image or blank box.
- */
-function ServiceThumb({ uri }: { uri?: string | null }) {
-  const { colors: c } = useTheme();
-  const [failed, setFailed] = useState(false);
-  const show = !!uri && !failed;
-
-  return (
-    <View style={[styles.serviceThumb, { backgroundColor: c.muted }]}>
-      {show ? (
-        <ExpoImage
-          source={{ uri: uri as string }}
-          style={styles.serviceThumbImg}
-          contentFit="cover"
-          transition={150}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <Feather name="image" size={20} color={c.mutedForeground} />
-      )}
-    </View>
-  );
-}
 
 export default function CategoryDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -61,7 +34,6 @@ export default function CategoryDetailScreen() {
   const { getById } = useCategories();
   const [serverCat, setServerCat] = useState<CategoryDetailResponse | null>(null);
   const [serverState, setServerState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
-  const [iconFailed, setIconFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -111,21 +83,24 @@ export default function CategoryDetailScreen() {
   const serverHeader = serverCat ? (
     <View style={[styles.serverCard, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={[styles.serverIcon, { backgroundColor: c.muted }]}>
-        {serverCat.icon_url && !iconFailed ? (
-          <Image
-            source={{ uri: serverCat.icon_url }}
-            style={styles.serverIconImg}
-            resizeMode="contain"
-            onError={() => setIconFailed(true)}
-          />
-        ) : (
-          <MaterialCommunityIcons name="shape-plus" size={26} color={c.primary} />
-        )}
+        {/* Category icon: same shared image box as services — loader while it
+            loads, tap-to-retry when the URL fails (no broken/blank box). */}
+        <RemoteImage
+          uri={serverCat.icon_url}
+          style={styles.serverIconImg}
+          contentFit="contain"
+          backgroundColor="transparent"
+          fallbackIcon="image"
+          fallbackIconSize={20}
+          accessibilityLabel={serverCat.name}
+        />
       </View>
       <View style={styles.serverBody}>
         <Text style={[styles.serverName, { color: c.text }]}>{serverCat.name}</Text>
-        {serverCat.description ? (
-          <Text style={[styles.serverDesc, { color: c.mutedForeground }]}>{serverCat.description}</Text>
+        {htmlToFlowText(serverCat.description) ? (
+          <Text style={[styles.serverDesc, { color: c.mutedForeground }]}>
+            {htmlToFlowText(serverCat.description)}
+          </Text>
         ) : null}
       </View>
       {!isActive ? (
@@ -224,7 +199,8 @@ export default function CategoryDetailScreen() {
           ) : null /* non-numeric id — the not-found card shows in the header */
         }
         renderItem={({ item, index }) => {
-          const price = formatServicePrice(item);
+          const price = formatServiceHourlyPrice(item, t('price_from_prefix'));
+          const description = htmlToFlowText(item.description);
           return (
             <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
               <TouchableOpacity
@@ -232,14 +208,20 @@ export default function CategoryDetailScreen() {
                 onPress={() => router.push(`/service/${item.id}`)}
                 activeOpacity={0.82}
               >
-                <ServiceThumb uri={item.thumbnail_url} />
+                <RemoteImage
+                  uri={resolveServiceImage(item)}
+                  style={styles.serviceThumb}
+                  fallbackIcon="image"
+                  fallbackIconSize={20}
+                  accessibilityLabel={item.title}
+                />
                 <View style={styles.cardBody}>
                   <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={2}>
                     {item.title}
                   </Text>
-                  {item.description ? (
+                  {description ? (
                     <Text style={[styles.cardDesc, { color: c.mutedForeground }]} numberOfLines={2}>
-                      {item.description}
+                      {description}
                     </Text>
                   ) : null}
                   {price ? <Text style={[styles.servicePrice, { color: c.primary }]}>{price}</Text> : null}
@@ -347,7 +329,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  serviceThumbImg: { width: '100%', height: '100%' },
   cardBody: { flex: 1 },
   cardTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, marginBottom: 3 },
   cardDesc: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 18 },
