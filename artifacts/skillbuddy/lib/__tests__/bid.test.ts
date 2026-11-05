@@ -373,9 +373,9 @@ eq('the docs 300-digit price is still refused', formatBidPriceLocale(`${'0'.repe
 
 eq('distance uses the locale decimal', formatBidDistanceLocale('1.5', 'de'), '1,5 km');
 eq('distance uses a dot in en', formatBidDistanceLocale('1.5', 'en'), '1.5 km');
-eq('whole kilometres drop the decimal', formatBidDistanceLocale('3', 'de'), '3 km');
-eq('distance is rounded to one decimal', formatBidDistanceLocale('12.25', 'lv'), '12,3 km');
-eq('a zero distance is shown, not hidden', formatBidDistanceLocale('0', 'et'), '0 km');
+eq('whole kilometres keep one decimal under 10 km', formatBidDistanceLocale('3', 'de'), '3,0 km');
+eq('10 km and over drop the decimal', formatBidDistanceLocale('12.25', 'lv'), '12 km');
+eq('a zero distance is shown in metres, not hidden', formatBidDistanceLocale('0', 'et'), '0 m');
 eq('a null distance shows nothing (unknown ≠ 0)', formatBidDistanceLocale(null, 'de'), null);
 eq('an unparseable distance shows nothing', formatBidDistanceLocale('nope', 'de'), null);
 eq('a negative distance is refused', parseBidDistance('-1.5'), null);

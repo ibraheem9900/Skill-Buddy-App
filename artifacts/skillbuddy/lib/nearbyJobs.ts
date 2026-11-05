@@ -26,6 +26,7 @@
  */
 
 import type { RealtimeStatus } from '@/lib/realtime';
+import { formatDistance } from '@/lib/distance';
 
 /** Query-parameter bounds, from the live OpenAPI schema. */
 export const NEARBY_LIMIT_MIN = 1;
@@ -382,23 +383,16 @@ export function nearbyVisibilityState(
 
 /* ------------------------------------------------------------------ misc */
 
-/** Locales that write a decimal comma (the app's five languages minus English). */
-const COMMA_DECIMAL_LANGUAGES = new Set(['de', 'et', 'lv', 'lt']);
-
 /**
- * Distance in the app's locale, one decimal place: '1.8 km' in English,
- * '1,8 km' in de/et/lv/lt. A distance the server did not send a number for
- * renders nothing (''), so the card omits the row instead of printing '- km'.
+ * Distance in the app's locale — delegated to lib/distance so the feed, job
+ * details, bid cards and profile radius all format it the same way (metres
+ * under 1 km, one decimal between 1 and 10, whole km from 10).
+ *
+ * A distance the server did not send a number for renders nothing (''), so the
+ * card omits the row instead of printing '- km'.
  */
 export function formatDistanceKm(distanceKm: number | null | undefined, language: string): string {
-  // A MISSING distance is not 0: null/undefined/'' must render nothing, or the
-  // card would claim the job is on the provider's doorstep.
-  if (distanceKm === null || distanceKm === undefined || (distanceKm as unknown) === '') return '';
-  const value = typeof distanceKm === 'number' ? distanceKm : Number(distanceKm);
-  if (!Number.isFinite(value) || value < 0) return '';
-  const fixed = value.toFixed(1);
-  const text = COMMA_DECIMAL_LANGUAGES.has(language) ? fixed.replace('.', ',') : fixed;
-  return `${text} km`;
+  return formatDistance(distanceKm, language);
 }
 
 /**

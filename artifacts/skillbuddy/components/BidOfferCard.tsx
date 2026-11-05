@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -12,6 +12,8 @@ import {
   type BidLocale,
 } from '@/lib/bid';
 import { parseProposedTimeLine, proposedTimesSummary } from '@/lib/bidTimes';
+import { initialsFor, providerDisplayName } from '@/lib/profileDisplay';
+import { rememberProvider } from '@/lib/publicProfiles';
 import type { BidResponse } from '@/types';
 
 interface Props {
@@ -43,6 +45,12 @@ interface Props {
    * competes with Accept and no new card layout is invented.
    */
   onReject?: () => void;
+  /**
+   * Opens the provider's read-only public profile. The screen passes this only
+   * when it can build one from the snapshot the bid already carries; the card
+   * never links to a page it cannot fill.
+   */
+  onViewProfile?: () => void;
 }
 
 /**
@@ -72,12 +80,25 @@ export default function BidOfferCard({
   onPress,
   onAccept,
   onReject,
+  onViewProfile,
 }: Props) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const [photoFailed, setPhotoFailed] = useState(false);
 
   const { provider } = bid;
+
+  // The only other-party snapshot the API sends is remembered for the profile
+  // screen (there is no public provider endpoint to fetch it from again).
+  useEffect(() => {
+    rememberProvider(provider);
+  }, [provider]);
+
+  // NEVER the raw email as the title (boss screenshot: "zeeshan@gmail.com").
+  const displayName = providerDisplayName(provider.name, t('pilot_fallback_name'));
+  const completedJobs =
+    typeof provider.total_jobs_completed === 'number' ? provider.total_jobs_completed : null;
+  const badgeCount = typeof provider.badge_count === 'number' ? provider.badge_count : null;
   /**
    * The pilot's chosen arrival(s), parsed out of the stored message by
    * lib/bidTimes — the technical line itself is never displayed. One time is
@@ -110,7 +131,7 @@ export default function BidOfferCard({
         activeOpacity={0.85}
         onPress={onPress}
         accessibilityRole="button"
-        accessibilityLabel={provider.name}
+        accessibilityLabel={displayName}
       >
         {recommended || accepted ? (
           <View style={styles.tagRow}>
@@ -146,14 +167,14 @@ export default function BidOfferCard({
             // tinted disc when there is no photo (or it fails to load).
             <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: c.muted }]}>
               <Text style={[styles.avatarInitial, { color: c.primary }]}>
-                {provider.name.trim().charAt(0).toUpperCase() || '?'}
+                {initialsFor(provider.name)}
               </Text>
             </View>
           )}
 
           <View style={{ flex: 1 }}>
             <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
-              {provider.name}
+              {displayName}
             </Text>
             <View style={styles.metaRow}>
               {rating ? (
@@ -162,16 +183,25 @@ export default function BidOfferCard({
                   <Text style={[styles.metaText, { color: c.mutedForeground }]}>{rating}</Text>
                 </>
               ) : null}
-              {typeof provider.badge_count === 'number' ? (
+              {completedJobs !== null ? (
                 <>
                   {rating ? <View style={[styles.dot, { backgroundColor: c.mutedForeground }]} /> : null}
+                  <Feather name="check-circle" size={11} color={c.mutedForeground} />
+                  <Text style={[styles.metaText, { color: c.mutedForeground }]}>
+                    {t('profile_jobs_done', { n: completedJobs })}
+                  </Text>
+                </>
+              ) : null}
+              {badgeCount !== null ? (
+                <>
+                  <View style={[styles.dot, { backgroundColor: c.mutedForeground }]} />
                   <MaterialCommunityIcons
                     name="shield-check-outline"
                     size={13}
                     color={c.mutedForeground}
                   />
                   <Text style={[styles.metaText, { color: c.mutedForeground }]}>
-                    {provider.badge_count}
+                    {t('profile_badges_count', { n: badgeCount })}
                   </Text>
                 </>
               ) : null}
@@ -209,6 +239,19 @@ export default function BidOfferCard({
               {proposed.single ? t('bid_starts', { time: proposed.text }) : proposed.text}
             </Text>
           </View>
+        ) : null}
+
+        {onViewProfile ? (
+          <TouchableOpacity
+            style={styles.profileLink}
+            onPress={onViewProfile}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile_view')}
+          >
+            <Feather name="user" size={12} color={c.primary} />
+            <Text style={[styles.profileLinkText, { color: c.primary }]}>{t('profile_view')}</Text>
+          </TouchableOpacity>
         ) : null}
 
         {(onAccept || onReject) && (
@@ -275,6 +318,8 @@ const styles = StyleSheet.create({
   offerWrap: { alignItems: 'flex-end', maxWidth: '42%' },
   price: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
   eta: { fontFamily: 'Manrope_400Regular', fontSize: 11, marginTop: 2, textAlign: 'right' },
+  profileLink: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingVertical: 4 },
+  profileLinkText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
   actions: { flexDirection: 'row', gap: 8 },
   acceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 22, paddingVertical: 10, marginTop: 2 },
   acceptText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },

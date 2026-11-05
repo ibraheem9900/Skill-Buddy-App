@@ -35,6 +35,7 @@ import {
   geocodeAddress,
   type GeocodeFields,
   type GeocodeOptions,
+  type GeocodePrecision,
   type GeocodeResult,
 } from '@/lib/geocode';
 
@@ -48,6 +49,46 @@ export interface CoordinateSource extends GeocodeFields {
 export interface LatLng {
   latitude: number;
   longitude: number;
+}
+
+/**
+ * A resolved point plus how exact it is. `stored` means the address already
+ * carried a pair, so the precision of that pair is unknown (it was never
+ * re-geocoded) — only the ladder's own results can be 'city'.
+ */
+export type ResolvedPrecision = GeocodePrecision | 'stored';
+
+export interface ResolvedCoordinates extends LatLng {
+  precision: ResolvedPrecision;
+}
+
+/** True when the only thing found was the city centre — show the hint, never block. */
+export function isCityPrecision(point: { precision?: ResolvedPrecision } | null | undefined): boolean {
+  return point?.precision === 'city';
+}
+
+/**
+ * The last save's precision, kept here so EVERY flow (profile add/edit, the
+ * Post-a-Job address modal, Create/Update Job Address) records it in one place
+ * without each screen remembering to. A profile save navigates back, so the
+ * hint is shown by the next screen that lists addresses.
+ */
+let lastResolutionPrecision: ResolvedPrecision | null = null;
+
+/** True when the most recent resolution fell back to the city centre. */
+export function peekCityPrecisionNotice(): boolean {
+  return lastResolutionPrecision === 'city';
+}
+
+/** True once, then cleared — for a one-shot banner. */
+export function consumeCityPrecisionNotice(): boolean {
+  const value = lastResolutionPrecision === 'city';
+  lastResolutionPrecision = null;
+  return value;
+}
+
+export function clearCityPrecisionNotice(): void {
+  lastResolutionPrecision = null;
 }
 
 /** Parse ONE coordinate value; null unless it is a sane number. */
@@ -114,9 +155,14 @@ export interface ResolveOptions extends GeocodeOptions {
 export async function resolveCoordinates(
   source: CoordinateSource,
   options: ResolveOptions = {}
-): Promise<LatLng | null> {
+): Promise<ResolvedCoordinates | null> {
   const existing = existingCoordinates(source);
-  if (existing) return existing;
+  // A stored pair is REUSED as-is: an update must never silently move a pin the
+  // user can already see, and its original precision is unknowable here.
+  if (existing) {
+    lastResolutionPrecision = 'stored';
+    return { ...existing, precision: 'stored' };
+  }
 
   const fields = geocodeFieldsOf(source);
   const retries = typeof options.retries === 'number' && options.retries >= 0 ? options.retries : 1;
@@ -126,16 +172,21 @@ export async function resolveCoordinates(
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs);
     const result = await geocodeAddress(fields, options);
-    if (result) return toLatLng(result);
+    if (result) {
+      const point = toLatLng(result);
+      lastResolutionPrecision = point?.precision ?? null;
+      return point;
+    }
   }
+  lastResolutionPrecision = null;
   return null;
 }
 
-function toLatLng(result: GeocodeResult): LatLng | null {
+function toLatLng(result: GeocodeResult): ResolvedCoordinates | null {
   const latitude = parseCoordinateValue(result.latitude, 'lat');
   const longitude = parseCoordinateValue(result.longitude, 'lng');
   if (latitude === null || longitude === null) return null;
-  return { latitude, longitude };
+  return { latitude, longitude, precision: result.precision };
 }
 
 /** Earth's mean radius, km (IUGG). */

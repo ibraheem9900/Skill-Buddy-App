@@ -1,34 +1,30 @@
 /**
- * geocode.ts — the STOPGAP that gives a saved address real coordinates.
+ * geocode.ts — the address → coordinates resolver used by EVERY address write.
  *
- * THE PROBLEM (live evidence, see the report): the provider's address in Tallinn
- * carries the coordinates 31.53000, 74.37000 — Lahore, Pakistan — which is NOT
- * the device's location either: the app has never imported expo-location (no
- * capture code exists in this repo's history), and both clients only ever
- * re-sent the stored pair. The backend does not geocode for us, so the pair is
- * whatever was stored long ago, and the nearby feed (which ranks by these
- * coordinates) therefore shows a provider in Estonia nothing.
+ * WHY THE LADDER (boss: "Both client and pilot has very short distance. Yet it
+ * does 8km here."): the old lookup sent ONE structured query that glued the
+ * apartment onto the building line (`street=Akadeemia tee 11/2 36`). Nominatim
+ * answers that with ZERO results, so the app fell back to the CITY CENTRE
+ * (59.437242, 24.7572693) — 6.9 km from the real building. Every distance then
+ * measured from the wrong point.
  *
- * THE FIX: when an address is saved WITHOUT coordinates, resolve them silently
- * from the address text itself, through OpenStreetMap Nominatim — a FREE public
- * service, called with plain fetch (no native module, nothing new in the APK).
- * The result is sent in the SAME `latitude`/`longitude` payload fields the app
- * already used, so no contract changes.
+ * THE LADDER, most precise first (verified live against Nominatim):
+ *   1. free-form "<house/building>, <postal code> <city>, <country>"
+ *      → "Akadeemia tee 11/2, 12616 Tallinn, Estonia" = 59.396799, 24.6642473
+ *        (building, 30 m from 11/1);
+ *   2. the same without a trailing "/N" sub-number
+ *      → "Akadeemia tee 11, ..." (the base building);
+ *   3. street name only, numbers stripped, + city;
+ *   4. postal code + country;
+ *   5. city centre (the OLD fallback, now the LAST rung and flagged as such).
  *
- * RULES THAT KEEP IT POLITE AND SAFE:
- *   • at most ONE request per second from this device (Nomimatim's usage policy);
- *   • an identifying User-Agent is sent (their policy requires one);
- *   • a structured query is tried first (country/city/postcode/street), then the
- *     city centre as a fallback when the exact address is not found;
- *   • it NEVER blocks saving: the caller bounds the wait and saves without
- *     coordinates when geocoding fails — a failure is not an error the user sees.
+ * The result carries `precision`, so a caller can tell the user "we only found
+ * your city" without blocking the save. Results are cached per normalised
+ * input, requests are queued at most one per second, an identifying
+ * User-Agent is sent, and the device GPS is never consulted.
  *
- * LONG-TERM: this belongs on the backend (one geocoding call per address write,
- * cached per city). The exact request to hand the backend developer is in the
- * delivery report; this module is the app-side stopgap only.
- *
- * The URL builders, the response parser and the rate limiter are pure and
- * unit-tested (the network call is injectable).
+ * The URL builders, the response parser, the cache and the rate limiter are
+ * pure and unit-tested; the network call is injectable.
  */
 
 /** The text fields a geocoding query can be built from. */
@@ -41,10 +37,14 @@ export interface GeocodeFields {
   country?: string | null;
 }
 
-/** What a successful lookup yields — numbers, or null and never a guess. */
+/** How exact the returned point is. `city` means "fallback only". */
+export type GeocodePrecision = 'building' | 'street' | 'postcode' | 'city';
+
+/** What a successful lookup yields — numbers plus the precision reached. */
 export interface GeocodeResult {
   latitude: number;
   longitude: number;
+  precision: GeocodePrecision;
 }
 
 export interface GeocodeOptions {
@@ -54,7 +54,7 @@ export interface GeocodeOptions {
   now?: () => number;
   /** Injected sleep (ms). */
   sleep?: (ms: number) => Promise<void>;
-  /** Hard cap on the whole operation (the caller still saves on failure). */
+  /** Hard cap on ONE request (the caller still saves on failure). */
   timeoutMs?: number;
 }
 
@@ -68,12 +68,147 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Collapse whitespace so the cache key and the query are stable. */
+function clean(value: unknown): string {
+  return text(value).replace(/\s+/g, ' ');
+}
+
 /**
- * The structured query for the exact address. Empty fields are omitted entirely
- * (an empty parameter changes Nominatim's behaviour and can return nothing).
- *
- * `street` combines the two street fields the way the address is written
- * (house/building number first — the form's own order).
+ * Country name → ISO 3166-1 alpha-2, for Nominatim's `countrycodes` filter.
+ * Only the countries this app's address data actually uses are listed; an
+ * unknown country simply omits the filter (the query still carries the name).
+ */
+const COUNTRY_CODES: Record<string, string> = {
+  estonia: 'ee',
+  eesti: 'ee',
+  latvia: 'lv',
+  latvija: 'lv',
+  lithuania: 'lt',
+  lietuva: 'lt',
+  germany: 'de',
+  deutschland: 'de',
+  finland: 'fi',
+  suomi: 'fi',
+  russia: 'ru',
+  poland: 'pl',
+  sweden: 'se',
+  norway: 'no',
+  denmark: 'dk',
+  ukraine: 'ua',
+  belarus: 'by',
+  'united kingdom': 'gb',
+  'great britain': 'gb',
+  england: 'gb',
+  ireland: 'ie',
+  france: 'fr',
+  spain: 'es',
+  italy: 'it',
+  netherlands: 'nl',
+  belgium: 'be',
+  austria: 'at',
+  'czech republic': 'cz',
+  czechia: 'cz',
+  portugal: 'pt',
+  'united states': 'us',
+  'united states of america': 'us',
+  usa: 'us',
+  canada: 'ca',
+  turkey: 'tr',
+  india: 'in',
+  pakistan: 'pk',
+};
+
+/** The two-letter code for a country name/ISO code, or '' when unknown. */
+export function countryCodeFor(country: string | null | undefined): string {
+  const value = clean(country).toLowerCase();
+  if (value.length === 0) return '';
+  if (/^[a-z]{2}$/.test(value)) return value;
+  return COUNTRY_CODES[value] ?? '';
+}
+
+/** Drop a trailing "/2" (or "/1A") sub-number from a building line. */
+export function stripSubNumber(house: string): string {
+  const value = clean(house);
+  return value.replace(/\s*\/\s*[0-9A-Za-z-]+\s*$/, '').trim();
+}
+
+/**
+ * The street NAME, with house numbers removed: "Akadeemia tee 11/2" →
+ * "Akadeemia tee". A value that is only a number yields '' (nothing to search).
+ */
+export function streetNameOnly(house: string): string {
+  const base = stripSubNumber(house);
+  const withoutNumbers = base
+    .replace(/\s+\d+[A-Za-z]?(?:\s*\/\s*[0-9A-Za-z-]+)?\s*$/, '')
+    .replace(/\s+\d+[A-Za-z]?\s+/g, ' ')
+    .replace(/^\s*\d+[A-Za-z]?(?:\s*\/\s*[0-9A-Za-z-]+)?\s*$/, '')
+    .trim();
+  return withoutNumbers.replace(/\s{2,}/g, ' ');
+}
+
+/** "12616 Tallinn" — the postcode+city part of a free-form address line. */
+export function postalCityLine(fields: GeocodeFields): string {
+  return [clean(fields.postal_code), clean(fields.city)]
+    .filter((part) => part.length > 0)
+    .join(' ');
+}
+
+export interface GeocodeRung {
+  precision: GeocodePrecision;
+  /** The query string for `GET /search?<params>`. */
+  params: string;
+  /** A stable label used by tests and logs. */
+  label: 'full' | 'base-building' | 'street' | 'postcode' | 'city';
+}
+
+/**
+ * Build the precision ladder for one address. Rungs that cannot be built (no
+ * city, no street name, …) are omitted, and duplicates are dropped, so the same
+ * query is never sent twice.
+ */
+export function buildGeocodeLadder(fields: GeocodeFields): GeocodeRung[] {
+  const house = clean(fields.house_number);
+  const baseHouse = stripSubNumber(house);
+  const street = streetNameOnly(house);
+  const postalCity = postalCityLine(fields);
+  const postal = clean(fields.postal_code);
+  const city = clean(fields.city);
+  const county = clean(fields.county);
+  const country = clean(fields.country);
+  const countrycode = countryCodeFor(country);
+
+  const rungs: GeocodeRung[] = [];
+  const seen = new Set<string>();
+
+  const push = (label: GeocodeRung['label'], precision: GeocodePrecision, parts: string[]) => {
+    const q = parts.filter((part) => part.length > 0).join(', ');
+    if (q.length === 0) return;
+    const params = new URLSearchParams({ q, format: 'jsonv2', limit: '1', addressdetails: '1' });
+    if (countrycode) params.set('countrycodes', countrycode);
+    const key = params.toString();
+    if (seen.has(key)) return;
+    seen.add(key);
+    rungs.push({ label, precision, params: key });
+  };
+
+  // 1. the complete building line, as the form collected it.
+  push('full', 'building', [house, postalCity, country]);
+  // 2. the base building without the "/2" sub-number.
+  if (baseHouse && baseHouse !== house) push('base-building', 'building', [baseHouse, postalCity, country]);
+  // 3. the street itself.
+  if (street) push('street', 'street', [street, city || county, country]);
+  // 4. the postcode.
+  push('postcode', 'postcode', [postal, country]);
+  // 5. the city — the LAST resort, and reported as such.
+  push('city', 'city', [city, county, country]);
+
+  return rungs;
+}
+
+/**
+ * The old structured parameters, kept exported because it documents the query
+ * that FAILED live (0 results for "Akadeemia tee 11/2 36"). Nothing calls it for
+ * geocoding any more — the ladder above replaces it.
  */
 export function buildStructuredParams(fields: GeocodeFields): string {
   const street = [text(fields.house_number), text(fields.street_address)]
@@ -94,11 +229,7 @@ export function buildStructuredParams(fields: GeocodeFields): string {
   return params.toString();
 }
 
-/**
- * The fallback query: the CITY centre, for an address Nominatim cannot find
- * exactly. Returns null when there is not even a city to fall back to — a
- * country-level guess would be worse than no coordinates at all.
- */
+/** The city-centre query (still exported for the old callers/tests). */
 export function buildCityParams(fields: GeocodeFields): string | null {
   const city = text(fields.city);
   if (city.length === 0) return null;
@@ -113,15 +244,30 @@ export function buildCityParams(fields: GeocodeFields): string | null {
   return params.toString();
 }
 
+/** The first hit of a Nominatim body, with the address block precision needs. */
+export interface NominatimHit {
+  latitude: number;
+  longitude: number;
+  address: Record<string, unknown>;
+  type: string;
+  displayName: string;
+}
+
 /**
- * Read `[{lat, lon}]` (Nominatim's jsonv2 shape) into numbers.
+ * Read `[{lat, lon, address}]` (Nominatim's jsonv2 shape).
  *
  * Returns null for anything unusable — an empty array, a non-array body, a
  * non-numeric or out-of-range pair — so a junk response can never become a pin.
  */
-export function parseNominatimResponse(body: unknown): GeocodeResult | null {
+export function parseNominatimHit(body: unknown): NominatimHit | null {
   if (!Array.isArray(body) || body.length === 0) return null;
-  const first = body[0] as { lat?: unknown; lon?: unknown } | null;
+  const first = body[0] as {
+    lat?: unknown;
+    lon?: unknown;
+    address?: unknown;
+    type?: unknown;
+    display_name?: unknown;
+  };
   if (!first || typeof first !== 'object') return null;
 
   // Both values must be PRESENT and numeric: Number('') is 0, so a missing
@@ -137,7 +283,54 @@ export function parseNominatimResponse(body: unknown): GeocodeResult | null {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
   if (latitude === 0 && longitude === 0) return null; // "null island" is a failed lookup
-  return { latitude, longitude };
+
+  const address =
+    first.address && typeof first.address === 'object'
+      ? (first.address as Record<string, unknown>)
+      : {};
+
+  return {
+    latitude,
+    longitude,
+    address,
+    type: text(first.type),
+    displayName: text(first.display_name),
+  };
+}
+
+/** Backwards-compatible pair-only parser. */
+export function parseNominatimResponse(body: unknown): { latitude: number; longitude: number } | null {
+  const hit = parseNominatimHit(body);
+  return hit ? { latitude: hit.latitude, longitude: hit.longitude } : null;
+}
+
+/**
+ * Did this rung actually reach the precision it claims?
+ *
+ * The guards matter: Nominatim happily answers a made-up street with the CITY,
+ * which would silently restore the exact bug this ladder exists to fix. A rung
+ * that comes back coarse is treated as a miss, and the next rung runs.
+ */
+export function precisionForRung(rung: GeocodePrecision, hit: NominatimHit): GeocodePrecision | null {
+  const address = hit.address;
+  const hasHouse = text(address.house_number).length > 0 || text(address.building).length > 0;
+  const hasRoad = text(address.road).length > 0;
+
+  if (rung === 'building') {
+    if (hit.type === 'administrative' && !hasHouse && !hasRoad) return null;
+    if (hasHouse) return 'building';
+    if (hasRoad) return 'street';
+    return null;
+  }
+  if (rung === 'street') {
+    if (!hasRoad) return null;
+    return 'street';
+  }
+  if (rung === 'postcode') {
+    if (!text(address.postcode) && hit.type !== 'postcode') return null;
+    return 'postcode';
+  }
+  return 'city';
 }
 
 /**
@@ -165,6 +358,27 @@ export function createRateLimiter(minIntervalMs: number = MIN_REQUEST_INTERVAL_M
 /** The module's shared gate — one per app process, as the policy intends. */
 const limiter = createRateLimiter();
 
+/** Per-input cache: the same address is never geocoded twice in a session. */
+const resultCache = new Map<string, GeocodeResult>();
+const MAX_CACHE_ENTRIES = 200;
+
+/** Cleared by tests; also usable after a sign-out if a caller wants a clean map. */
+export function clearGeocodeCache(): void {
+  resultCache.clear();
+}
+
+/** The cache key: every query-relevant field, normalised. */
+export function geocodeCacheKey(fields: GeocodeFields): string {
+  return JSON.stringify([
+    clean(fields.house_number),
+    clean(fields.street_address),
+    clean(fields.postal_code),
+    clean(fields.city),
+    clean(fields.county),
+    clean(fields.country),
+  ]);
+}
+
 /** Run `promise`, resolving to null after `timeoutMs` instead of hanging. */
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -182,12 +396,12 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
 /**
  * One query's outcome. "miss" (the server answered, it just does not know this
- * address) is worth a fallback query; "error" (the request never got an answer)
- * is not — the city centre would fail the same way, so the caller retries once
- * at the resolver level instead of burning a second request while offline.
+ * address) is worth the next rung; "error" (the request never got an answer) is
+ * not — every rung would fail the same way, so the caller retries the whole
+ * lookup once instead of burning five requests while offline.
  */
 type QueryOutcome =
-  | { status: 'hit'; result: GeocodeResult }
+  | { status: 'hit'; hit: NominatimHit }
   | { status: 'miss' }
   | { status: 'error' };
 
@@ -211,8 +425,8 @@ async function requestOnce(
     if (!response) return { status: 'error' };
     if (!response.ok) return { status: 'error' };
     const body = await response.json();
-    const parsed = parseNominatimResponse(body);
-    return parsed ? { status: 'hit', result: parsed } : { status: 'miss' };
+    const hit = parseNominatimHit(body);
+    return hit ? { status: 'hit', hit } : { status: 'miss' };
   } catch {
     // Network failure, a JSON parse error, an aborted request: all the same.
     return { status: 'error' };
@@ -220,38 +434,48 @@ async function requestOnce(
 }
 
 /**
- * Resolve coordinates for an address, silently.
+ * Resolve coordinates for an address through the precision ladder, silently.
  *
- * Order: the exact address, then the city centre. Returns null when nothing
- * usable came back — the caller saves the address unchanged in that case.
+ * Returns null when nothing usable came back — the caller decides whether that
+ * blocks a job (it does) or merely leaves a profile address without a pin.
  */
 export async function geocodeAddress(
   fields: GeocodeFields,
   options: GeocodeOptions = {}
 ): Promise<GeocodeResult | null> {
-  const fetchImpl =
-    options.fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
+  const key = geocodeCacheKey(fields);
+  const cached = resultCache.get(key);
+  if (cached) return cached;
+
+  const fetchImpl = options.fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
   if (!fetchImpl) return null; // no fetch available on this runtime — save as is
   const now = options.now ?? (() => Date.now());
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const attempts: string[] = [];
-  const structured = buildStructuredParams(fields);
-  if (structured.length > 0) attempts.push(structured);
-  const cityCentre = buildCityParams(fields);
-  if (cityCentre && cityCentre !== structured) attempts.push(cityCentre);
-
-  for (const params of attempts) {
+  for (const rung of buildGeocodeLadder(fields)) {
     // Respect the one-request-per-second policy before every attempt.
     const wait = limiter.waitMs(now());
     if (wait > 0) await sleep(wait);
     limiter.markSent(now());
-    const outcome = await requestOnce(params, fetchImpl, timeoutMs);
-    if (outcome.status === 'hit') return outcome.result;
-    // A network-level failure ends the attempt here: the fallback query would
-    // fail identically. The resolver retries the whole lookup once.
+    const outcome = await requestOnce(rung.params, fetchImpl, timeoutMs);
+    // A network-level failure ends the whole lookup here: the next rung would
+    // fail identically. The resolver retries the ladder once.
     if (outcome.status === 'error') return null;
+    if (outcome.status === 'miss') continue;
+    const precision = precisionForRung(rung.precision, outcome.hit);
+    if (!precision) continue; // the rung answered, but not at this precision
+    const result: GeocodeResult = {
+      latitude: outcome.hit.latitude,
+      longitude: outcome.hit.longitude,
+      precision,
+    };
+    if (resultCache.size >= MAX_CACHE_ENTRIES) {
+      const oldest = resultCache.keys().next().value;
+      if (oldest !== undefined) resultCache.delete(oldest);
+    }
+    resultCache.set(key, result);
+    return result;
   }
   return null;
 }

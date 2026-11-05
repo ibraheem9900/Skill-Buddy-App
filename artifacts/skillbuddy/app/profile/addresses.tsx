@@ -17,6 +17,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
+import { peekCityPrecisionNotice } from '@/lib/cityPrecisionNotice';
 import useAddresses, { parseCoordinate } from '@/hooks/useAddresses';
 import { markNearbyStale } from '@/lib/nearbyStale';
 import { addressLocationStatus } from '@/lib/providerAddress';
@@ -162,6 +163,28 @@ export default function AddressesScreen() {
           />
         }
       >
+        {/* Non-blocking notice after a save whose lookup only reached the city.
+            The address is saved; nearby matching is just approximate. */}
+        {peekCityPrecisionNotice() ? (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: c.card,
+                borderColor: c.border,
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: 8,
+              },
+            ]}
+          >
+            <Feather name="info" size={15} color={c.mutedForeground} />
+            <Text style={[styles.stateText, { color: c.mutedForeground, flex: 1 }]}>
+              {t('addr_city_precision_hint')}
+            </Text>
+          </View>
+        ) : null}
+
         {status === 'loading' && !address ? (
           <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
             <View style={[styles.rowIcon, { backgroundColor: c.accent }]}>

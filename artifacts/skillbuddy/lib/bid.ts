@@ -68,6 +68,8 @@ import type {
 /** Re-exported so a caller has one import for the whole Submit Bid flow. */
 export { isValidJobId } from '@/lib/jobPublish';
 
+import { formatDistance } from '@/lib/distance';
+
 /* ───────────────────────────────────────────────────────────────── money ─── */
 
 /** The schema's pattern allows unbounded leading zeros; no real price is long. */
@@ -1020,14 +1022,9 @@ export function formatBidDistanceLocale(
 ): string | null {
   const n = parseBidDistance(raw);
   if (n === null) return null;
-  const fmt = LOCALE_NUMBER_FORMAT[locale] ?? LOCALE_NUMBER_FORMAT.en;
-  const rounded = Math.round(n * 10) / 10;
-  const fixed = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-  const [whole, fraction] = fixed.split('.');
-  const amount = fraction
-    ? `${groupThousands(whole, fmt.group)}${fmt.decimal}${fraction}`
-    : groupThousands(whole, fmt.group);
-  return `${amount} km`;
+  // ONE formatter for the whole app (lib/distance): "8.0 km" on the feed and
+  // "8 km" on a bid card were the same server field printed two ways.
+  return formatDistance(n, locale);
 }
 
 /* ────────────────────────────────────────────────── what the client sees ── */

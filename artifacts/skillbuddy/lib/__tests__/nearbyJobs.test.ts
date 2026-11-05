@@ -318,7 +318,7 @@ check('a null frame is never "new"', isNewNearbyJob([existing], null) === false)
 
 equal('distance is one decimal in the app locale', formatDistanceKm(1.84, 'en'), '1.8 km');
 equal('a decimal comma locale renders a comma', formatDistanceKm(1.84, 'de'), '1,8 km');
-equal('et/lv/lt also use the comma', formatDistanceKm(0.05, 'lt'), '0,1 km');
+equal('under a kilometre is shown in metres', formatDistanceKm(0.05, 'lt'), '50 m');
 equal('a whole number still shows one decimal', formatDistanceKm(2, 'en'), '2.0 km');
 equal('a missing distance renders nothing (row omitted)', formatDistanceKm(null, 'en'), '');
 equal('a NaN distance renders nothing', formatDistanceKm(Number.NaN, 'en'), '');

@@ -1470,6 +1470,9 @@ export default function JobBidsScreen() {
           recommended={recommendedTop.some((r) => r.id === item.id)}
           isNew={newBidIds.includes(item.id)}
           onPress={() => setSheetBid(item)}
+          // Read-only public profile, built from the snapshot this bid already
+          // carries (lib/publicProfiles) + GET /providers/{id}/skills.
+          onViewProfile={() => router.push(`/provider/${item.provider.id}` as any)}
           // The Accept action is decided by lib/bid.canAcceptBid: the CLIENT's
           // role, an offer still PENDING, and a job still OPEN with nobody
           // assigned. Every other case passes undefined, so no button exists.

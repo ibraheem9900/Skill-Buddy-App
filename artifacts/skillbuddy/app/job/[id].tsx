@@ -121,6 +121,9 @@ import {
   type JobActionId,
 } from '@/lib/jobDetail';
 import { sanitizeRichText } from '@/lib/sanitizeRichText';
+import { useJobPermissions } from '@/hooks/useJobPermissions';
+import { existingCoordinates, haversineKm } from '@/lib/coordinates';
+import { formatDistance } from '@/lib/distance';
 import { splitTable } from '@/lib/jobSchedule';
 import {
   clockOf,
@@ -165,7 +168,7 @@ export default function BiddingDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   // Translated tables for the LOCAL schedule labels (never Intl, never UTC).
   const scheduleMonths = useMemo(() => splitTable(t('post_sched_months')), [t]);
   const scheduleWeekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
@@ -216,7 +219,7 @@ export default function BiddingDashboardScreen() {
   );
 
   // ── Publish a DRAFT job (POST /api/v1/jobs/{job_id}/publish) ─────────────
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { publish, publishing } = usePublishJob();
 
   // A 401 is only observable here AFTER the shared client refreshed the token
@@ -677,6 +680,19 @@ export default function BiddingDashboardScreen() {
   // "provider assigned, payment settled, work not started" (there is no
   // can_start_job flag). The 200 IS the job, so it is adopted directly.
   const { activeRole } = useRole();
+  /**
+   * THE permission matrix (lib/jobPermissions). The backend's `is_editable` /
+   * `can_restart_timer` / `can_convert_*` flags describe the JOB, not the
+   * viewer — a pilot looking at someone else's open job used to inherit every
+   * owner action because the screen trusted those flags alone. Every owner
+   * action now needs isOwner (CLIENT role AND job.client_id === user.id).
+   */
+  const perms = useJobPermissions(serverJob);
+  /** Handler-level guard: visibility is not the only check. */
+  const ownerOnly = (fn: () => void) => () => {
+    if (!perms.isOwner) return;
+    fn();
+  };
   const { startJob, starting } = useStartJob();
 
   const doStartJob = useCallback(async () => {
@@ -1401,18 +1417,60 @@ export default function BiddingDashboardScreen() {
         value: <Text style={infoValueStyle}>{createdOn}</Text>,
       });
     }
-    infoTiles.push({
-      key: 'provider',
-      heading: t('jobd_tile_provider'),
-      value: (
-        <Text style={infoValueStyle}>
-          {providerAssigned && serverJob.assigned_provider_id != null
-            ? t('jobd_provider_n', { id: serverJob.assigned_provider_id }) +
-              (assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : '')
-            : t('jobd_not_assigned')}
-        </Text>
-      ),
-    });
+    if (perms.isProviderViewer) {
+      // ── PILOT VIEW ──────────────────────────────────────────────────────
+      // The pilot sees Distance from you + who the client is, where the owner
+      // sees Provider. Both come from data that already exists: the job
+      // address's stored pin and this user's own saved address. If either pin
+      // is missing the tile is HIDDEN rather than showing a made-up 0 km.
+      const jobPoint = addr
+        ? existingCoordinates({ latitude: addr.latitude, longitude: addr.longitude })
+        : null;
+      const myPoint = existingCoordinates(user?.address ?? null);
+      if (jobPoint && myPoint) {
+        infoTiles.push({
+          key: 'distance',
+          heading: t('jobd_tile_distance'),
+          value: (
+            <Text style={infoValueStyle}>
+              {formatDistance(haversineKm(myPoint, jobPoint), language)}
+            </Text>
+          ),
+        });
+      }
+      // JobResponse carries client_id but NO client snapshot (and there is no
+      // public client-profile endpoint — see the delivery report). The id is
+      // factual and translated; nothing else is invented.
+      infoTiles.push({
+        key: 'client',
+        heading: t('jobd_tile_client'),
+        value: <Text style={infoValueStyle}>{t('jobd_client_n', { id: serverJob.client_id })}</Text>,
+      });
+      if (providerAssigned && serverJob.assigned_provider_id != null) {
+        infoTiles.push({
+          key: 'provider',
+          heading: t('jobd_tile_provider'),
+          value: (
+            <Text style={infoValueStyle}>
+              {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
+            </Text>
+          ),
+        });
+      }
+    } else {
+      infoTiles.push({
+        key: 'provider',
+        heading: t('jobd_tile_provider'),
+        value: (
+          <Text style={infoValueStyle}>
+            {providerAssigned && serverJob.assigned_provider_id != null
+              ? t('jobd_provider_n', { id: serverJob.assigned_provider_id }) +
+                (assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : '')
+              : t('jobd_not_assigned')}
+          </Text>
+        ),
+      });
+    }
     if (completedOn) {
       infoTiles.push({
         key: 'completed',
@@ -1426,16 +1484,19 @@ export default function BiddingDashboardScreen() {
     // offered on a job that is already regular, and "Convert to Urgent" never on one
     // that is already urgent — the flags themselves still decide whether each
     // transition is allowed at all.
-    const actions = visibleJobActions(serverJob).filter((action) => {
-      if (action === 'convertToRegular') return canConvertJobToRegular(serverJob);
-      if (action === 'convertToUrgent') return canConvertJobToUrgent(serverJob);
-      // The "cancel" row here is the CLIENT's route (/job/{id}/cancel with a reason,
-      // POST /api/v1/jobs/{job_id}/cancel). A provider's withdrawal is a different
-      // endpoint rendered as its own provider-only button below, so this row must
-      // never appear for a provider even while is_cancellable is true.
-      if (action === 'cancel') return canClientCancelJob(serverJob, activeRole);
-      return true;
-    });
+    // NOTHING owner-only renders unless the viewer IS the owner. The backend
+    // flags are still consulted per action, but never alone — that is exactly
+    // how a pilot ended up with Edit / Restart / Convert on someone else's job.
+    const actions = perms.isOwner
+      ? visibleJobActions(serverJob).filter((action) => {
+          if (action === 'convertToRegular') return canConvertJobToRegular(serverJob) && perms.canConvertToRegular;
+          if (action === 'convertToUrgent') return canConvertJobToUrgent(serverJob) && perms.canConvertToUrgent;
+          if (action === 'cancel') return canClientCancelJob(serverJob, activeRole) && perms.canCancelJob;
+          if (action === 'edit') return perms.canEditJob;
+          if (action === 'restartTimer') return perms.canRestartTimer;
+          return false;
+        })
+      : [];
     const actionIcon: Record<JobActionId, keyof typeof Feather.glyphMap> = {
       edit: 'edit-2',
       cancel: 'x-circle',
@@ -1452,6 +1513,9 @@ export default function BiddingDashboardScreen() {
     // they are deliberately not rendered — no fake map and no placeholder pin.
 
     const runAction = (action: JobActionId) => {
+      // HANDLER GUARD, not just the button: a stale render (or a route opened
+      // directly) must never fire an owner request as a pilot.
+      if (!perms.isOwner) return;
       // Edit is wired: the button only appears when the backend's is_editable is
       // true, and the edit screen re-checks that flag before rendering a form.
       if (action === 'edit') {
@@ -1580,14 +1644,14 @@ export default function BiddingDashboardScreen() {
           {/* DRAFT-only: publishing a job that is already out there makes no
               sense, and the endpoint is only for turning a draft into a live,
               bidding job. Hidden entirely for every other status. */}
-          {isDraftJob(serverJob) ? (
+          {perms.isOwner && isDraftJob(serverJob) ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
                 { backgroundColor: c.primary },
                 publishing && styles.publishBtnBusy,
               ]}
-              onPress={confirmPublish}
+              onPress={ownerOnly(confirmPublish)}
               disabled={publishing}
               activeOpacity={0.85}
             >
@@ -1621,7 +1685,7 @@ export default function BiddingDashboardScreen() {
               the CLIENT role and by the job having left DRAFT: a draft has no
               bidding window and cannot receive bids. Nothing about the offers
               is assumed here — that screen reads them itself. */}
-          {activeRole === 'CLIENT' && serverJob.status !== 'DRAFT' ? (
+          {perms.canViewBids ? (
             <TouchableOpacity
               style={[styles.publishBtn, { backgroundColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/bids` as any)}
@@ -1641,7 +1705,7 @@ export default function BiddingDashboardScreen() {
               STATE-AGNOSTIC about whether this provider already bid: that answer
               only exists at /bids/mine, which the bid screen itself reads, so
               tapping it either shows the form or that provider's own bid summary. */}
-          {canProviderSubmitBid(serverJob, activeRole) ? (
+          {perms.canPlaceBid ? (
             <TouchableOpacity
               style={[styles.publishBtn, { backgroundColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/bid` as any)}
@@ -1663,9 +1727,7 @@ export default function BiddingDashboardScreen() {
               that answer only exists at /bids/mine, which the screen itself
               reads, so this opens either the submitted bid or the closed state.
               CLIENT mode is untouched: the client's way in is "View bids" above. */}
-          {activeRole === 'PROVIDER' &&
-          !canProviderSubmitBid(serverJob, activeRole) &&
-          serverJob.status !== 'DRAFT' ? (
+          {perms.canViewOwnBid ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
@@ -1686,7 +1748,7 @@ export default function BiddingDashboardScreen() {
               open for assignment (bidding open, not cancelled/completed) and not
               already assigned — see lib/jobAssign. It also needs a real provider id,
               which only the offers list can supply, so no button renders without one. */}
-          {canAssignProvider(serverJob) && isValidProviderId(providerId) ? (
+          {perms.isOwner && canAssignProvider(serverJob) && isValidProviderId(providerId) ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
@@ -1714,7 +1776,7 @@ export default function BiddingDashboardScreen() {
               so the gate is the backend's own status: only a job sitting in
               PAYMENT_PENDING is payable (lib/jobPayment). It enables/disables itself
               from the response — nothing about the post-payment status is assumed. */}
-          {canConfirmPayment(serverJob) ? (
+          {perms.isOwner && canConfirmPayment(serverJob) ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
@@ -2012,7 +2074,7 @@ export default function BiddingDashboardScreen() {
                 ) : null}
                 {/* Update Job Address (PATCH) is EDIT-ONLY: shown when the job
                     already carries an address and is still editable. */}
-                {canUpdateJobAddress(serverJob) ? (
+                {perms.canEditAddress && canUpdateJobAddress(serverJob) ? (
                   <TouchableOpacity
                     style={[styles.publishBtn, { backgroundColor: c.primary, alignSelf: 'stretch' }]}
                     onPress={() => router.push(`/job/${serverJob.id}/edit-address` as any)}
@@ -2046,7 +2108,7 @@ export default function BiddingDashboardScreen() {
                     {t('jobd_no_address')}
                   </Text>
                 </View>
-                {jobHasAddress(serverJob) && canUpdateJobAddress(serverJob) ? (
+                {perms.canEditAddress && jobHasAddress(serverJob) && canUpdateJobAddress(serverJob) ? (
                   <TouchableOpacity
                     style={[styles.publishBtn, { backgroundColor: c.primary, alignSelf: 'stretch' }]}
                     onPress={() => router.push(`/job/${serverJob.id}/edit-address` as any)}
@@ -2057,7 +2119,7 @@ export default function BiddingDashboardScreen() {
                       {t('jobaddr_update_title')}
                     </Text>
                   </TouchableOpacity>
-                ) : canAddJobAddress(serverJob) ? (
+                ) : perms.canEditAddress && canAddJobAddress(serverJob) ? (
                   <TouchableOpacity
                     style={[styles.publishBtn, { backgroundColor: c.primary, alignSelf: 'stretch' }]}
                     onPress={() => router.push(`/job/${serverJob.id}/address` as any)}

@@ -340,6 +340,16 @@ export const authApi = {
    */
   getProviderSkills: () => api.get<ProviderSkill[]>('/api/v1/providers/me/skills'),
   /**
+   * GET /api/v1/providers/{provider_id}/skills — ANOTHER provider's skills.
+   *
+   * Live schema: protected (OAuth2) but keyed by provider id, not by "me", so
+   * it is the one public-profile section the backend already exposes. The bid
+   * snapshot supplies the rest (name, photo, rating, badges, completed jobs);
+   * reviews, member-since and verification have NO endpoint — see the report.
+   */
+  getPublicProviderSkills: (providerId: number) =>
+    api.get<ProviderSkill[]>(`/api/v1/providers/${providerId}/skills`),
+  /**
    * POST /api/v1/providers/me/skills — adds one skill. Body per the live
    * schema is ONLY `service_id` (integer, required): the backend then applies
    * its own defaults (skill_type PRIMARY, years_of_experience 0, is_active

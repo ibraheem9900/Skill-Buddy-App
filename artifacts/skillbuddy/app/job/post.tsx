@@ -113,6 +113,7 @@ import {
 } from '@/lib/postAddress';
 import { buildProfileAddressPayload } from '@/lib/profileAddressSync';
 import { resolveCoordinates } from '@/lib/coordinates';
+import { peekCityPrecisionNotice } from '@/lib/cityPrecisionNotice';
 import type { AttachmentDraft } from '@/lib/jobAttachments';
 import {
   DESC_WORD_MAX,
@@ -1922,6 +1923,28 @@ export default function PostJobScreen() {
 
       {stepErrors.address ? (
         <Text style={[styles.error, { color: c.destructive }]}>{stepErrors.address}</Text>
+      ) : null}
+
+      {/* Non-blocking geocoding notice: the save SUCCEEDED, but the address
+          only resolved to its city, so distance matching is approximate. */}
+      {peekCityPrecisionNotice() ? (
+        <View
+          style={[
+            styles.addrState,
+            {
+              backgroundColor: c.card,
+              borderColor: c.border,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 8,
+            },
+          ]}
+        >
+          <Feather name="info" size={14} color={c.mutedForeground} />
+          <Text style={[styles.addrStateText, { color: c.mutedForeground, flex: 1, textAlign: 'left' }]}>
+            {t('addr_city_precision_hint')}
+          </Text>
+        </View>
       ) : null}
     </>
   );

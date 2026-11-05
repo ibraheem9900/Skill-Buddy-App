@@ -3,7 +3,9 @@ import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-nativ
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import AmountStepper from '@/components/AmountStepper';
 import { BID_MESSAGE_MAX_CHARS } from '@/lib/bid';
+import { formatCents, parseMoneyToCents } from '@/lib/money';
 
 /**
  * THE bid form fields — price, expected time (hours + minutes) and message —
@@ -115,28 +117,24 @@ export default function BidFormFields({
 
   return (
     <>
-      {/* Offered price — the final total the client pays, VAT included. */}
+      {/* Offered price — the final total the client pays, VAT included.
+          ONE amount control (round −/+ with press-and-hold, +€1/+€5/+€10, tap
+          to type) backed by INTEGER CENTS, so no long float can appear here
+          and both the Submit and Edit flows share the same rules. */}
       <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_price_label')}</Text>
-      <TextInput
-        style={[
-          styles.input,
-          {
-            backgroundColor: c.card,
-            color: c.text,
-            borderColor: priceError ? c.destructive : c.border,
-          },
-        ]}
-        value={price}
-        onChangeText={onPriceChange}
+      <AmountStepper
+        valueCents={parseMoneyToCents(price)}
+        onChange={(cents) => onPriceChange(formatCents(cents))}
+        minCents={100}
+        maxCents={9_999_900}
+        disabled={disabled}
+        error={priceError}
+        hint={t('jobd_bid_price_vat_note')}
+        decreaseLabel={t('a11y_decrease_amount')}
+        increaseLabel={t('a11y_increase_amount')}
         placeholder={t('jobd_bid_price_ph')}
-        placeholderTextColor={c.mutedForeground}
-        keyboardType="decimal-pad"
-        editable={!disabled}
       />
       {priceExtra}
-      <Text style={[styles.hint, { color: priceError ? c.destructive : c.mutedForeground }]}>
-        {priceError ?? t('jobd_bid_price_vat_note')}
-      </Text>
 
       {/* Time: the pilot's per-task arrival picker. The old ETA steppers only
           appear for a caller that has not adopted it yet. */}

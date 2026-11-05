@@ -73,6 +73,10 @@
     "./coordinates.test.ts",
     "./htmlText.test.ts",
     "./servicePrice.test.ts",
-    "./carousel.test.ts"
+    "./carousel.test.ts",
+    "./money.test.ts",
+    "./distance.test.ts",
+    "./amountStepper.test.ts",
+    "./jobPermissions.test.ts"
   ]
 }

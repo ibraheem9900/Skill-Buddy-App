@@ -13,6 +13,7 @@ import {
   parseCoordinateValue,
   resolveCoordinates,
 } from '../coordinates';
+import { clearGeocodeCache } from '../geocode';
 
 declare const console: { log: (msg: string) => void };
 
@@ -85,25 +86,45 @@ async function runAsyncChecks() {
 
   const requests: { url: string; ua: string }[] = [];
   const geocodingFetch = (async (url: string, init?: any) => {
-    requests.push({ url: String(url), ua: String(init?.headers?.['User-Agent'] ?? '') });
-    return { ok: true, json: async () => [{ lat: '59.4271224', lon: '24.6622459' }] } as any;
+    requests.push({ url: decodeURIComponent(String(url)), ua: String(init?.headers?.['User-Agent'] ?? '') });
+    return {
+      ok: true,
+      json: async () => [
+        {
+          lat: '59.4271224',
+          lon: '24.6622459',
+          address: { house_number: '11/2', road: 'Akadeemia tee' },
+        },
+      ],
+    } as any;
   }) as unknown as typeof fetch;
 
   const resolved = await resolveCoordinates(TALLINN, { fetchImpl: geocodingFetch });
   eq('the geocoded latitude is returned', resolved?.latitude, 59.4271224);
   eq('the geocoded longitude is returned', resolved?.longitude, 24.6622459);
+  eq('the precision is reported', resolved?.precision, 'building');
   eq('one request was made', requests.length, 1);
-  check('the address text was sent', requests[0].url.includes('city=Tallinn'));
-  check('the postal code was sent', requests[0].url.includes('postalcode=12616'));
+  check('the address text was sent', requests[0].url.includes('Tallinn'));
+  check('the postal code was sent', requests[0].url.includes('12616'));
   check('the identifying User-Agent was sent', requests[0].ua.includes('SkillBuddy-Mobile'));
 
   /* ── One retry, then give up cleanly ────────────────────────────────────── */
+
+  // Every lookup above cached its result, so the failure cases get a fresh
+  // cache — otherwise they would be answered from memory and never hit the
+  // network at all.
+  clearGeocodeCache();
 
   let attempts = 0;
   const flakyFetch = (async () => {
     attempts += 1;
     if (attempts === 1) throw new Error('offline');
-    return { ok: true, json: async () => [{ lat: '59.43', lon: '24.75' }] } as any;
+    return {
+      ok: true,
+      json: async () => [
+        { lat: '59.43', lon: '24.75', address: { house_number: '11/2', road: 'Akadeemia tee' } },
+      ],
+    } as any;
   }) as unknown as typeof fetch;
 
   const retried = await resolveCoordinates(TALLINN, {
@@ -114,6 +135,8 @@ async function runAsyncChecks() {
   });
   eq('a failed first attempt is retried', attempts, 2);
   eq('and the retry succeeds', retried?.latitude, 59.43);
+
+  clearGeocodeCache();
 
   let alwaysFails = 0;
   const downFetch = (async () => {

@@ -75,6 +75,10 @@ const TEST_FILES = [
   'htmlText.test.js',
   'servicePrice.test.js',
   'carousel.test.js',
+  'money.test.js',
+  'distance.test.js',
+  'amountStepper.test.js',
+  'jobPermissions.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
