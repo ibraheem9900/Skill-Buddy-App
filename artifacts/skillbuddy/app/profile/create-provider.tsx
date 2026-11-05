@@ -17,7 +17,11 @@ import { useLanguage } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import BackButton from '@/components/BackButton';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
-import { SERVICE_RADIUS_MAX, SERVICE_RADIUS_MIN } from '@/lib/nearbyJobs';
+import {
+  SERVICE_RADIUS_DEFAULT,
+  SERVICE_RADIUS_MAX,
+  SERVICE_RADIUS_MIN,
+} from '@/lib/nearbyJobs';
 
 /**
  * "Become a Provider" — one-time creation (POST /api/v1/providers/profile).
@@ -51,7 +55,10 @@ export default function CreateProviderProfileScreen() {
   const [bio, setBio] = useState('');
   const [rate, setRate] = useState('');
   const [providerType, setProviderType] = useState<string>('INDIVIDUAL');
-  const [radius, setRadius] = useState(25);
+  // The documented default is 5 km (lib/nearbyJobs). A new pilot's feed is
+  // distance-matched against this value, so starting at 25 km silently widened
+  // every new provider's search area from the day the profile was created.
+  const [radius, setRadius] = useState(SERVICE_RADIUS_DEFAULT);
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
