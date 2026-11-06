@@ -426,12 +426,6 @@ export default function EditJobScreen() {
                 </View>
               );
             })}
-            <View style={[styles.notice, { backgroundColor: c.muted, borderColor: c.border }]}>
-              <Feather name="info" size={13} color={c.mutedForeground} />
-              <Text style={[styles.noticeText, { color: c.mutedForeground }]}>
-                {t('editjob_tasks_locked')}
-              </Text>
-            </View>
           </>
         ) : (
           <>
