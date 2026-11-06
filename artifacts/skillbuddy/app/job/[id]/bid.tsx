@@ -283,6 +283,16 @@ export default function PlaceBidScreen() {
    * derived eta, the COMBINED message (the provider's words plus the time line),
    * and one chosen arrival per task.
    */
+  /**
+   * The SAME validator the submit path runs, applied live: an amount below
+   * €1.00 or above €99,999.00 shows its translated error as soon as the field
+   * is committed and keeps Submit disabled. An empty field is not flagged here
+   * — tapping Submit is how "price required" is revealed.
+   */
+  const priceValidation = price.trim().length > 0 ? validateBidPrice(price) : null;
+  const livePriceError =
+    priceValidation && !priceValidation.ok ? t(priceValidation.errorKey) : null;
+
   const validateAll = useCallback((): boolean => {
     const priceResult = validateBidPrice(price);
     const etaResult = validateEtaMinutes(
@@ -719,6 +729,12 @@ export default function PlaceBidScreen() {
     const editValid = editDraft !== null && isBidDraftValid(editDraft);
     /** A bid saved before this feature has no time yet — one is required now. */
     const editArrivalsReady = hasEveryArrival(editArrivals, tasks);
+    const editPriceValidation =
+      editDraft && editDraft.price.trim().length > 0 ? validateBidPrice(editDraft.price) : null;
+    const liveEditPriceError =
+      editPriceValidation && !editPriceValidation.ok
+        ? t(editPriceValidation.errorKey)
+        : null;
     const canSaveEdit =
       !!editDraft && editChanged && editValid && editArrivalsReady && !savingEdit && !editLocked;
 
@@ -917,7 +933,7 @@ export default function PlaceBidScreen() {
                     () => setEditPriceError(null)
                   )
                 }
-                priceError={editPriceError}
+                priceError={liveEditPriceError ?? editPriceError}
                 arrivalSection={
                   <BidArrivalTimes
                     tasks={tasks}
@@ -1095,7 +1111,7 @@ export default function PlaceBidScreen() {
               setPrice(value);
               if (priceError) setPriceError(null);
             }}
-            priceError={priceError}
+            priceError={livePriceError ?? priceError}
             arrivalSection={
               <BidArrivalTimes
                 tasks={tasks}
@@ -1148,10 +1164,10 @@ export default function PlaceBidScreen() {
             style={[
               styles.submit,
               { backgroundColor: c.primary },
-              (bidSubmitting || nearbyGone) && styles.submitBusy,
+              (bidSubmitting || nearbyGone || livePriceError !== null) && styles.submitBusy,
             ]}
             onPress={() => void submit()}
-            disabled={bidSubmitting || nearbyGone}
+            disabled={bidSubmitting || nearbyGone || livePriceError !== null}
             activeOpacity={0.85}
           >
             {bidSubmitting ? (

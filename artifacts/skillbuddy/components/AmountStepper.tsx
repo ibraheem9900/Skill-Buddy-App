@@ -13,7 +13,13 @@ import {
   stepCents,
 } from '@/lib/amountStepper';
 import { clampCents, formatCents, parseMoneyToCents } from '@/lib/money';
-import { formatBidPriceLocale, type BidLocale } from '@/lib/bid';
+import {
+  BID_MAX_CENTS,
+  BID_MIN_CENTS,
+  formatAdjustChipLabel,
+  formatBidPriceLocale,
+  type BidLocale,
+} from '@/lib/bid';
 
 /**
  * THE bid amount control — one component for every place a bid amount is set
@@ -54,8 +60,8 @@ export interface AmountStepperProps {
 export default function AmountStepper({
   valueCents,
   onChange,
-  minCents = 100,
-  maxCents = 9_999_900,
+  minCents = BID_MIN_CENTS,
+  maxCents = BID_MAX_CENTS,
   disabled = false,
   error = null,
   hint = null,
@@ -78,8 +84,13 @@ export default function AmountStepper({
 
   useEffect(() => {
     valueRef.current = valueCents;
-    if (valueCents !== null) setLastValid(valueCents);
-  }, [valueCents]);
+    // Only an IN-RANGE amount can be restored after unreadable text. An
+    // out-of-range typed value is shown with its own error; it must never
+    // become the fallback that silently replaces the next typo.
+    if (valueCents !== null && valueCents >= minCents && valueCents <= maxCents) {
+      setLastValid(valueCents);
+    }
+  }, [maxCents, minCents, valueCents]);
 
   const stopHold = useCallback(() => {
     if (holdTimer.current !== null) {
@@ -104,10 +115,15 @@ export default function AmountStepper({
   const beginHold = useCallback(
     (direction: -1 | 1) => {
       if (disabled) return;
+      const empty = valueRef.current === null;
       const current = valueRef.current ?? minCents;
       if (!canStep(current, direction, minCents, maxCents, disabled)) return;
       stopHold();
-      commit(stepCents(current, direction, BID_STEP_CENTS, minCents, maxCents));
+      // The first tap on an empty field sets the minimum itself (€1.00), not
+      // minimum + one step (€2.00).
+      commit(
+        empty ? minCents : stepCents(current, direction, BID_STEP_CENTS, minCents, maxCents)
+      );
       holdStart.current = Date.now();
 
       const tick = () => {
@@ -129,9 +145,12 @@ export default function AmountStepper({
   );
 
   const chips = BID_CHIPS_CENTS.map((chip) => {
-    const base = valueRef.current ?? lastValid ?? minCents;
+    // An empty field starts from zero, so +€1 becomes exactly the €1 minimum
+    // instead of the last amount the field happened to hold.
+    const base = valueRef.current ?? 0;
     const target = clampCents(base + chip, minCents, maxCents);
-    const label = `+${formatBidPriceLocale(formatCents(chip), locale) ?? `€${chip / 100}`}`;
+    // "+€1" / "+1 €" — whole euros, the way the spec writes the chips.
+    const label = formatAdjustChipLabel(chip / 100, locale);
     return (
       <TouchableOpacity
         key={chip}
@@ -164,10 +183,17 @@ export default function AmountStepper({
       if (lastValid !== null) onChange(lastValid);
       return;
     }
-    const clamped = clampCents(cents, minCents, maxCents);
-    setLastValid(clamped);
-    valueRef.current = clamped;
-    onChange(clamped);
+    // Out-of-range amounts are NOT silently clamped: the typed value is kept
+    // and lib/bid's validator shows the translated min/max error under the
+    // field, which is also what keeps Submit disabled.
+    if (cents < minCents || cents > maxCents) {
+      valueRef.current = cents;
+      onChange(cents);
+      return;
+    }
+    setLastValid(cents);
+    valueRef.current = cents;
+    onChange(cents);
   };
 
   return (

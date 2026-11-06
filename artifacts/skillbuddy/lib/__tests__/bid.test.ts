@@ -159,12 +159,21 @@ deepEq('three decimals report "decimals" rather than rounding silently', validat
 deepEq('a whole number is sent as a number', validateBidPrice('20'), { ok: true, value: 20 });
 deepEq('one decimal is sent as a number', validateBidPrice('7.5'), { ok: true, value: 7.5 });
 deepEq('whitespace is trimmed before validating', validateBidPrice('  12.30 '), { ok: true, value: 12.3 });
-deepEq('a leading dot with decimals is accepted', validateBidPrice('.75'), { ok: true, value: 0.75 });
+deepEq('a leading dot with decimals is accepted when the floor allows it', validateBidPrice('.75', { minPrice: 0 }), { ok: true, value: 0.75 });
 deepEq('a client-side ceiling is enforced', validateBidPrice('500', { maxPrice: 100 }), {
   ok: false,
   errorKey: 'bid_err_price_too_large',
 });
 deepEq('a price at the ceiling passes', validateBidPrice('100', { maxPrice: 100 }), { ok: true, value: 100 });
+deepEq('below the €1 minimum is refused', validateBidPrice('0.75'), {
+  ok: false,
+  errorKey: 'bid_err_price_min',
+});
+deepEq('the €1 minimum itself passes', validateBidPrice('1.00'), { ok: true, value: 1 });
+deepEq('the default ceiling is €99,999', validateBidPrice('100000'), {
+  ok: false,
+  errorKey: 'bid_err_price_too_large',
+});
 
 /* The Baltic/German comma separator (the task's own "comma and dot both work"). */
 deepEq('a comma decimal separator is accepted', validateBidPrice('12,50'), { ok: true, value: 12.5 });
@@ -766,11 +775,11 @@ deepEq('the chips are the four euro steps', [...BID_ADJUST_STEPS], [-10, -5, 5, 
 eq('-10 takes a price down', adjustBidPrice('25.50', -10), '15.50');
 eq('+10 takes it up', adjustBidPrice('25.50', 10), '35.50');
 eq('it works from a comma field too', adjustBidPrice('25,50', 5), '30.50');
-eq('it never goes below the schema minimum', adjustBidPrice('3.00', -10), '0.01');
+eq('it never goes below the €1 minimum', adjustBidPrice('3.00', -10), '1.00');
 eq('an empty field starts from zero rather than looking broken', adjustBidPrice('', 5), '5.00');
-eq('a negative chip on an empty field lands on the minimum', adjustBidPrice('', -10), '0.01');
-eq('a chip that would change nothing is disabled', canApplyBidAdjust('0.01', -5), false);
-eq('a chip that changes the price is enabled', canApplyBidAdjust('0.01', 5), true);
+eq('a negative chip on an empty field lands on the minimum', adjustBidPrice('', -10), '1.00');
+eq('a chip that would change nothing is disabled', canApplyBidAdjust('1.00', -5), false);
+eq('a chip that changes the price is enabled', canApplyBidAdjust('1.00', 5), true);
 eq('...on an empty field too', canApplyBidAdjust('', 5), true);
 eq('...and on an unparseable one', canApplyBidAdjust('abc', -10), true);
 

@@ -78,6 +78,16 @@ const MAX_PRICE_INPUT_CHARS = 15;
 const MAX_PRICE_ABS = 1e9;
 /** offered_price carries at most 2 decimals (cents). */
 export const BID_PRICE_MAX_DECIMALS = 2;
+
+/**
+ * The product's bid window, in INTEGER CENTS: €1.00 … €99,999.00.
+ *
+ * BidCreate's schema only says `exclusiveMinimum: 0` and declares no upper
+ * bound, so these are the product limits the amount stepper uses; validation
+ * enforces the same window so a typed value cannot slip past the stepper.
+ */
+export const BID_MIN_CENTS = 100;
+export const BID_MAX_CENTS = 9_999_900;
 function isUsableNumber(n: number): boolean {
   return Number.isFinite(n) && Math.abs(n) <= MAX_PRICE_ABS;
 }
@@ -129,6 +139,7 @@ export type BidFormErrorKey =
   | 'bid_err_price_invalid'
   | 'bid_err_price_positive'
   | 'bid_err_price_decimals'
+  | 'bid_err_price_min'
   | 'bid_err_price_too_large'
   | 'bid_err_eta_required'
   | 'bid_err_eta_invalid'
@@ -159,7 +170,7 @@ export type BidValidation<T> = { ok: true; value: T } | { ok: false; errorKey: B
  */
 export function validateBidPrice(
   input: string,
-  options: { maxPrice?: number } = {}
+  options: { minPrice?: number; maxPrice?: number } = {}
 ): BidValidation<number> {
   const trimmed = (input ?? '').trim();
   if (trimmed.length === 0) return { ok: false, errorKey: 'bid_err_price_required' };
@@ -180,8 +191,11 @@ export function validateBidPrice(
   const cents = parseCents(normalised);
   if (cents === null || cents <= 0) return { ok: false, errorKey: 'bid_err_price_positive' };
 
-  const max = options.maxPrice ?? MAX_PRICE_ABS;
-  if (cents / 100 > max) return { ok: false, errorKey: 'bid_err_price_too_large' };
+  const minCents = options.minPrice === undefined ? BID_MIN_CENTS : Math.round(options.minPrice * 100);
+  if (cents < minCents) return { ok: false, errorKey: 'bid_err_price_min' };
+
+  const maxCents = options.maxPrice === undefined ? BID_MAX_CENTS : Math.round(options.maxPrice * 100);
+  if (cents > maxCents) return { ok: false, errorKey: 'bid_err_price_too_large' };
 
   return { ok: true, value: cents / 100 };
 }
@@ -604,8 +618,8 @@ export function isBidDraftValid(draft: BidDraft): boolean {
  */
 export const BID_ADJUST_STEPS = [-10, -5, 5, 10] as const;
 
-/** The lowest price a chip may produce — the schema's exclusiveMinimum 0. */
-export const BID_MIN_PRICE = 0.01;
+/** The lowest price a chip may produce — the product's €1.00 bid minimum. */
+export const BID_MIN_PRICE = 1;
 
 /**
  * Move the price by `deltaEuros` (± 5 / ± 10) and return the new field text in

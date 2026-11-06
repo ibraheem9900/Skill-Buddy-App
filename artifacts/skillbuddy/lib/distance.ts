@@ -62,7 +62,11 @@ export function formatDistance(
 
   const oneDecimal = value < 10;
   const rounded = oneDecimal ? Math.round(value * 10) / 10 : Math.round(value);
-  const fixed = oneDecimal ? rounded.toFixed(1) : String(rounded);
+  // The ROUNDED value decides the format: 9.96 km rounds to 10.0, which is
+  // already in the "10 km or more" band, so it must print "10 km" rather than
+  // "10.0 km" while 9.94 prints "9.9 km".
+  const keepDecimal = oneDecimal && rounded < 10;
+  const fixed = keepDecimal ? rounded.toFixed(1) : String(rounded);
   const [whole, fraction] = fixed.split('.');
   const decimal = COMMA_DECIMAL_LANGUAGES.has(language) ? ',' : '.';
   const text = fraction
