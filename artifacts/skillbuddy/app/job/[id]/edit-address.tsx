@@ -19,13 +19,12 @@ import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useJobDetail } from '@/hooks/useJobDetail';
-import { invalidateJobList } from '@/hooks/useJobList';
+import { useRepostJob } from '@/hooks/useRepostJob';
 import useCountries from '@/hooks/useCountries';
 import useCounties from '@/hooks/useCounties';
 import useCities from '@/hooks/useCities';
-import { authApi } from '@/services/api';
-import { firstErrorMessage } from '@/lib/jobList';
 import { resolveCoordinates } from '@/lib/coordinates';
+import { buildCreateJobAddressRequest } from '@/lib/jobAddress';
 import {
   addressFieldKeyboard,
   addressFieldMaxLength,
@@ -34,10 +33,8 @@ import {
 } from '@/lib/addressFields';
 import { composeFormattedAddress } from '@/lib/jobCreate';
 import {
-  buildUpdateJobAddressRequest,
   canUpdateJobAddress,
   hydrateFromCachedAddress,
-  mapJobAddressUpdateErrors,
   parseCoordinate,
   selectCity,
   selectCountry,
@@ -96,8 +93,6 @@ export default function EditJobAddressScreen() {
     job,
     serverMessage,
     retry,
-    refetch,
-    applyJob,
   } = useJobDetail(numericId);
 
   const {
@@ -132,9 +127,8 @@ export default function EditJobAddressScreen() {
     Partial<Record<JobAddressUpdateField, string>>
   >({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const { repost, reposting } = useRepostJob();
   const [pickerOpen, setPickerOpen] = useState<'country' | 'county' | 'city' | null>(null);
-  const inFlight = useRef(false);
 
   // Prefill ONCE from the cached address so a background refetch can never wipe the
   // user's edits after they have touched the form. A prefill is skipped once the user
@@ -238,7 +232,7 @@ export default function EditJobAddressScreen() {
   );
 
   const submit = useCallback(async () => {
-    if (!job || submitting || inFlight.current) return;
+    if (!job || reposting) return;
 
     const values: JobAddressUpdateValues = {
       ...cascade,
@@ -261,14 +255,11 @@ export default function EditJobAddressScreen() {
       return;
     }
 
-    inFlight.current = true;
-    setSubmitting(true);
     setFormError(null);
 
     // COORDINATES: keep the stored pair when it is usable, otherwise geocode
     // the edited text (lib/coordinates). A job address without a point is
-    // invisible to the nearby feed, so the edit refuses to save one — with a
-    // message the user can retry.
+    // invisible to the nearby feed, so the edit refuses to save one.
     const coordinates = await resolveCoordinates({
       latitude,
       longitude,
@@ -280,72 +271,94 @@ export default function EditJobAddressScreen() {
       country: country?.name ?? null,
     });
     if (!coordinates) {
-      inFlight.current = false;
-      setSubmitting(false);
       setFormError(t('post_addr_no_coords'));
       return;
     }
 
-    // The ids are non-null once validated; the resolved point is explicit.
-    const payload = buildUpdateJobAddressRequest({
-      ...values,
-      latitude: coordinates.latitude,
-      longitude: coordinates.longitude,
-      countryId: cascade.countryId!,
-      countyId: cascade.countyId!,
-      cityId: cascade.cityId!,
-    });
+    // EDIT = REPOST: PATCHing the address would keep the old bids. The edited
+    // address is carried into a NEW job, which is published before the old job
+    // is cancelled (hooks/useRepostJob owns the order).
+    const address = buildCreateJobAddressRequest(
+      {
+        ...values,
 
-    try {
-      const { data: updatedAddress } = await authApi.updateJobAddress(job.id, payload);
-      // The 200 body IS the address object — adopt it directly. The job's address in
-      // app state now comes from the server's response, never from the values typed
-      // on this screen (which may have reformatted numbers, etc.).
-      invalidateJobList();
-      applyJob({ ...job, address: updatedAddress });
-      setSubmitting(false);
+
+        countryId: cascade.countryId!,
+        countyId: cascade.countyId!,
+        cityId: cascade.cityId!,
+      },
+      coordinates
+    );
+
+    const outcome = await repost(job, { address }, t('repost_cancel_reason'));
+
+    if (outcome.ok) {
       showAlert({
-        title: t('addr_u_success_title'),
-        message: t('addr_u_success_msg'),
+        title: t('repost_success_title'),
+        message: outcome.feeCharged
+          ? `${t('repost_success_msg')} ${t('repost_success_fee')}`
+          : t('repost_success_msg'),
         icon: 'check-circle',
-        buttons: [{ text: t('post_view_job'), onPress: () => router.back() }],
       });
-      // Reconcile anything else the server recalculated as a side effect (status,
-      // history, flags) without blocking the confirmation.
-      void refetch();
-    } catch (err: any) {
-      setSubmitting(false);
-      const status: number | undefined = err?.response?.status;
-      const backendMessage = firstErrorMessage(err?.response?.data);
-
-      if (status === 401) {
-        showAlert({
-          title: t('addr_u_err_session'),
-          message: t('addr_u_err_session'),
-          icon: 'lock',
-        });
-        router.replace('/(auth)/login' as any);
-      } else if (status === 422) {
-        const mapped = mapJobAddressUpdateErrors(err?.response?.data?.detail);
-        setFieldErrors(mapped.fieldErrors);
-        setFormError(mapped.formErrors[0] ?? null);
-      } else if (status === 404) {
-        // Address (or job) not found — if the address is gone, the job no longer has
-        // one to edit; route back and let Job Details decide how to surface it.
-        setFormError(backendMessage ?? t('jobaddr_update_exists'));
-      } else {
-        setFormError(backendMessage ?? t('addr_u_err_network'));
-      }
-      // The job may have changed underneath us; re-read it so the screen reflects the
-      // truth (is_editable may have flipped, or the address may have been removed).
-      void refetch();
-    } finally {
-      inFlight.current = false;
+      router.replace(`/job/${outcome.job.id}` as any);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (outcome.stage === 'busy') return;
+
+    if (outcome.stage === 'invalid') {
+      showAlert({
+        title: t('repost_create_failed_title'),
+        message: t(
+          outcome.reason === 'address' ? 'repost_no_address' : 'repost_no_schedule'
+        ),
+        icon: 'alert-circle',
+      });
+      return;
+    }
+
+    if (outcome.stage === 'create') {
+      showAlert({
+        title: t('repost_create_failed_title'),
+        message: outcome.message ?? t('repost_create_failed_msg'),
+        icon: 'alert-triangle',
+      });
+      return;
+    }
+
+    if (outcome.stage === 'publish') {
+      showAlert({
+        title: t('repost_publish_failed_title'),
+        message: outcome.message ?? t('repost_publish_failed_msg'),
+        icon: 'alert-triangle',
+        buttons: [
+          {
+            text: t('repost_publish_failed_open'),
+            onPress: () => router.replace(`/job/${outcome.draft.id}` as any),
+          },
+          { text: t('repost_notice_cancel'), style: 'cancel' },
+        ],
+      });
+      return;
+    }
+
+    // The new job is live but the old one is not cancelled: open the old job so
+    // it can be cancelled manually.
+    showAlert({
+      title: t('repost_cancel_failed_title'),
+      message: outcome.message ?? t('repost_cancel_failed_msg'),
+      icon: 'alert-triangle',
+      buttons: [
+        {
+          text: t('repost_cancel_failed_open'),
+          onPress: () => router.replace(`/job/${job.id}` as any),
+        },
+        { text: t('repost_notice_cancel'), style: 'cancel' },
+      ],
+    });
   }, [
     job,
-    submitting,
+    reposting,
     cascade,
     latitude,
     longitude,
@@ -354,10 +367,10 @@ export default function EditJobAddressScreen() {
     postalCode,
     landmark,
     formattedAddress,
+    repost,
     showAlert,
     t,
     router,
-    refetch,
   ]);
 
   const header = (title: string) => (
@@ -615,17 +628,17 @@ export default function EditJobAddressScreen() {
           style={[
             styles.submitBtn,
             { backgroundColor: c.primary },
-            submitting && styles.submitBtnBusy,
+            reposting && styles.submitBtnBusy,
           ]}
           onPress={() => void submit()}
-          disabled={submitting}
+          disabled={reposting}
           activeOpacity={0.85}
         >
-          {submitting ? (
+          {reposting ? (
             <ActivityIndicator size="small" color={c.primaryForeground} />
           ) : null}
           <Text style={[styles.submitText, { color: c.primaryForeground }]}>
-            {submitting ? t('editjob_saving') : t('addr_u_save')}
+            {reposting ? t('editjob_saving') : t('addr_u_save')}
           </Text>
         </TouchableOpacity>
       </KeyboardAwareScrollViewCompat>

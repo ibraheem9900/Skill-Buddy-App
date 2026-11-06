@@ -77,6 +77,7 @@
     "./money.test.ts",
     "./distance.test.ts",
     "./amountStepper.test.ts",
-    "./jobPermissions.test.ts"
+    "./jobPermissions.test.ts",
+    "./repostJob.test.ts"
   ]
 }

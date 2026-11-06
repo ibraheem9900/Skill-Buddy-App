@@ -79,6 +79,7 @@ const TEST_FILES = [
   'distance.test.js',
   'amountStepper.test.js',
   'jobPermissions.test.js',
+  'repostJob.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

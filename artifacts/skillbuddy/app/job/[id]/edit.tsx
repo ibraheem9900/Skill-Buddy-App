@@ -19,8 +19,7 @@ import BrandedLoader from '@/components/BrandedLoader';
 import DateStrip from '@/components/DateStrip';
 import TimeChoices from '@/components/TimeChoices';
 import { useJobDetail } from '@/hooks/useJobDetail';
-import { invalidateJobList } from '@/hooks/useJobList';
-import { authApi } from '@/services/api';
+import { useRepostJob } from '@/hooks/useRepostJob';
 import { splitTable } from '@/lib/jobSchedule';
 import { selectionWindow } from '@/lib/jobBooking';
 import {
@@ -28,7 +27,8 @@ import {
   clampHours,
   clockOf,
   exceedsHoursCap,
-  formatLocalDateTime,
+  formatDayLabel,
+  localStartOf,
   formatTimeLabel,
   formatWindowLabel,
   maxHoursForStart,
@@ -42,18 +42,14 @@ import {
   editDayChoices,
   editDayLabel,
   editHoursCap,
-  fieldErrorText,
   isOutsideEditWindow,
   jobToEditValues,
   localDateKey,
-  mapUpdateJobErrors,
   parseLocalDateKey,
-  updateJobErrorMessage,
   userWordCount,
   validateJobEdit,
   type JobEditErrorKey,
   type JobEditField,
-  type JobEditFieldError,
   type JobEditValues,
 } from '@/lib/jobUpdate';
 
@@ -87,18 +83,14 @@ export default function EditJobScreen() {
 
   const numericId = /^\d+$/.test(id ?? '') ? Number(id) : null;
 
-  const { status: detailStatus, job, serverMessage, retry, refetch, applyJob } =
-    useJobDetail(numericId);
+  const { status: detailStatus, job, serverMessage, retry } = useJobDetail(numericId);
 
   const [form, setForm] = useState<JobEditValues | null>(null);
   const [clientErrors, setClientErrors] = useState<
     Partial<Record<JobEditField, JobEditErrorKey>>
   >({});
-  const [serverErrors, setServerErrors] = useState<
-    Partial<Record<JobEditField, JobEditFieldError>>
-  >({});
   const [hoursNotice, setHoursNotice] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const { repost, reposting } = useRepostJob();
   const prefilled = useRef(false);
 
   const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
@@ -146,20 +138,13 @@ export default function EditJobScreen() {
       delete next[field];
       return next;
     });
-    setServerErrors((prev) => {
-      if (!(field in prev)) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
   };
 
   const errorText = (field: JobEditField): string | null =>
-    fieldErrorText(serverErrors[field], (key) => t(key)) ??
-    (clientErrors[field] ? t(clientErrors[field]!) : null);
+    clientErrors[field] ? t(clientErrors[field]!) : null;
 
   const submit = useCallback(async () => {
-    if (!form || submitting) return;
+    if (!form || reposting) return;
     // The flag is the gate — never a client guess about the status.
     if (job?.is_editable !== true) return;
 
@@ -177,54 +162,76 @@ export default function EditJobScreen() {
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const { data } = await authApi.updateJob(job.id, body);
-      // The response is the source of truth: adopt it whole.
-      applyJob(data);
-      invalidateJobList();
-      setSubmitting(false);
+    // EDIT = REPOST. The API cannot replace milestones or clear bids, so a new
+    // job is created and published FIRST; the old job is cancelled only after
+    // that (hooks/useRepostJob owns the order).
+    const outcome = await repost(job, body, t('repost_cancel_reason'));
+
+    if (outcome.ok) {
       showAlert({
-        title: t('editjob_saved_title'),
-        message: t('editjob_saved_msg'),
+        title: t('repost_success_title'),
+        message: outcome.feeCharged
+          ? `${t('repost_success_msg')} ${t('repost_success_fee')}`
+          : t('repost_success_msg'),
         icon: 'check-circle',
-        buttons: [{ text: t('post_view_job'), onPress: () => router.back() }],
       });
-    } catch (err: any) {
-      setSubmitting(false);
-      const status: number | undefined = err?.response?.status;
-
-      if (status === 401) {
-        showAlert({
-          title: t('post_err_session_title'),
-          message: t('post_err_session_msg'),
-          icon: 'lock',
-        });
-        router.replace('/(auth)/login' as any);
-        return;
-      }
-
-      if (status === 422) {
-        const mapped = mapUpdateJobErrors(err?.response?.data?.detail);
-        setServerErrors(mapped.fieldErrors);
-        if (mapped.formErrors.length > 0) {
-          showAlert({
-            title: t('post_err_invalid_title'),
-            message: mapped.formErrors.join('\n'),
-            icon: 'alert-circle',
-          });
-        }
-      } else {
-        showAlert({
-          title: t('editjob_err_title'),
-          message: updateJobErrorMessage(err?.response?.data) ?? t('editjob_err_msg'),
-          icon: 'alert-triangle',
-        });
-      }
-
-      await refetch();
+      router.replace(`/job/${outcome.job.id}` as any);
+      return;
     }
-  }, [form, submitting, job, meridiem, applyJob, showAlert, t, router, refetch]);
+
+    if (outcome.stage === 'busy') return;
+
+    if (outcome.stage === 'invalid') {
+      showAlert({
+        title: t('repost_create_failed_title'),
+        message: t(
+          outcome.reason === 'address' ? 'repost_no_address' : 'repost_no_schedule'
+        ),
+        icon: 'alert-circle',
+      });
+      return;
+    }
+
+    if (outcome.stage === 'create') {
+      showAlert({
+        title: t('repost_create_failed_title'),
+        message: outcome.message ?? t('repost_create_failed_msg'),
+        icon: 'alert-triangle',
+      });
+      return;
+    }
+
+    if (outcome.stage === 'publish') {
+      showAlert({
+        title: t('repost_publish_failed_title'),
+        message: outcome.message ?? t('repost_publish_failed_msg'),
+        icon: 'alert-triangle',
+        buttons: [
+          {
+            text: t('repost_publish_failed_open'),
+            onPress: () => router.replace(`/job/${outcome.draft.id}` as any),
+          },
+          { text: t('repost_notice_cancel'), style: 'cancel' },
+        ],
+      });
+      return;
+    }
+
+    // The new job is live but the old one is not cancelled: open the old job so
+    // it can be cancelled manually.
+    showAlert({
+      title: t('repost_cancel_failed_title'),
+      message: outcome.message ?? t('repost_cancel_failed_msg'),
+      icon: 'alert-triangle',
+      buttons: [
+        {
+          text: t('repost_cancel_failed_open'),
+          onPress: () => router.replace(`/job/${job.id}` as any),
+        },
+        { text: t('repost_notice_cancel'), style: 'cancel' },
+      ],
+    });
+  }, [form, reposting, job, meridiem, repost, showAlert, t, router]);
 
   const header = (title: string) => (
     <View style={[styles.header, { backgroundColor: c.background, borderBottomColor: c.border }]}>
@@ -386,7 +393,10 @@ export default function EditJobScreen() {
             <Text style={[styles.label, { color: c.text }]}>{t('post_tasks')}</Text>
             {storedMilestones.map((m, index) => {
               const segment = segments[index] ?? null;
-              const when = formatLocalDateTime(m.scheduled_at, months, weekdays, meridiem);
+              const local = localStartOf(m.scheduled_at);
+              // DATE ONLY: the window label below already starts with the same
+              // clock, which is what printed "8:00 AM · 8:00 AM - 11:00 PM".
+              const when = local ? formatDayLabel(local.day, months, weekdays) : '';
               const window =
                 segment && segment.endMinutes !== null
                   ? formatWindowLabel(
@@ -560,14 +570,14 @@ export default function EditJobScreen() {
         )}
 
         <TouchableOpacity
-          style={[styles.submitBtn, { backgroundColor: c.primary }, submitting && styles.submitBtnBusy]}
+          style={[styles.submitBtn, { backgroundColor: c.primary }, reposting && styles.submitBtnBusy]}
           onPress={() => void submit()}
-          disabled={submitting}
+          disabled={reposting}
           activeOpacity={0.85}
         >
-          {submitting ? <ActivityIndicator size="small" color={c.primaryForeground} /> : null}
+          {reposting ? <ActivityIndicator size="small" color={c.primaryForeground} /> : null}
           <Text style={[styles.submitText, { color: c.primaryForeground }]}>
-            {submitting ? t('editjob_saving') : t('editjob_submit')}
+            {reposting ? t('editjob_saving') : t('editjob_submit')}
           </Text>
         </TouchableOpacity>
       </KeyboardAwareScrollViewCompat>

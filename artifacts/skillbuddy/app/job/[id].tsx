@@ -13,11 +13,12 @@ import BackButton from '@/components/BackButton';
 import { calculateProviderScore } from '@/lib/scoring';
 import CountdownTimer from '@/components/CountdownTimer';
 import { canProviderSubmitBid } from '@/lib/bid';
-import BidCard from '@/components/BidCard';
+
 import EmptyState from '@/components/EmptyState';
 import BrandedLoader from '@/components/BrandedLoader';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { useJobDetail } from '@/hooks/useJobDetail';
+import useRepostNotice from '@/hooks/useRepostNotice';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { useRestartJobTimer } from '@/hooks/useRestartJobTimer';
 import { useConvertJobToRegular } from '@/hooks/useConvertJobToRegular';
@@ -177,6 +178,7 @@ export default function BiddingDashboardScreen() {
     [t]
   );
   const showAlert = useAppAlert();
+  const confirmRepost = useRepostNotice();
 
   // A NUMERIC id is a server job (navigated to as `/job/<id>`); the mock
   // catalogue uses 'j1'/'j2' and keeps the local bidding dashboard below,
@@ -1519,7 +1521,7 @@ export default function BiddingDashboardScreen() {
       // Edit is wired: the button only appears when the backend's is_editable is
       // true, and the edit screen re-checks that flag before rendering a form.
       if (action === 'edit') {
-        router.push(`/job/${serverJob.id}/edit` as any);
+        confirmRepost(serverJob, () => router.push(`/job/${serverJob.id}/edit` as any));
         return;
       }
       // Restart Timer is wired: it is offered only while the backend's
@@ -2077,7 +2079,7 @@ export default function BiddingDashboardScreen() {
                 {perms.canEditAddress && canUpdateJobAddress(serverJob) ? (
                   <TouchableOpacity
                     style={[styles.publishBtn, { backgroundColor: c.primary, alignSelf: 'stretch' }]}
-                    onPress={() => router.push(`/job/${serverJob.id}/edit-address` as any)}
+                    onPress={() => confirmRepost(serverJob, () => router.push(`/job/${serverJob.id}/edit-address` as any))}
                     activeOpacity={0.85}
                   >
                     <Feather name="edit-2" size={15} color={c.primaryForeground} />
@@ -2111,7 +2113,7 @@ export default function BiddingDashboardScreen() {
                 {perms.canEditAddress && jobHasAddress(serverJob) && canUpdateJobAddress(serverJob) ? (
                   <TouchableOpacity
                     style={[styles.publishBtn, { backgroundColor: c.primary, alignSelf: 'stretch' }]}
-                    onPress={() => router.push(`/job/${serverJob.id}/edit-address` as any)}
+                    onPress={() => confirmRepost(serverJob, () => router.push(`/job/${serverJob.id}/edit-address` as any))}
                     activeOpacity={0.85}
                   >
                     <Feather name="edit-2" size={15} color={c.primaryForeground} />
