@@ -75,12 +75,19 @@ check(
   Object.values(canOwnerRunAction(pilot)).every((allowed) => allowed === false)
 );
 
-/* ── The client id coincidentally matches while acting as a pilot ────────── */
+/* ── The owner while the role switch is on PILOT ─────────────────────────── */
 
-const clientIdAsPilot = jobPermissions(job, 'PROVIDER', '7');
+const ownerInPilotMode = jobPermissions(job, 'PROVIDER', '7');
+check('the owner stays the owner in PILOT mode', ownerInPilotMode.isOwner);
+check('the owner in PILOT mode may edit', ownerInPilotMode.canEditJob);
+check('the owner in PILOT mode may edit the address', ownerInPilotMode.canEditAddress);
+check('the owner in PILOT mode may view bids', ownerInPilotMode.canViewBids);
+check('the owner in PILOT mode may cancel', ownerInPilotMode.canCancelJob);
+check('the owner in PILOT mode is NOT a provider viewer', !ownerInPilotMode.isProviderViewer);
+check('the owner in PILOT mode cannot place a bid on their own job', !ownerInPilotMode.canPlaceBid);
 check(
-  'the active role decides: client id + PILOT role is NOT the owner',
-  !clientIdAsPilot.isOwner
+  'every owner action stays available in PILOT mode',
+  Object.values(canOwnerRunAction(ownerInPilotMode)).every(Boolean)
 );
 
 /* ── A different client ──────────────────────────────────────────────────── */
@@ -94,11 +101,34 @@ check('another client is not a pilot either', !stranger.isProviderViewer);
 
 /* ── No role chosen, no user, no job ─────────────────────────────────────── */
 
+// RoleContext has a CLIENT default and loads the saved role asynchronously; a
+// transient null must not hide the owner's own job either.
 const noRole = jobPermissions(job, null, '7');
-check('no active role → no owner rights', !noRole.isOwner && !noRole.canEditJob);
-check('no active role → no bidding either', !noRole.canPlaceBid);
+check('a transient missing role does not hide the owner', noRole.isOwner && noRole.canEditJob);
+check('a transient missing role still cannot bid as the owner', !noRole.canPlaceBid);
 const noUser = jobPermissions(job, 'CLIENT', null);
 check('no signed-in user → no owner rights', !noUser.isOwner);
+check('no signed-in user → no owner actions', !noUser.canEditJob && !noUser.canCancelJob);
+
+// The job detail loads separately from /users/me. Ownership must appear when
+// the user finally arrives, with no role change in between.
+const whileUserLoads = jobPermissions(job, 'PROVIDER', undefined);
+check('not the owner while the signed-in user is unavailable', !whileUserLoads.isOwner);
+const afterUserLoads = jobPermissions(job, 'PROVIDER', '7');
+check('ownership appears when the user loads', afterUserLoads.isOwner && afterUserLoads.canEditJob);
+
+// Real payload shapes: client_id is a number today, but accept a string or a
+// padded string as well, so a serializer change cannot hide every owner action.
+const stringClientIdJob = { ...job, client_id: '7' as any };
+check(
+  'a string client_id from another payload shape matches',
+  jobPermissions(stringClientIdJob, 'PROVIDER', '7').isOwner
+);
+const paddedClientIdJob = { ...job, client_id: ' 7 ' as any };
+check(
+  'a padded string client_id still matches',
+  jobPermissions(paddedClientIdJob, 'CLIENT', '7').isOwner
+);
 const noJob = jobPermissions(null, 'CLIENT', '7');
 check('no job → nothing is allowed', !noJob.isOwner && !noJob.canPlaceBid && !noJob.canViewOwnBid);
 

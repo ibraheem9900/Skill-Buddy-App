@@ -12,10 +12,12 @@
  * someone else's open job inherited the owner's actions.
  *
  * THE RULE:
- *   OWNER  = the active role is CLIENT *and* `job.client_id` equals the
- *            signed-in user's id. Every owner action additionally requires the
- *            backend's own flag for it.
- *   PILOT  = the active role is PROVIDER and the viewer is not the owner. The
+ *   OWNER  = `job.client_id` equals the signed-in user's id. The active role
+ *            does NOT decide ownership: an owner who last switched the app to
+ *            PILOT mode still owns their job and must still see Edit / View
+ *            bids / Restart / Convert / Cancel. Every owner action additionally
+ *            requires the backend's own flag for it.
+ *   PILOT  = the viewer is NOT the owner and the active role is PROVIDER. The
  *            pilot may only bid / see their own bid.
  *
  * Both checks are used: visibility (what renders) AND the handlers themselves,
@@ -80,8 +82,13 @@ export function jobPermissions(
   role: JobActorRole,
   userId: string | number | null | undefined
 ): JobPermissions {
-  const isProviderViewer = role === 'PROVIDER';
-  const isOwner = role === 'CLIENT' && !!job && sameUserId(job.client_id, userId);
+  // Ownership is an id fact, not a mode. RoleContext restores the user's last
+  // chosen role per account, so an owner who used PILOT mode was losing every
+  // owner action when the guard started requiring `role === 'CLIENT'`.
+  const isOwner = !!job && sameUserId(job.client_id, userId);
+  // The owner never gets the provider surface, even while the role switch is on
+  // PROVIDER: no "Place a Bid" / pilot view on their own job.
+  const isProviderViewer = role === 'PROVIDER' && !isOwner;
   const owner = isOwner && !!job;
 
   // A draft has no bidding window: the client cannot view bids yet and a pilot

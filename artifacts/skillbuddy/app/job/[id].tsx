@@ -687,7 +687,8 @@ export default function BiddingDashboardScreen() {
    * `can_restart_timer` / `can_convert_*` flags describe the JOB, not the
    * viewer — a pilot looking at someone else's open job used to inherit every
    * owner action because the screen trusted those flags alone. Every owner
-   * action now needs isOwner (CLIENT role AND job.client_id === user.id).
+   * action now needs isOwner. Ownership is `job.client_id === user.id`, NOT the
+   * active role: an owner who last used PILOT mode still owns their own job.
    */
   const perms = useJobPermissions(serverJob);
   /** Handler-level guard: visibility is not the only check. */
@@ -1493,7 +1494,9 @@ export default function BiddingDashboardScreen() {
       ? visibleJobActions(serverJob).filter((action) => {
           if (action === 'convertToRegular') return canConvertJobToRegular(serverJob) && perms.canConvertToRegular;
           if (action === 'convertToUrgent') return canConvertJobToUrgent(serverJob) && perms.canConvertToUrgent;
-          if (action === 'cancel') return canClientCancelJob(serverJob, activeRole) && perms.canCancelJob;
+          // This branch is owner-only, so the CLIENT cancel route applies even
+          // when the role switch is on PILOT: ownership, not the switch, decides.
+          if (action === 'cancel') return canClientCancelJob(serverJob, 'CLIENT') && perms.canCancelJob;
           if (action === 'edit') return perms.canEditJob;
           if (action === 'restartTimer') return perms.canRestartTimer;
           return false;
@@ -1805,7 +1808,7 @@ export default function BiddingDashboardScreen() {
               There is no can_start_job flag, so the gate is the backend's own status
               plus the role; it disappears by itself once the response moves the job
               on, because nothing about the new status is assumed. */}
-          {canStartJob(serverJob, activeRole) ? (
+          {perms.isProviderViewer && canStartJob(serverJob, activeRole) ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
@@ -1832,7 +1835,7 @@ export default function BiddingDashboardScreen() {
               gate is the backend's own status plus the role; once the response marks
               the job done, the returned flags/status remove it together with Start,
               Convert and Cancel. */}
-          {canCompleteJob(serverJob, activeRole) ? (
+          {perms.isProviderViewer && canCompleteJob(serverJob, activeRole) ? (
             <TouchableOpacity
               style={[
                 styles.publishBtn,
@@ -1861,7 +1864,7 @@ export default function BiddingDashboardScreen() {
               while the job is IN_PROGRESS; it disappears by itself once the response
               moves the job to the paused status — nothing about that status is assumed,
               and no Resume action is built here. */}
-          {canPauseJob(serverJob, activeRole) ? (
+          {perms.isOwner && canPauseJob(serverJob, 'CLIENT') ? (
             <TouchableOpacity
               style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/pause` as any)}
@@ -1879,7 +1882,7 @@ export default function BiddingDashboardScreen() {
               Same shape and window as the client's pause above, but role-gated to the
               provider side, so exactly one of the two pause buttons can ever show. It
               REQUIRES a free-text `details` body, hence its own form screen. */}
-          {canProviderPauseJob(serverJob, activeRole) ? (
+          {perms.isProviderViewer && canProviderPauseJob(serverJob, activeRole) ? (
             <TouchableOpacity
               style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/provider-pause` as any)}
@@ -1898,7 +1901,7 @@ export default function BiddingDashboardScreen() {
               its own form screen (like the client's cancel). It is offered only in the
               PROVIDER_ASSIGNED window — the sibling provider-cancel action owns
               IN_PROGRESS — so the two can never appear together. */}
-          {canDeclineJob(serverJob, activeRole) ? (
+          {perms.isProviderViewer && canDeclineJob(serverJob, activeRole) ? (
             <TouchableOpacity
               style={[styles.restartBtn, { borderColor: c.destructive, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/decline` as any)}
@@ -1919,7 +1922,7 @@ export default function BiddingDashboardScreen() {
               role on a job that still has a provider assigned and is not finished; it
               disappears by itself once the response clears the assignment or cancels the
               job, because nothing about the resulting state is assumed. */}
-          {canProviderCancelJob(serverJob, activeRole) ? (
+          {perms.isProviderViewer && canProviderCancelJob(serverJob, activeRole) ? (
             <TouchableOpacity
               style={[
                 styles.restartBtn,
@@ -1953,7 +1956,7 @@ export default function BiddingDashboardScreen() {
               itself once the response moves the job on — nothing about that resulting
               state is assumed, and no "view blockers" list is invented (the API has no
               blockers collection endpoint). */}
-          {canReportBlocker(serverJob) ? (
+          {(perms.isOwner || perms.isProviderViewer) && canReportBlocker(serverJob) ? (
             <TouchableOpacity
               style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/blocker` as any)}
