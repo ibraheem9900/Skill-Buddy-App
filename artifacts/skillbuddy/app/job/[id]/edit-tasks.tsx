@@ -13,7 +13,7 @@ import BrandedLoader from '@/components/BrandedLoader';
 import TaskEditSheet from '@/components/TaskEditSheet';
 import { fixedSlots, formatWindowLabel } from '@/lib/jobBooking';
 import { formatDayLabel, parseScheduleSegments, segmentsForTasks } from '@/lib/timeSlots';
-import { applyTaskSlots, buildTask, sortTasks, type TaskDraft } from '@/lib/postWizard';
+import { applyTaskSlots, buildTask, sortTasks, validateTaskSlots, type TaskDraft } from '@/lib/postWizard';
 import { parseLocalDateKey } from '@/lib/jobUpdate';
 import type { JobMilestoneCreate } from '@/types';
 
@@ -124,6 +124,13 @@ export default function EditTasksScreen() {
     setSaving(true);
     setError(null);
     try {
+      // The app owns these rules: the backend accepted a day 10 days out.
+      const ruleError = validateTaskSlots(tasks, new Date());
+      if (ruleError) {
+        setError(t(ruleError));
+        setSaving(false);
+        return;
+      }
       const milestones: JobMilestoneCreate[] = tasks
         .filter((task) => task.timeSlots.length > 0)
         .map((task) => ({

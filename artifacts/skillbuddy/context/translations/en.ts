@@ -1893,6 +1893,8 @@ const en = {
   post_err_day_time: 'Choose a time for every selected day.',
   post_err_tasks_empty: 'Add at least one task to continue.',
   post_err_dates_pick: 'Please choose a start date.',
+  post_err_tasks_duplicate_day: 'Only one task per day is allowed.',
+  post_err_dates_window: 'Choose a day within the next 7 days.',
   post_err_dates_past: 'Bookings cannot start in the past.',
   post_err_dates_max: 'You can book a maximum of 7 days.',
   post_err_dates_min: 'Choose at least {n} days for a multiple-day job.',

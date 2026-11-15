@@ -1849,6 +1849,8 @@ const et = {
   post_err_time: 'Palun vali kellaaeg.',
   post_err_time_past: 'See kellaaeg on juba möödunud. Palun vali hilisem aeg.',
   post_err_dates_pick: 'Palun vali alguskuupäev.',
+  post_err_tasks_duplicate_day: 'Lubatud on ainult üks ülesanne päevas.',
+  post_err_dates_window: 'Vali päev järgmise 7 päeva jooksul.',
   post_err_dates_past: 'Broneering ei saa alata minevikus.',
   post_err_dates_max: 'Saad broneerida maksimaalselt 7 päeva.',
   post_err_dates_min: 'Mitmepäevase töö jaoks vali vähemalt {n} päeva.',

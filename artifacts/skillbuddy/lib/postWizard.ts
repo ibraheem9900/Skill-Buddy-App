@@ -506,6 +506,38 @@ export function validateTasks(
   return validateTimeChoice(tasks[index].time, tasks[index].day, now) ?? 'post_err_day_time';
 }
 
+/**
+ * Rules for the Edit tasks screen, checked BEFORE any PATCH is sent.
+ *
+ * The backend is lax here (it accepted a milestone 10 days out in ROUND 17), so
+ * the app owns the rule: one task per day, every task has at least one slot, at
+ * most MAX_MILESTONE_DAYS tasks, and every day is inside today .. today + 6.
+ */
+export type TaskSlotsErrorKey =
+  | 'post_err_at_least_one_slot'
+  | 'post_err_dates_max'
+  | 'post_err_dates_past'
+  | 'post_err_dates_window'
+  | 'post_err_tasks_duplicate_day';
+
+export function validateTaskSlots(tasks: TaskDraft[], now: Date = new Date()): TaskSlotsErrorKey | null {
+  if (tasks.length === 0) return 'post_err_at_least_one_slot';
+  if (tasks.length > MAX_MILESTONE_DAYS) return 'post_err_dates_max';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    if (!task.timeSlots || task.timeSlots.length === 0) return 'post_err_at_least_one_slot';
+    if (seen.has(task.dayKey)) return 'post_err_tasks_duplicate_day';
+    seen.add(task.dayKey);
+    const [y, m, d] = task.dayKey.split('-').map((part) => Number(part));
+    const day = new Date(y, (m || 1) - 1, d || 1);
+    const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
+    if (Number.isNaN(diff) || diff < 0) return 'post_err_dates_past';
+    if (diff > AGENDA_DAYS - 1) return 'post_err_dates_window';
+  }
+  return null;
+}
+
 /** An Anytime start that leaves no hour before 11 PM cannot be booked. */
 export function anytimeLeavesNoHour(task: TaskDraft): boolean {
   const win = selectionWindow(task.time);

@@ -1848,6 +1848,8 @@ const lv = {
   post_err_time: 'Lūdzu, izvēlieties laiku.',
   post_err_time_past: 'Šis laiks jau ir pagājis. Lūdzu, izvēlieties vēlāku laiku.',
   post_err_dates_pick: 'Lūdzu, izvēlieties sākuma datumu.',
+  post_err_tasks_duplicate_day: 'Vienā dienā atļauts tikai viens uzdevums.',
+  post_err_dates_window: 'Izvēlies dienu nākamo 7 dienu laikā.',
   post_err_dates_past: 'Rezervācija nevar sākties pagātnē.',
   post_err_dates_max: 'Varat rezervēt ne vairāk kā 7 dienas.',
   post_err_dates_min: 'Daudzu dienu darbam izvēlies vismaz {n} dienas.',

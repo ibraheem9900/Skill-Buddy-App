@@ -1848,6 +1848,8 @@ const de = {
   post_err_time: 'Bitte wähle eine Uhrzeit.',
   post_err_time_past: 'Diese Uhrzeit ist bereits vorbei. Bitte wähle eine spätere.',
   post_err_dates_pick: 'Bitte wähle ein Startdatum.',
+  post_err_tasks_duplicate_day: 'Nur eine Aufgabe pro Tag ist erlaubt.',
+  post_err_dates_window: 'Wähle einen Tag innerhalb der nächsten 7 Tage.',
   post_err_dates_past: 'Buchungen können nicht in der Vergangenheit beginnen.',
   post_err_dates_max: 'Du kannst maximal 7 Tage buchen.',
   post_err_dates_min: 'Wähle für einen mehrtägigen Auftrag mindestens {n} Tage.',

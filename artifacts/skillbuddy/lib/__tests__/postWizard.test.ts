@@ -37,6 +37,8 @@ import {
   toggleSlot,
   toggleTaskSlot,
   validateTasks,
+  applyTaskSlots,
+  validateTaskSlots,
   type DaySelection,
   type TaskDraft,
 } from '../postWizard';
@@ -343,6 +345,41 @@ eq('deleting the last task leaves no active day', emptyState.activeKey, null);
 eq('and no days', emptyState.days.length, 0);
 eq('no task means Next stays blocked', validateTasks([], NOW), 'post_err_dates_pick');
 eq('empty tasks have no active task', activeDayOf(emptyState, []), null);
+
+/* ── validateTaskSlots: the Edit-tasks gate (ROUND 17) ───────────────────── */
+const slotsDay1: TaskDraft = { ...buildTask(day(20)), timeSlots: ['MORNING', 'MIDDAY'], time: { kind: 'slot', key: 'MORNING' } };
+eq('a valid slot set passes', validateTaskSlots([slotsDay1], NOW), null);
+eq(
+  'a day outside today..today+6 is blocked by the app',
+  validateTaskSlots([{ ...buildTask(day(30)), timeSlots: ['MORNING'], time: { kind: 'slot', key: 'MORNING' } }], NOW),
+  'post_err_dates_window'
+);
+eq(
+  'a past day is blocked',
+  validateTaskSlots([{ ...buildTask(day(1)), timeSlots: ['MORNING'], time: { kind: 'slot', key: 'MORNING' } }], NOW),
+  'post_err_dates_past'
+);
+eq(
+  'a task with no slot is blocked',
+  validateTaskSlots([{ ...buildTask(day(20)), timeSlots: [] }], NOW),
+  'post_err_at_least_one_slot'
+);
+eq(
+  'two tasks on one day are blocked',
+  validateTaskSlots([slotsDay1, { ...buildTask(day(20)), timeSlots: ['EVENING'], time: { kind: 'slot', key: 'EVENING' } }], NOW),
+  'post_err_tasks_duplicate_day'
+);
+eq(
+  'more than 7 tasks are blocked',
+  validateTaskSlots(Array.from({ length: 8 }, (_, i) => ({ ...buildTask(day(20 + i)), timeSlots: ['MORNING'], time: { kind: 'slot' as const, key: 'MORNING' } })), NOW),
+  'post_err_dates_max'
+);
+
+// applyTaskSlots: one day keeps every slot and re-clamps hours to the latest start.
+const multiSlot = applyTaskSlots([buildTask(day(20))], keyFor(20, null), ['MORNING', 'AFTERNOON'], 9).tasks[0];
+eq('applyTaskSlots keeps every slot', multiSlot.timeSlots.join(','), 'MORNING,AFTERNOON');
+const clampedEarly = applyTaskSlots([buildTask(day(20))], keyFor(20, null), ['EVENING'], 9).tasks[0];
+eq('evening start caps hours at 6', clampedEarly.hours, 6);
 
 console.log(`postWizard: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {

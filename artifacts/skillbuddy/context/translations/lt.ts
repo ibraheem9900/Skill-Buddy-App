@@ -1848,6 +1848,8 @@ const lt = {
   post_err_time: 'Pasirinkite laiką.',
   post_err_time_past: 'Šis laikas jau praėjo. Pasirinkite vėlesnį laiką.',
   post_err_dates_pick: 'Pasirinkite pradžios datą.',
+  post_err_tasks_duplicate_day: 'Vienai dienai leidžiama tik viena užduotis.',
+  post_err_dates_window: 'Pasirinkite dieną per artimiausias 7 dienas.',
   post_err_dates_past: 'Rezervacija negali prasidėti praeityje.',
   post_err_dates_max: 'Galite rezervuoti ne daugiau kaip 7 dienas.',
   post_err_dates_min: 'Kelių dienų darbui pasirink bent {n} dienas.',
