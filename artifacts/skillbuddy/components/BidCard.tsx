@@ -3,6 +3,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { formatDistance } from '@/lib/distance'
+import { formatBidDistanceLocale } from '@/lib/bid'
 import type { Bid } from '@/types';
 
 interface Props {
@@ -15,7 +17,7 @@ interface Props {
 
 export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: Props) {
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { provider } = bid;
 
   return (
@@ -40,7 +42,7 @@ export default function BidCard({ bid, rank, onViewProfile, onChat, onAccept }: 
             <MaterialCommunityIcons name="shield-check-outline" size={13} color={c.mutedForeground} />
             <Text style={[styles.metaText, { color: c.mutedForeground }]}>{t('bidcard_badge', { n: provider.badge ?? 0 })}</Text>
             <View style={[styles.badgeDot, { backgroundColor: c.mutedForeground }]} />
-            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{t('bidcard_distance', { n: provider.distanceKm })}</Text>
+            <Text style={[styles.metaText, { color: c.mutedForeground }]}>{formatDistance(provider.distanceKm, language)}</Text>
           </View>
         </View>
         <View style={styles.priceWrap}>

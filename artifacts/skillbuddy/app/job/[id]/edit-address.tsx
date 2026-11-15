@@ -16,6 +16,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
+import BottomSheet from '@/components/BottomSheet';
 import BrandedLoader from '@/components/BrandedLoader';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useJobDetail } from '@/hooks/useJobDetail';
@@ -644,31 +645,19 @@ export default function EditJobAddressScreen() {
       </KeyboardAwareScrollViewCompat>
 
       {/* One modal, three levels — the same pattern the Post-a-Job screen uses */}
-      <Modal
+      <BottomSheet
         visible={pickerOpen !== null}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setPickerOpen(null)}
+        onClose={() => setPickerOpen(null)}
+        title={t(
+          (pickerOpen === 'country'
+            ? 'addr_c_country'
+            : pickerOpen === 'county'
+              ? 'addr_c_county'
+              : 'addr_c_city') as any
+        )}
+        height={560}
       >
-        <View style={styles.modalBackdrop}>
-          <View
-            style={[styles.modalSheet, { backgroundColor: c.card, borderColor: c.border }]}
-          >
-            <View style={[styles.modalHead, { borderBottomColor: c.border }]}>
-              <Text style={[styles.modalTitle, { color: c.text }]}>
-                {t(
-                  pickerOpen === 'country'
-                    ? 'addr_c_country'
-                    : pickerOpen === 'county'
-                      ? 'addr_c_county'
-                      : 'addr_c_city'
-                ) as any}
-              </Text>
-              <TouchableOpacity onPress={() => setPickerOpen(null)} hitSlop={8}>
-                <Feather name="x" size={20} color={c.text} />
-              </TouchableOpacity>
-            </View>
+        <View style={{ flex: 1 }}>
 
             {pickerLoading ? (
               <View style={styles.modalState}>
@@ -722,9 +711,8 @@ export default function EditJobAddressScreen() {
                 })}
               </ScrollView>
             )}
-          </View>
         </View>
-      </Modal>
+      </BottomSheet>
     </View>
   );
 }

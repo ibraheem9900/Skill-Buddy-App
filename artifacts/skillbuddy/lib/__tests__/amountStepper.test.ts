@@ -16,8 +16,8 @@ import {
 
 /**
  * The press-and-hold schedule behind <AmountStepper> (same feel as the old
- * Anytime time-picker arrows): tap = €1, hold = 400 ms then every 100 ms,
- * accelerating to €5 after 1.5 s and €10 after 3 s.
+ * Anytime time-picker arrows): tap = €5, hold = 400 ms then every 100 ms,
+ * accelerating to €10 after 3 s.
  */
 
 declare const console: { log: (msg: string) => void };
@@ -32,21 +32,21 @@ function eq<T>(label: string, actual: T, expected: T) {
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
-eq('a tap is one euro', BID_STEP_CENTS, 100);
-eq('three chips: €1, €5, €10', BID_CHIPS_CENTS.join(','), '100,500,1000');
+eq('a tap is five euros', BID_STEP_CENTS, 500);
+eq('two chips: €5, €10', BID_CHIPS_CENTS.join(','), '500,1000');
 eq('first repeat at 400 ms', STEP_FIRST_DELAY_MS, 400);
 eq('then every 100 ms', STEP_REPEAT_MS, 100);
 
 /* ── The accelerating step ────────────────────────────────────────────────── */
 
-eq('a fresh press moves €1', repeatStepFor(0), 100);
-eq('still €1 just before 1.5 s', repeatStepFor(1499), 100);
+eq('a fresh press moves €5', repeatStepFor(0), 500);
+eq('still €5 just before 1.5 s', repeatStepFor(1499), 500);
 eq('€5 from 1.5 s', repeatStepFor(1500), STEP_FAST_CENTS);
 eq('still €5 just before 3 s', repeatStepFor(2999), STEP_FAST_CENTS);
 eq('€10 from 3 s', repeatStepFor(3000), STEP_FASTER_CENTS);
 eq('€10 stays after 3 s', repeatStepFor(10_000), STEP_FASTER_CENTS);
-eq('a negative elapsed is treated as a tap', repeatStepFor(-50), 100);
-eq('NaN is treated as a tap', repeatStepFor(Number.NaN), 100);
+eq('a negative elapsed is treated as a tap', repeatStepFor(-50), 500);
+eq('NaN is treated as a tap', repeatStepFor(Number.NaN), 500);
 eq('the thresholds are ordered', STEP_FAST_AFTER_MS < STEP_FASTER_AFTER_MS, true);
 
 /* ── Repeat timing ────────────────────────────────────────────────────────── */
@@ -57,13 +57,13 @@ eq('later repeats keep waiting 100 ms', nextRepeatDelay(3000), 100);
 
 /* ── Stepping ─────────────────────────────────────────────────────────────── */
 
-eq('plus moves up one euro', stepCents(2998, 1), 3098);
-eq('minus moves down one euro', stepCents(2998, -1), 2898);
+eq('plus moves up five euros', stepCents(2998, 1), 3498);
+eq('minus moves down five euros', stepCents(2998, -1), 2498);
 eq('a chip can move €5', stepCents(2998, 1, 500), 3498);
 eq('minus stops at the minimum', stepCents(150, -1, 100, 100, 9_999_900), 100);
 eq('plus stops at the maximum', stepCents(9_999_850, 1, 100, 100, 9_999_900), 9_999_900);
 eq('never below the minimum', stepCents(100, -1, 1000, 100, 9_999_900), 100);
-eq('a fractional value is rounded before stepping', stepCents(2998.6, 1), 3099);
+eq('a fractional value is rounded before stepping', stepCents(2998.6, 1), 3499);
 eq('a custom window is honoured', stepCents(5000, 1, 100, 1000, 5100), 5100);
 
 /* ── Button availability ──────────────────────────────────────────────────── */

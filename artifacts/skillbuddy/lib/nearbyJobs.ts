@@ -64,6 +64,20 @@ export interface NearbyJob {
   bidding_ends_at: string;
   distance_km: number;
   matches_skill: boolean;
+  /**
+   * The location feed is moving to `job_id` + coordinates only. Both are
+   * optional so the current eight-field response and the new shape parse
+   * through the same adapter; the feed merges the rest from job details.
+   */
+  latitude?: number;
+  longitude?: number;
+  /** True when distance was computed from API coordinates, not sent by the API. */
+  distance_approximate?: boolean;
+  address_text?: string | null;
+  expected_hours?: string | null;
+  final_price?: string | null;
+  detailsLoaded?: boolean;
+  detailsError?: boolean;
 }
 
 /** Only set parameters are sent; a missing optional param means "server default". */
@@ -395,11 +409,68 @@ export function formatDistanceKm(distanceKm: number | null | undefined, language
   return formatDistance(distanceKm, language);
 }
 
+/** Read a coordinate pair from flat or nested fields, as a number or numeric string. */
+function parsePoint(raw: Record<string, unknown>): { latitude?: number; longitude?: number } {
+  const nested =
+    raw.location && typeof raw.location === 'object'
+      ? (raw.location as Record<string, unknown>)
+      : raw.coordinates && typeof raw.coordinates === 'object'
+        ? (raw.coordinates as Record<string, unknown>)
+        : null;
+  const read = (names: string[]): number | undefined => {
+    for (const source of [raw, nested]) {
+      if (!source) continue;
+      for (const name of names) {
+        const value = source[name];
+        if (value === null || value === undefined || value === '') continue;
+        const parsed = typeof value === 'number' ? value : Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    return undefined;
+  };
+  const latitude = read(['latitude', 'lat']);
+  const longitude = read(['longitude', 'lng', 'lon']);
+  if (latitude === undefined || longitude === undefined) return {};
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return {};
+  return { latitude, longitude };
+}
+
 /**
- * Read a `job.nearby_opened` frame as a feed item. The event carries EXACTLY the
- * list item's fields (integration guide), so one parser serves both the REST
- * array and the socket frame. Returns null for a frame without a usable job id
- * or title — a malformed frame must never add a nameless card to the feed.
+ * Parse ONE item of the nearby LOCATION feed. The new contract guarantees only
+ * `job_id` (plus coordinates); the old one also carries title/request/deadline.
+ * Missing display fields are left blank and filled from job details, so the
+ * adapter works before and after the backend switches.
+ */
+export function parseNearbyLocation(data: unknown): NearbyJob | null {
+  if (!data || typeof data !== 'object') return null;
+  const raw = data as Record<string, unknown>;
+  const jobId = raw.job_id;
+  if (typeof jobId !== 'number' || !Number.isInteger(jobId)) return null;
+
+  const numberOr = (value: unknown, fallback: number): number => {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  return {
+    job_id: jobId,
+    service_id: numberOr(raw.service_id, 0),
+    category_id: numberOr(raw.category_id, 0),
+    title: typeof raw.title === 'string' ? raw.title : '',
+    request_type: typeof raw.request_type === 'string' ? raw.request_type : '',
+    bidding_ends_at: typeof raw.bidding_ends_at === 'string' ? raw.bidding_ends_at : '',
+    distance_km: numberOr(raw.distance_km, Number.NaN),
+    matches_skill: raw.matches_skill === true,
+    ...parsePoint(raw),
+  };
+}
+
+/**
+ * Read a `job.nearby_opened` frame as a legacy feed item. The event carries
+ * EXACTLY the list item's fields (integration guide), so one parser serves both
+ * the REST array and the socket frame. Returns null for a frame without a usable
+ * job id or title — a malformed frame must never add a nameless card to the feed.
  */
 export function parseNearbyJob(data: unknown): NearbyJob | null {
   if (!data || typeof data !== 'object') return null;

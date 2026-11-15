@@ -141,11 +141,24 @@ const closedJob: JobPermissionJob = {
   is_bidding_open: false,
 };
 const closedOwner = jobPermissions(closedJob, 'CLIENT', '7');
-check('the owner cannot edit a job the backend closed', !closedOwner.canEditJob);
-check('the owner cannot restart a closed timer', !closedOwner.canRestartTimer);
+// An expired window hides Edit (nothing may change while bidding is closed)
+// but still offers Restart Timer — the recovery action the boss asked for.
+check('the owner cannot edit an OPEN job with a closed window', !closedOwner.canEditJob);
+check('the owner can restart an expired OPEN timer', closedOwner.canRestartTimer);
 const closedPilot = jobPermissions(closedJob, 'PROVIDER', '9');
 check('a pilot cannot bid once bidding closed', !closedPilot.canPlaceBid);
 check('a pilot sees their own bid when bidding closed', closedPilot.canViewOwnBid);
+
+const finishedJob: JobPermissionJob = {
+  ...job,
+  status: 'COMPLETED',
+  is_editable: false,
+  can_restart_timer: false,
+  is_bidding_open: false,
+};
+const finishedOwner = jobPermissions(finishedJob, 'CLIENT', '7');
+check('a finished job is not editable', !finishedOwner.canEditJob);
+check('a finished timer is not restartable', !finishedOwner.canRestartTimer);
 
 const assignedJob: JobPermissionJob = { ...job, is_bidding_open: true, assigned_provider_id: 9 };
 const assignedPilot = jobPermissions(assignedJob, 'PROVIDER', '9');

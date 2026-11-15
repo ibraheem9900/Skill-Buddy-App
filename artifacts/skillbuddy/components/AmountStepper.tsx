@@ -8,11 +8,12 @@ import {
   BID_STEP_CENTS,
   STEP_FIRST_DELAY_MS,
   canStep,
+  nearestFiveCents,
   nextRepeatDelay,
   repeatStepFor,
   stepCents,
 } from '@/lib/amountStepper';
-import { clampCents, formatCents, parseMoneyToCents } from '@/lib/money';
+import { clampCents } from '@/lib/money';
 import {
   BID_MAX_CENTS,
   BID_MIN_CENTS,
@@ -26,23 +27,22 @@ import {
  * (Submit Bid and the Edit bid sheet share it through BidFormFields).
  *
  *   ┌─────────────────────────────────────────────┐
- *   │      (−)            €29.98            (+)   │
+ *   │      (−)             €30              (+)   │
  *   └─────────────────────────────────────────────┘
- *              [ +€1 ]  [ +€5 ]  [ +€10 ]
+ *              [ +€5 ]  [ +€10 ]
  *
- * • Tap − / + moves BID_STEP_CENTS (€1). Holding repeats after 400 ms, then
- *   every 100 ms, accelerating to 500 and then 1000 cents (lib/amountStepper).
- * • Tapping the amount turns it into a decimal-pad input. On blur the value is
- *   normalised to 2 decimals; unparseable text restores the last valid amount.
- * • Amounts are INTEGER CENTS end to end (lib/money), so no float can ever
- *   reach the field: "29.97833444215889632447" becomes €29.98.
+ * • Tap − / + moves exactly €5. Holding repeats after 400 ms, then every
+ *   100 ms, accelerating to 500 and then 1000 cents (lib/amountStepper).
+ * • Tapping the amount turns it into an integer keypad. Every non-digit is
+ *   stripped as it is typed, and blur / Submit snaps to the nearest €5.
+ * • Empty means empty: Submit stays disabled until a real amount is entered.
  * • Minus/plus disable at the range ends, and the hold timers are cleared on
  *   release, blur and unmount.
  */
 export interface AmountStepperProps {
   /** Integer cents, or null while the field is empty. */
   valueCents: number | null;
-  onChange: (cents: number) => void;
+  onChange: (cents: number | null) => void;
   minCents?: number;
   maxCents?: number;
   disabled?: boolean;
@@ -67,7 +67,7 @@ export default function AmountStepper({
   hint = null,
   decreaseLabel,
   increaseLabel,
-  placeholder = '0.00',
+  placeholder = '0',
 }: AmountStepperProps) {
   const { colors: c } = useTheme();
   const { language } = useLanguage();
@@ -84,9 +84,6 @@ export default function AmountStepper({
 
   useEffect(() => {
     valueRef.current = valueCents;
-    // Only an IN-RANGE amount can be restored after unreadable text. An
-    // out-of-range typed value is shown with its own error; it must never
-    // become the fallback that silently replaces the next typo.
     if (valueCents !== null && valueCents >= minCents && valueCents <= maxCents) {
       setLastValid(valueCents);
     }
@@ -104,7 +101,7 @@ export default function AmountStepper({
 
   const commit = useCallback(
     (cents: number) => {
-      const next = clampCents(cents, minCents, maxCents);
+      const next = clampCents(nearestFiveCents(cents, minCents), minCents, maxCents);
       valueRef.current = next;
       setLastValid(next);
       onChange(next);
@@ -119,8 +116,7 @@ export default function AmountStepper({
       const current = valueRef.current ?? minCents;
       if (!canStep(current, direction, minCents, maxCents, disabled)) return;
       stopHold();
-      // The first tap on an empty field sets the minimum itself (€1.00), not
-      // minimum + one step (€2.00).
+      // The first tap on an empty field sets the €5 minimum itself.
       commit(
         empty ? minCents : stepCents(current, direction, BID_STEP_CENTS, minCents, maxCents)
       );
@@ -131,7 +127,6 @@ export default function AmountStepper({
         const nowCents = valueRef.current ?? minCents;
         const next = stepCents(nowCents, direction, repeatStepFor(elapsed), minCents, maxCents);
         if (next !== nowCents) commit(next);
-        // Stop at the end instead of looping pointlessly.
         if (next === nowCents && (direction === -1 ? next <= minCents : next >= maxCents)) {
           stopHold();
           return;
@@ -145,11 +140,8 @@ export default function AmountStepper({
   );
 
   const chips = BID_CHIPS_CENTS.map((chip) => {
-    // An empty field starts from zero, so +€1 becomes exactly the €1 minimum
-    // instead of the last amount the field happened to hold.
     const base = valueRef.current ?? 0;
-    const target = clampCents(base + chip, minCents, maxCents);
-    // "+€1" / "+1 €" — whole euros, the way the spec writes the chips.
+    const target = clampCents(nearestFiveCents(base + chip, minCents), minCents, maxCents);
     const label = formatAdjustChipLabel(chip / 100, locale);
     return (
       <TouchableOpacity
@@ -172,28 +164,42 @@ export default function AmountStepper({
 
   const minusEnabled = canStep(valueCents ?? minCents, -1, minCents, maxCents, disabled);
   const plusEnabled = canStep(valueCents ?? minCents, 1, minCents, maxCents, disabled);
-  const display = valueCents === null ? null : formatBidPriceLocale(formatCents(valueCents), locale) ?? null;
+  const display =
+    valueCents === null ? null : formatBidPriceLocale(valueCents / 100, locale) ?? null;
 
   const finishEditing = () => {
     setEditing(false);
     stopHold();
-    const cents = parseMoneyToCents(draft);
-    if (cents === null) {
-      // Unreadable text never replaces a real amount: restore the last valid one.
-      if (lastValid !== null) onChange(lastValid);
+
+    if (draft.trim().length === 0) {
+      valueRef.current = null;
+      setLastValid(null);
+      onChange(null);
       return;
     }
-    // Out-of-range amounts are NOT silently clamped: the typed value is kept
-    // and lib/bid's validator shows the translated min/max error under the
-    // field, which is also what keeps Submit disabled.
-    if (cents < minCents || cents > maxCents) {
+
+    const cents = Number(draft) * 100;
+    if (!Number.isSafeInteger(cents) || cents <= 0) {
+      if (lastValid !== null) onChange(lastValid);
+      else onChange(null);
+      return;
+    }
+
+    // Above the ceiling is kept exactly as typed so lib/bid can show the
+    // translated "too large" error instead of silently changing the amount.
+    if (cents > maxCents) {
       valueRef.current = cents;
       onChange(cents);
       return;
     }
-    setLastValid(cents);
-    valueRef.current = cents;
-    onChange(cents);
+
+    commit(cents);
+  };
+
+  const editValue = () => {
+    if (disabled) return;
+    setDraft(valueCents === null ? '' : String(Math.round(valueCents / 100)));
+    setEditing(true);
   };
 
   return (
@@ -220,25 +226,35 @@ export default function AmountStepper({
           <TextInput
             style={[styles.amountInput, { color: c.text }]}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={(text) => {
+              // Integer keypad only: paste, an IME or an old auto-fill can still
+              // put separators in the field, so every non-digit is stripped.
+              const digits = text.replace(/\D/g, '').slice(0, 7);
+              setDraft(digits);
+              if (digits.length === 0) {
+                valueRef.current = null;
+                onChange(null);
+                return;
+              }
+              const cents = Number(digits) * 100;
+              valueRef.current = cents;
+              onChange(cents);
+            }}
             onBlur={finishEditing}
             onSubmitEditing={finishEditing}
-            keyboardType="decimal-pad"
+            keyboardType="number-pad"
             autoFocus
             selectTextOnFocus
             placeholder={placeholder}
             placeholderTextColor={c.mutedForeground}
             editable={!disabled}
-            maxLength={15}
+            maxLength={7}
+            accessibilityLabel={placeholder}
           />
         ) : (
           <TouchableOpacity
             style={styles.amountBtn}
-            onPress={() => {
-              if (disabled) return;
-              setDraft(valueCents === null ? '' : formatCents(valueCents));
-              setEditing(true);
-            }}
+            onPress={editValue}
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel={display ?? placeholder}

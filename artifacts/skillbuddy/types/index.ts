@@ -744,8 +744,10 @@ export type JobApiStatus =
  * schedule either — see the doc comment on createJob.
  */
 export interface JobMilestoneCreate {
-  /** ISO 8601 UTC, e.g. "2026-09-28T10:35:52.816Z". */
-  scheduled_at: string;
+  /** Local calendar date, `YYYY-MM-DD` (schema `date`). */
+  date: string;
+  /** One or more TimeSlotResponse.code values for this ONE task. */
+  time_slots: string[];
   /** number | numeric string | null on the wire; this app always sends a number. */
   expected_hours?: number | string | null;
 }
@@ -835,13 +837,29 @@ export type MilestoneStatus =
   | 'CLIENT_NO_SHOW';
 
 /** JobMilestoneResponse — a persisted milestone. */
+export interface JobMilestoneTimeSlotResponse {
+  code: string;
+  label: string;
+  start_time: string;
+  end_time: string;
+  window: string;
+  arrival_options: string[];
+}
+
 export interface JobMilestoneResponse {
   id: number;
   sequence: number;
-  /** REQUIRED (non-null) per the live schema, unlike the job's own schedule. */
-  scheduled_at: string;
+  /** Local date `YYYY-MM-DD`; the new schedule field. */
+  scheduled_date?: string;
+  /** Every allowed slot for this ONE day/task. */
+  time_slots?: JobMilestoneTimeSlotResponse[];
+  /** Union of the allowed slots' 30-minute arrival marks. */
+  arrival_options?: string[];
+  /** Legacy field; null on new date+slots milestones. */
+  scheduled_at?: string | null;
   /** Numeric STRING on the wire (same convention as service prices). */
   expected_hours?: string | null;
+  confirmed_eta_minutes?: number | null;
   status: MilestoneStatus;
   started_at?: string | null;
   completed_at?: string | null;
@@ -883,9 +901,8 @@ export interface JobStatusHistoryResponse {
 export interface UpdateJobRequest {
   title?: string | null;
   description?: string | null;
-  /** ISO 8601 UTC string. */
-  scheduled_at?: string | null;
-  expected_hours?: number | null;
+  /** Replaces the whole schedule when sent (JobMilestoneCreate[]). */
+  milestones?: JobMilestoneCreate[] | null;
 }
 
 /**
@@ -1192,13 +1209,37 @@ export interface BidProviderSummary {
  * the authoritative split is still JobBidsResponse.recommended vs
  * other_offers, so a screen should group by that, not by this flag.
  */
+export interface BidMilestoneResponse {
+  milestone_id: number;
+  sequence: number;
+  scheduled_date: string;
+  /** Local `HH:MM`. */
+  arrival_time: string;
+  arrival_at: string;
+  eta_minutes: number;
+  ends_at: string;
+  message?: string | null;
+}
+
+export interface BidMilestoneInput {
+  milestone_id: number;
+  /** Local `HH:MM`, one of that milestone's arrival_options. */
+  arrival_time: string;
+  /** 1..1440 minutes for this milestone. */
+  eta_minutes: number;
+  message?: string | null;
+}
+
 export interface BidResponse {
   id: number;
   job_id: number;
   provider: BidProviderSummary;
   /** Numeric STRING per the schema — parse, never render raw. */
   offered_price: string;
-  eta_minutes: number;
+  /** Legacy top-level ETA; new responses use total_eta_minutes. */
+  eta_minutes?: number;
+  total_eta_minutes?: number;
+  milestones?: BidMilestoneResponse[];
   message?: string | null;
   status: BidStatus;
   /** Nullable numeric STRING (km). Null means unknown, not zero. */
@@ -1238,9 +1279,9 @@ export interface BidResponse {
  */
 export interface BidCreateRequest {
   offered_price: number;
-  /** 0..1440 (24 h), integer. */
-  eta_minutes: number;
   message?: string | null;
+  /** Exactly one entry per job milestone (backend requires this now). */
+  milestones: BidMilestoneInput[];
 }
 
 /**
@@ -1266,6 +1307,7 @@ export interface BidUpdateRequest {
   offered_price?: number | null;
   eta_minutes?: number | null;
   message?: string | null;
+  milestones?: BidMilestoneInput[];
 }
 
 /**

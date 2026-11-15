@@ -137,8 +137,8 @@ eq('a 16-char price is rejected by the length guard', parseBidPrice('00000000001
 eq('a 15-char price is still accepted', parseBidPrice('000000000012.45'), 12.45);
 eq('an absurdly large price is rejected', parseBidPrice('9999999999'), null);
 
-eq('a price formats with 2 decimals', formatBidPrice('20'), '€20.00');
-eq('a one-decimal price is padded', formatBidPrice('7.5'), '€7.50');
+eq('a price formats as whole euros', formatBidPrice('20'), '€20');
+eq('a legacy cent price rounds for display', formatBidPrice('7.5'), '€8');
 eq('an unparseable price formats to null', formatBidPrice('nope'), null);
 eq('a missing price formats to null', formatBidPrice(null), null);
 
@@ -157,27 +157,27 @@ deepEq('three decimals report "decimals" rather than rounding silently', validat
   errorKey: 'bid_err_price_decimals',
 });
 deepEq('a whole number is sent as a number', validateBidPrice('20'), { ok: true, value: 20 });
-deepEq('one decimal is sent as a number', validateBidPrice('7.5'), { ok: true, value: 7.5 });
-deepEq('whitespace is trimmed before validating', validateBidPrice('  12.30 '), { ok: true, value: 12.3 });
-deepEq('a leading dot with decimals is accepted when the floor allows it', validateBidPrice('.75', { minPrice: 0 }), { ok: true, value: 0.75 });
+deepEq('a non-multiple is refused', validateBidPrice('7.5'), { ok: false, errorKey: 'bid_err_price_multiple' });
+deepEq('whitespace is trimmed before checking the unit', validateBidPrice('  12.30 '), { ok: false, errorKey: 'bid_err_price_multiple' });
+deepEq('a leading dot is still not a €5 multiple', validateBidPrice('.75', { minPrice: 0 }), { ok: false, errorKey: 'bid_err_price_multiple' });
 deepEq('a client-side ceiling is enforced', validateBidPrice('500', { maxPrice: 100 }), {
   ok: false,
   errorKey: 'bid_err_price_too_large',
 });
 deepEq('a price at the ceiling passes', validateBidPrice('100', { maxPrice: 100 }), { ok: true, value: 100 });
-deepEq('below the €1 minimum is refused', validateBidPrice('0.75'), {
+deepEq('below the €5 minimum is refused', validateBidPrice('0.75'), {
   ok: false,
   errorKey: 'bid_err_price_min',
 });
-deepEq('the €1 minimum itself passes', validateBidPrice('1.00'), { ok: true, value: 1 });
+deepEq('the €5 minimum itself passes', validateBidPrice('5.00'), { ok: true, value: 5 });
 deepEq('the default ceiling is €99,999', validateBidPrice('100000'), {
   ok: false,
   errorKey: 'bid_err_price_too_large',
 });
 
 /* The Baltic/German comma separator (the task's own "comma and dot both work"). */
-deepEq('a comma decimal separator is accepted', validateBidPrice('12,50'), { ok: true, value: 12.5 });
-deepEq('a comma with one decimal is accepted', validateBidPrice('7,5'), { ok: true, value: 7.5 });
+deepEq('a comma amount still has to be a €5 multiple', validateBidPrice('12,50'), { ok: false, errorKey: 'bid_err_price_multiple' });
+deepEq('a comma with one decimal is not a €5 multiple', validateBidPrice('7,5'), { ok: false, errorKey: 'bid_err_price_multiple' });
 deepEq('a comma and a dot together are ambiguous and refused', validateBidPrice('1.234,56'), {
   ok: false,
   errorKey: 'bid_err_price_invalid',
@@ -188,12 +188,11 @@ deepEq(
   { ok: false, errorKey: 'bid_err_price_decimals' }
 );
 
-const validated = validateBidPrice('3');
+const validated = validateBidPrice('20');
 eq('the validated value is a NUMBER, not a string', typeof (validated as { value: unknown }).value, 'number');
 eq(
-  'the number carries at most 2 decimals',
-  (validateBidPrice('12.3') as { value: number }).value === 12.3 &&
-    Math.round((validateBidPrice('12.3') as { value: number }).value * 100) === 1230,
+  'the validated amount is a whole-euro multiple of five',
+  (validated as { value: number }).value === 20 && Number.isInteger((validated as { value: number }).value),
   true
 );
 
@@ -250,12 +249,12 @@ eq('a missing job offers no bid', canProviderSubmitBid(null, 'PROVIDER'), false)
 
 const request = buildBidCreateRequest(12.5, 90, 'Can start at noon');
 deepEq('the body uses the schema\'s own field names', Object.keys(request).sort(), [
-  'eta_minutes',
   'message',
+  'milestones',
   'offered_price',
 ]);
 eq('the price is sent as a NUMBER', typeof request.offered_price, 'number');
-eq('the eta is sent as the integer it was validated as', request.eta_minutes, 90);
+eq('no structured task is invented without a milestone', request.milestones.length, 0);
 eq('an absent message is sent as null, not omitted', buildBidCreateRequest(5, 0, null).message, null);
 
 const detail = [
@@ -368,14 +367,14 @@ function response(over: Partial<JobBidsResponse> = {}): JobBidsResponse {
 
 /* ─────────────────────────────────────────── money & distance per locale ── */
 
-eq('en renders the symbol first', formatBidPriceLocale('12.5', 'en'), '€12.50');
-eq('de renders the symbol last with a comma', formatBidPriceLocale('12.5', 'de'), '12,50 €');
-eq('et renders the symbol last with a comma', formatBidPriceLocale('12.5', 'et'), '12,50 €');
-eq('lv renders the symbol last with a comma', formatBidPriceLocale('12.5', 'lv'), '12,50 €');
-eq('lt renders the symbol last with a comma', formatBidPriceLocale('12.5', 'lt'), '12,50 €');
-eq('en groups thousands', formatBidPriceLocale('1234.5', 'en'), '€1,234.50');
-eq('de groups thousands with a dot', formatBidPriceLocale('1234.5', 'de'), '1.234,50 €');
-eq('a whole price keeps its cents', formatBidPriceLocale('7', 'de'), '7,00 €');
+eq('en renders the symbol first without decimals', formatBidPriceLocale('12.5', 'en'), '€13');
+eq('de renders the symbol last without decimals', formatBidPriceLocale('12.5', 'de'), '13 €');
+eq('et renders the symbol last without decimals', formatBidPriceLocale('12.5', 'et'), '13 €');
+eq('lv renders the symbol last without decimals', formatBidPriceLocale('12.5', 'lv'), '13 €');
+eq('lt renders the symbol last without decimals', formatBidPriceLocale('12.5', 'lt'), '13 €');
+eq('en groups thousands', formatBidPriceLocale('1234.5', 'en'), '€1,235');
+eq('de groups thousands with a dot', formatBidPriceLocale('1234.5', 'de'), '1.235 €');
+eq('a whole price has no decimal tail', formatBidPriceLocale('7', 'de'), '7 €');
 eq('an unparseable price has no string at all', formatBidPriceLocale('abc', 'en'), null);
 eq('a missing price has no string at all', formatBidPriceLocale(null, 'de'), null);
 eq('the docs 300-digit price is still refused', formatBidPriceLocale(`${'0'.repeat(300)}`, 'en'), null);
@@ -652,27 +651,27 @@ eq('a missing job hides the action', canEditBid(offer({ id: 1 }), null, 'PROVIDE
 deepEq(
   'a bid prefills into the draft',
   bidDraftFromBid({ offered_price: '20.00', eta_minutes: 45, message: null }),
-  { price: '20.00', etaHours: 0, etaMinutes: 45, message: '' }
+  { price: '20', etaHours: 0, etaMinutes: 45, message: '' }
 );
 deepEq(
   '24 h prefills as 24 and 0',
   bidDraftFromBid({ offered_price: '1.00', eta_minutes: 1440, message: 'hi' }),
-  { price: '1.00', etaHours: 24, etaMinutes: 0, message: 'hi' }
+  { price: '5', etaHours: 24, etaMinutes: 0, message: 'hi' }
 );
 deepEq(
   'an hour and a half prefills as 1 h 30',
   bidDraftFromBid({ offered_price: '1', eta_minutes: 90, message: '' }),
-  { price: '1.00', etaHours: 1, etaMinutes: 30, message: '' }
+  { price: '5', etaHours: 1, etaMinutes: 30, message: '' }
 );
 deepEq(
   'an over-max eta is clamped to 24 h',
   bidDraftFromBid({ offered_price: '1', eta_minutes: 2000, message: null }),
-  { price: '1.00', etaHours: 24, etaMinutes: 0, message: '' }
+  { price: '5', etaHours: 24, etaMinutes: 0, message: '' }
 );
 deepEq(
   'a negative eta prefills as 0',
   bidDraftFromBid({ offered_price: '1', eta_minutes: -5, message: null }),
-  { price: '1.00', etaHours: 0, etaMinutes: 0, message: '' }
+  { price: '5', etaHours: 0, etaMinutes: 0, message: '' }
 );
 deepEq(
   "the docs' 300-digit price prefills EMPTY, never NaN",
@@ -754,9 +753,9 @@ eq(
 eq('a missing bid never claims a change', hasBidDraftChanged(null, unchangedDraft), false);
 
 /* Validity — the same three rules Create Bid runs. */
-const goodDraft = { price: '25.50', etaHours: 0, etaMinutes: 50, message: 'ok' };
+const goodDraft = { price: '25', etaHours: 0, etaMinutes: 50, message: 'ok' };
 eq('a complete draft is valid', isBidDraftValid(goodDraft), true);
-eq('a comma price is valid', isBidDraftValid({ ...goodDraft, price: '25,50' }), true);
+eq('a comma €5 amount is valid', isBidDraftValid({ ...goodDraft, price: '25,00' }), true);
 eq('0 is refused', isBidDraftValid({ ...goodDraft, price: '0' }), false);
 eq('an empty price is refused', isBidDraftValid({ ...goodDraft, price: '' }), false);
 eq('3 decimals are refused', isBidDraftValid({ ...goodDraft, price: '25.555' }), false);
@@ -772,14 +771,14 @@ eq('an empty message is allowed', isBidDraftValid({ ...goodDraft, message: '' })
 
 /* The quick adjust — EURO amounts, confirmed with the product owner. */
 deepEq('the chips are the four euro steps', [...BID_ADJUST_STEPS], [-10, -5, 5, 10]);
-eq('-10 takes a price down', adjustBidPrice('25.50', -10), '15.50');
-eq('+10 takes it up', adjustBidPrice('25.50', 10), '35.50');
-eq('it works from a comma field too', adjustBidPrice('25,50', 5), '30.50');
-eq('it never goes below the €1 minimum', adjustBidPrice('3.00', -10), '1.00');
-eq('an empty field starts from zero rather than looking broken', adjustBidPrice('', 5), '5.00');
-eq('a negative chip on an empty field lands on the minimum', adjustBidPrice('', -10), '1.00');
-eq('a chip that would change nothing is disabled', canApplyBidAdjust('1.00', -5), false);
-eq('a chip that changes the price is enabled', canApplyBidAdjust('1.00', 5), true);
+eq('-10 takes a price down', adjustBidPrice('25.00', -10), '15');
+eq('+10 takes it up', adjustBidPrice('25.00', 10), '35');
+eq('it works from a comma field too', adjustBidPrice('25,00', 5), '30');
+eq('it never goes below the €5 minimum', adjustBidPrice('3.00', -10), '5');
+eq('an empty field starts at the minimum', adjustBidPrice('', 5), '5');
+eq('a negative chip on an empty field lands on the minimum', adjustBidPrice('', -10), '5');
+eq('a chip that would change nothing is disabled', canApplyBidAdjust('5', -5), false);
+eq('a chip that changes the price is enabled', canApplyBidAdjust('5', 5), true);
 eq('...on an empty field too', canApplyBidAdjust('', 5), true);
 eq('...and on an unparseable one', canApplyBidAdjust('abc', -10), true);
 

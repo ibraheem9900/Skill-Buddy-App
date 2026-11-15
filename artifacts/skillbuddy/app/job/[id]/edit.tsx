@@ -19,9 +19,10 @@ import BrandedLoader from '@/components/BrandedLoader';
 import DateStrip from '@/components/DateStrip';
 import TimeChoices from '@/components/TimeChoices';
 import { useJobDetail } from '@/hooks/useJobDetail';
+import useTimeSlots from '@/hooks/useTimeSlots';
 import { useRepostJob } from '@/hooks/useRepostJob';
 import { splitTable } from '@/lib/jobSchedule';
-import { selectionWindow } from '@/lib/jobBooking';
+import { selectionWindow, type TimeChoice } from '@/lib/jobBooking';
 import {
   DAY_END_MINUTES,
   clampHours,
@@ -84,6 +85,7 @@ export default function EditJobScreen() {
   const numericId = /^\d+$/.test(id ?? '') ? Number(id) : null;
 
   const { status: detailStatus, job, serverMessage, retry } = useJobDetail(numericId);
+  const { status: slotsStatus, refresh: refreshSlots } = useTimeSlots();
 
   const [form, setForm] = useState<JobEditValues | null>(null);
   const [clientErrors, setClientErrors] = useState<
@@ -114,18 +116,35 @@ export default function EditJobScreen() {
     return () => clearTimeout(timer);
   }, [hoursNotice]);
 
-  const setTime = (next: JobEditValues['time']) => {
+  /** Add/remove ONE allowed slot; the task keeps at least one. */
+  const toggleTime = (next: TimeChoice) => {
     setForm((prev) => {
       if (!prev) return prev;
-      const cap = next
-        ? maxHoursForStart(minutesOf(selectionWindow(next)?.start ?? null))
-        : null;
-      if (cap === null) return { ...prev, time: next };
-      if (exceedsHoursCap(prev.expectedHours, cap)) {
-        setHoursNotice(cap);
-        return { ...prev, time: next, expectedHours: clampHours(prev.expectedHours, cap) };
-      }
-      return { ...prev, time: next };
+      const current = prev.times ?? (prev.time ? [prev.time] : []);
+      const exists = current.some((entry) =>
+        next.kind === 'anytime'
+          ? entry.kind === 'anytime'
+          : entry.kind === 'slot' && entry.key === next.key
+      );
+      const times = exists
+        ? current.filter((entry) =>
+            next.kind === 'anytime'
+              ? entry.kind !== 'anytime'
+              : !(entry.kind === 'slot' && entry.key === next.key)
+          )
+        : [...current, next];
+      const starts = times
+        .map((entry) => selectionWindow(entry))
+        .filter((win): win is { start: { hour: number; minute: number }; end: { hour: number; minute: number } } => win !== null)
+        .map((win) => minutesOf(win.start))
+        .filter((minutes): minutes is number => minutes !== null);
+      const cap = starts.length > 0 ? maxHoursForStart(Math.max(...starts)) : null;
+      const expectedHours =
+        cap !== null && exceedsHoursCap(prev.expectedHours, cap)
+          ? clampHours(prev.expectedHours, cap)
+          : prev.expectedHours;
+      if (cap !== null && expectedHours !== prev.expectedHours) setHoursNotice(cap);
+      return { ...prev, times, time: times[times.length - 1] ?? null, expectedHours };
     });
     clearError('scheduled_at');
     clearError('expected_hours');
@@ -471,12 +490,25 @@ export default function EditJobScreen() {
               status={() => null}
             />
 
-            {/* Time — the five client windows + Anytime, preselected from the job. */}
+            {/* Time — the server slots + Anytime, preselected from the job. */}
             <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+            {slotsStatus === 'loading' ? (
+              <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_slots_loading')}</Text>
+            ) : null}
+            {slotsStatus === 'error' ? (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={[styles.error, { color: c.destructive }]}>{t('post_slots_error')}</Text>
+                <TouchableOpacity onPress={() => void refreshSlots()}>
+                  <Text style={[styles.label, { color: c.primary }]}>{t('post_slots_retry')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <TimeChoices
               choice={form.time}
               day={chosenDay ?? dayChoices[0]}
-              onChange={setTime}
+              onChange={() => undefined}
+              selected={form.times ?? (form.time ? [form.time] : [])}
+              onToggle={toggleTime}
             />
             {errorText('scheduled_at') ? (
               <Text style={[styles.error, { color: c.destructive }]}>

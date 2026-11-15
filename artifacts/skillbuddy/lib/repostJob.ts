@@ -29,6 +29,7 @@ import type {
   UpdateJobRequest,
 } from '@/types';
 
+
 /** The edited fields a repost may carry. `address` is the Edit Job Address case. */
 export type RepostChanges = UpdateJobRequest & {
   address?: JobAddressCreate | null;
@@ -89,34 +90,25 @@ export function repostMilestones(
   job: Pick<JobResponse, 'milestones' | 'scheduled_at' | 'expected_hours'>,
   changes: RepostChanges
 ): JobMilestoneCreate[] | null {
-  const stored = [...(job.milestones ?? [])]
+  const stored: JobMilestoneCreate[] = [...(job.milestones ?? [])]
     .sort((a, b) => a.sequence - b.sequence || a.id - b.id)
-    .map((milestone) => ({
-      scheduled_at: milestone.scheduled_at,
-      expected_hours: hoursOf(milestone.expected_hours),
-    }));
+    .flatMap((milestone) => {
+      const timeSlots = (milestone.time_slots ?? []).map((slot) => slot.code);
+      if (!milestone.scheduled_date || timeSlots.length === 0) return [];
+      return [{
+        date: milestone.scheduled_date,
+        time_slots: timeSlots,
+        expected_hours: hoursOf(milestone.expected_hours) ?? hoursOf(job.expected_hours) ?? 1,
+      }];
+    });
 
-  // A job whose milestone list is missing still has the job-level schedule; it
-  // is enough to recreate one task rather than refusing the repost.
-  const list =
-    stored.length > 0
-      ? stored
-      : job.scheduled_at
-        ? [{ scheduled_at: job.scheduled_at, expected_hours: hoursOf(job.expected_hours) }]
-        : [];
+  if (stored.length === 0) return null;
 
-  if (list.length === 0) return null;
-
-  if (list.length === 1 && (changes.scheduled_at != null || changes.expected_hours != null)) {
-    return [
-      {
-        scheduled_at: changes.scheduled_at ?? list[0].scheduled_at,
-        expected_hours: changes.expected_hours ?? list[0].expected_hours,
-      },
-    ];
+  if (stored.length === 1 && changes.milestones && changes.milestones.length === 1) {
+    return [changes.milestones[0]];
   }
 
-  return list;
+  return stored;
 }
 
 /**

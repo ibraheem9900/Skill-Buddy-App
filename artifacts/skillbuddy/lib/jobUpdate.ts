@@ -1,5 +1,6 @@
 import { firstErrorMessage, parseExpectedHours } from '@/lib/jobList';
 import {
+  codesOfChoices,
   localDay,
   selectionWindow,
   type TimeChoice,
@@ -94,6 +95,8 @@ export interface JobEditOriginal {
   expectedHours: number;
   /** The window label read from the stored line, or null. */
   windowLabel: string | null;
+  /** Server codes of the first milestone's allowed slots. */
+  timeCodes: string[];
   milestones: number;
   isMultiDay: boolean;
 }
@@ -106,8 +109,10 @@ export interface JobEditValues {
   description: string;
   /** The chosen local day, or null = keep the stored date. */
   dateKey: string | null;
-  /** The chosen window, or null = nothing chosen yet. */
+  /** The chosen window, or null = nothing chosen yet (legacy single). */
   time: TimeChoice | null;
+  /** Every allowed slot of the task (new multi-select form). */
+  times?: TimeChoice[];
   expectedHours: number;
   original: JobEditOriginal;
 }
@@ -212,7 +217,10 @@ export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEd
   // Anytime is now a FIXED 8:00 AM - 11:00 PM window: a legacy custom window
   // (e.g. the old 2:05 AM - 2:55 AM) is rewritten to the fixed one, which caps
   // expected hours at 15 and can no longer surface values like 20 h.
-  let time = deriveSlotOf({ scheduledAt, segment }) as TimeChoice | null;
+  const firstServerCode = milestones[0]?.time_slots?.[0]?.code;
+  let time = (firstServerCode
+    ? { kind: 'slot', key: firstServerCode }
+    : deriveSlotOf({ scheduledAt, segment })) as TimeChoice | null;
   if (time?.kind === 'anytime' && (time.start.hour !== 8 || time.start.minute !== 0 || time.end.hour !== 23 || time.end.minute !== 0)) {
     time = { kind: 'anytime', start: { hour: 8, minute: 0 }, end: { hour: 23, minute: 0 } };
   }
@@ -227,6 +235,9 @@ export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEd
     // A multi-day job has no single day to edit, so nothing is preselected.
     dateKey: isMultiDay ? null : local ? localDateKey(local.day) : null,
     time: isMultiDay ? null : time,
+    times: isMultiDay
+      ? []
+      : (milestones[0]?.time_slots ?? []).map((slot) => ({ kind: 'slot', key: slot.code })),
     // The 11 PM rule caps the value for a single day; a multi-day job keeps the
     // stored number untouched (the screen never edits it).
     expectedHours:
@@ -247,6 +258,7 @@ export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEd
             { am: 'AM', pm: 'PM' }
           )
         : null,
+      timeCodes: (milestones[0]?.time_slots ?? []).map((slot) => slot.code),
       milestones: milestones.length,
       isMultiDay,
     },
@@ -255,9 +267,14 @@ export function jobToEditValues(job: JobResponse, now: Date = new Date()): JobEd
 
 /** The 11 PM ceiling for the form's chosen window (null while none is chosen). */
 export function editHoursCap(values: JobEditValues): number | null {
-  const win = values.time ? selectionWindow(values.time) : null;
-  if (!win) return null;
-  return maxHoursForStart(minutesOf(win.start));
+  const choices = values.times && values.times.length > 0 ? values.times : values.time ? [values.time] : [];
+  const starts = choices
+    .map((choice) => selectionWindow(choice))
+    .filter((win): win is { start: { hour: number; minute: number }; end: { hour: number; minute: number } } => win !== null)
+    .map((win) => minutesOf(win.start))
+    .filter((minutes): minutes is number => minutes !== null);
+  if (starts.length === 0) return null;
+  return maxHoursForStart(Math.max(...starts));
 }
 
 /* ------------------------------------------------------------------ *
@@ -284,6 +301,10 @@ export function composeEditDescription(
         ? body
         : null;
   }
+  // New jobs already carry the allowed slots structurally, so the old
+  // description line is not rebuilt (and a multi-slot task is never reduced to
+  // its first slot in prose).
+  if (values.original.timeCodes.length > 0) return body.length > 0 ? body : null;
   const win = values.time ? selectionWindow(values.time) : null;
   const line =
     win && minutesOf(win.start) !== null && minutesOf(win.end) !== null
@@ -432,24 +453,22 @@ export function buildUpdateJobRequest(
 
   if (!values.original.isMultiDay) {
     const time = effectiveTime(values);
-    const win = time ? selectionWindow(time) : null;
     const dateKey = effectiveDateKey(values);
-    const startMinutes = win ? minutesOf(win.start) : null;
-    const scheduledAt =
-      dateKey !== null && startMinutes !== null ? buildScheduledAtIso(dateKey, startMinutes) : null;
-
-    // A window that maps back to the same LOCAL day + start sends nothing: the
-    // instant would be identical anyway, and an untouched form must not rewrite
-    // a schedule it never touched.
+    const choices = values.times && values.times.length > 0 ? values.times : time ? [time] : [];
+    const codes = codesOfChoices(choices);
+    const sameCodes =
+      codes.length === values.original.timeCodes.length &&
+      codes.every((code) => values.original.timeCodes.includes(code));
     const unchanged =
-      values.original.minutes !== null &&
-      values.original.dateKey !== null &&
-      startMinutes === values.original.minutes &&
-      dateKey === values.original.dateKey;
-    if (!unchanged && scheduledAt) body.scheduled_at = scheduledAt;
-
-    if (values.expectedHours !== values.original.expectedHours) {
-      body.expected_hours = values.expectedHours;
+      dateKey === values.original.dateKey &&
+      sameCodes &&
+      values.expectedHours === values.original.expectedHours;
+    if (!unchanged && dateKey && codes.length > 0) {
+      body.milestones = [{
+        date: dateKey,
+        time_slots: codes,
+        expected_hours: values.expectedHours,
+      }];
     }
   }
 

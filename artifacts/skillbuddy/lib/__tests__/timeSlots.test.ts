@@ -23,10 +23,14 @@ import {
   parseScheduleSegments,
   pilotTimesForSlot,
   segmentsForTasks,
+  slotAvailableToday,
   slotByKey,
   slotContaining,
   stripScheduleBlock,
 } from '../timeSlots';
+import { seedClientSlots } from './slotFixtures';
+
+seedClientSlots();
 
 declare const console: { log: (msg: string) => void };
 declare function require(name: string): any;
@@ -66,14 +70,29 @@ eq(
   CLIENT_SLOTS.map((entry) => formatWindowLabel(entry.start, entry.end, MERIDIEM)).join(' | '),
   '8:00 AM - 11:00 AM | 11:00 AM - 2:00 PM | 2:00 PM - 5:00 PM | 5:00 PM - 8:00 PM | 8:00 PM - 11:00 PM'
 );
-eq('a slot is found by key', slotByKey('slot_14_17')?.startMinutes, 840);
+eq('a slot is found by key', slotByKey('AFTERNOON')?.startMinutes, 840);
+eq(
+  'a started slot with a future arrival mark stays bookable',
+  slotAvailableToday({ kind: 'slot', key: 'MORNING' }, new Date(2026, 10, 14), new Date(2026, 10, 14, 9, 0)),
+  true
+);
+eq(
+  'a slot with no future arrival mark is closed',
+  slotAvailableToday({ kind: 'slot', key: 'MORNING' }, new Date(2026, 10, 14), new Date(2026, 10, 14, 10, 45)),
+  false
+);
+eq(
+  'the same slot is always open on a future day',
+  slotAvailableToday({ kind: 'slot', key: 'MORNING' }, new Date(2026, 10, 15), new Date(2026, 10, 14, 10, 45)),
+  true
+);
 eq('an unknown key is null', slotByKey('slot_9_10'), null);
 
 // Containment: the window's start is inside it, its end is not.
-eq('8:00 AM is in the first window', slotContaining(480)?.key, 'slot_8_11');
-eq('9:30 AM is in the first window', slotContaining(570)?.key, 'slot_8_11');
-eq('11:00 AM is already the second window', slotContaining(660)?.key, 'slot_11_14');
-eq('10:30 PM is in the last window', slotContaining(1350)?.key, 'slot_20_23');
+eq('8:00 AM is in the first window', slotContaining(480)?.key, 'MORNING');
+eq('9:30 AM is in the first window', slotContaining(570)?.key, 'MORNING');
+eq('11:00 AM is already the second window', slotContaining(660)?.key, 'MIDDAY');
+eq('10:30 PM is in the last window', slotContaining(1350)?.key, 'NIGHT');
 eq('11:00 PM belongs to no window', slotContaining(1380), null);
 
 /* ── The pilot's half-hour marks ─────────────────────────────────────────── */const marks = (key: string) =>
@@ -84,27 +103,27 @@ eq('11:00 PM belongs to no window', slotContaining(1380), null);
 // the mark before the END, and slot 2 labels each option with its own AM/PM.
 eq(
   'slot 1 (8-11 AM) offers 8:00 to 10:30',
-  marks('slot_8_11'),
+  marks('MORNING'),
   '8:00 AM, 8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM'
 );
 eq(
   'slot 2 (11 AM-2 PM) offers 11:00 to 1:30 and crosses noon correctly',
-  marks('slot_11_14'),
+  marks('MIDDAY'),
   '11:00 AM, 11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM'
 );
 eq(
   'slot 3 (2-5 PM) offers 2:00 to 4:30',
-  marks('slot_14_17'),
+  marks('AFTERNOON'),
   '2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, 4:00 PM, 4:30 PM'
 );
 eq(
   'slot 4 (5-8 PM) offers 5:00 to 7:30',
-  marks('slot_17_20'),
+  marks('EVENING'),
   '5:00 PM, 5:30 PM, 6:00 PM, 6:30 PM, 7:00 PM, 7:30 PM'
 );
 eq(
   'slot 5 (8-11 PM) offers 8:00 to 10:30',
-  marks('slot_20_23'),
+  marks('NIGHT'),
   '8:00 PM, 8:30 PM, 9:00 PM, 9:30 PM, 10:00 PM, 10:30 PM'
 );
 
@@ -118,12 +137,14 @@ for (const entry of CLIENT_SLOTS) {
 }
 // A window that opens between marks starts at the NEXT mark (9:20 → 9:30).
 const offMark = pilotTimesForSlot({
-  key: 'anytime',
-  startMinutes: 9 * 60 + 20,
-  endMinutes: 11 * 60,
-  start: { hour: 9, minute: 20 },
-  end: { hour: 11, minute: 0 },
-});
+      key: 'anytime',
+    startMinutes: 9 * 60 + 20,
+    endMinutes: 11 * 60,
+    start: { hour: 9, minute: 20 },
+    end: { hour: 11, minute: 0 },
+    arrivalMinutes: [],
+    label: '',
+  });
 eq(
   'a 9:20 start opens at 9:30',
   offMark.map((clock) => formatTimeLabel(clock, MERIDIEM)).join(', '),
@@ -139,6 +160,8 @@ eq(
     endMinutes: 10 * 60 + 45,
     start: { hour: 10, minute: 0 },
     end: { hour: 10, minute: 45 },
+    arrivalMinutes: [],
+    label: '',
   }).map((clock) => minutesOf(clock)).join(','),
   '600,630'
 );
@@ -240,7 +263,7 @@ eq(
 // An exact match with a client window is that slot.
 const asSlot = deriveSlotOf({ scheduledAt: iso, segment: segments[0] });
 eq('the stored segment wins', asSlot?.kind, 'slot');
-eq('and names the right window', asSlot?.kind === 'slot' ? asSlot.key : null, 'slot_8_11');
+eq('and names the right window', asSlot?.kind === 'slot' ? asSlot.key : null, 'MORNING');
 
 // A custom Anytime window stays custom instead of being rewritten.
 const custom = deriveSlotOf({
@@ -258,22 +281,22 @@ eq(
 
 // No line: the local start decides.
 const fromStart = deriveSlotOf({ scheduledAt: iso });
-eq('an 8:00 AM start is the first window', fromStart?.kind === 'slot' ? fromStart.key : null, 'slot_8_11');
+eq('an 8:00 AM start is the first window', fromStart?.kind === 'slot' ? fromStart.key : null, 'MORNING');
 const pilotMark = deriveSlotOf({ scheduledAt: new Date(2026, 9, 22, 9, 30).toISOString() });
-eq('a pilot’s 9:30 mark is still 8-11 AM', pilotMark?.kind === 'slot' ? pilotMark.key : null, 'slot_8_11');
+eq('a pilot’s 9:30 mark is still 8-11 AM', pilotMark?.kind === 'slot' ? pilotMark.key : null, 'MORNING');
 // A start INSIDE a window belongs to that window (it is the same booking).
 const insideWindow = deriveSlotOf({ scheduledAt: new Date(2026, 9, 22, 12, 15).toISOString() });
 eq(
   'a start inside 11-2 belongs to it',
   insideWindow?.kind === 'slot' ? insideWindow.key : null,
-  'slot_11_14'
+  'MIDDAY'
 );
 // A start before every window falls forward to the nearest one.
 const beforeAll = deriveSlotOf({ scheduledAt: new Date(2026, 9, 22, 7, 0).toISOString() });
 eq(
   'a 7:00 AM start maps to 8-11',
   beforeAll?.kind === 'slot' ? beforeAll.key : null,
-  'slot_8_11'
+  'MORNING'
 );
 const missing = deriveSlotOf({ scheduledAt: null });
 eq('no instant means nothing to preselect', missing, null);

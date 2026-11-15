@@ -95,7 +95,7 @@ const request = buildCreateJobRequest({
   preferredTimeLine: 'Preferred time: 8:00 AM - 11:00 AM',
   requestType: 'regular',
   bookingType: 'one_time',
-  scheduledAtIso: '2026-10-21T08:00:00.000Z',
+  milestones: [{ date: '2026-10-21', timeSlots: ['MORNING'], expectedHours: 1 }],
   expectedHours: 1,
   countryId: 1,
   countyId: 2,

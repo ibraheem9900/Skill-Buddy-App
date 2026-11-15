@@ -12,7 +12,16 @@ import { createRequestSequencer } from '@/lib/jobBidsLive';
 import { clearNearbyJobGone, markNearbyJobGone, resetNearbyAvailability } from '@/lib/nearbyAvailability';
 import { consumeNearbyStale, resetNearbyStale } from '@/lib/nearbyStale';
 import {
+  createDetailsLoader,
+  markNearbyDetailsFailed,
+  mergeNearbyDetails,
+  type NearbyJobDetail,
+  type LatLngLike,
+} from '@/lib/nearbyDetails';
+import { parseCoordinateValue } from '@/lib/coordinates';
+import {
   NEARBY_DEFAULT_FILTERS,
+  NEARBY_LIMIT_MAX,
   NEARBY_POLL_MS,
   buildNearbyJobsQuery,
   classifyNearbyFailure,
@@ -22,7 +31,7 @@ import {
   isNewNearbyJob,
   nearbyVisibilityState,
   nextNearbyExpiryAt,
-  parseNearbyJob,
+  parseNearbyLocation,
   removeNearbyJob,
   shouldPollNearbyJobs,
   upsertNearbyJob,
@@ -104,9 +113,30 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
    * nudge, and the write happened while this hook was out of focus.
    */
   const [skillsAuditKey, setSkillsAuditKey] = useState(0);
+  /**
+   * The provider's own API-provided reference point and radius. The radius is
+   * what the header says ("within N km"); the point is the fallback for a
+   * computed distance when the location feed sends coordinates but no
+   * distance_km.
+   */
+  const [radiusKm, setRadiusKm] = useState<number | null>(null);
+  const metaRef = useRef<{ radiusKm: number | null; point: LatLngLike | null }>({
+    radiusKm: null,
+    point: null,
+  });
+  const metaReadRef = useRef(false);
 
   const sequencer = useRef(createRequestSequencer()).current;
   const jobsRef = useRef<NearbyJob[]>([]);
+  /** One details loader per hook instance: TTL cache + in-flight de-dupe. */
+  const detailsLoader = useRef(
+    createDetailsLoader({
+      fetchJob: async (id: number) =>
+        (await authApi.getJob(id)).data as unknown as NearbyJobDetail,
+      concurrency: 4,
+      ttlMs: 60_000,
+    })
+  ).current;
   const focusedRef = useRef(false);
   const activeRef = useRef(AppState.currentState === 'active');
   const enabledRef = useRef(enabled);
@@ -124,6 +154,78 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
   }, []);
 
   /* --------------------------------------------------------------- loading */
+
+  /**
+   * Read the pilot's radius and reference point ONCE from the APIs that own
+   * them. The server decides feed membership with the same radius, so the
+   * header never hardcodes one; a failed read leaves it hidden.
+   */
+  const loadMeta = useCallback(async () => {
+    if (metaReadRef.current) return;
+    metaReadRef.current = true;
+    const [profile, address] = await Promise.allSettled([
+      authApi.getProviderProfile(),
+      authApi.getAddresses(),
+    ]);
+    if (!mountedRef.current) return;
+    const profileData = profile.status === 'fulfilled' ? profile.value.data : null;
+    const rawRadius = profileData?.effective_service_radius_km ?? profileData?.service_radius;
+    const radius = typeof rawRadius === 'number' && Number.isFinite(rawRadius) ? rawRadius : null;
+    const addressData = address.status === 'fulfilled' ? (address.value.data as any) : null;
+    const source = Array.isArray(addressData) ? addressData[0] : addressData;
+    const latitude = parseCoordinateValue(source?.latitude, 'lat');
+    const longitude = parseCoordinateValue(source?.longitude, 'lng');
+    const point = latitude !== null && longitude !== null ? { latitude, longitude } : null;
+    metaRef.current = { radiusKm: radius, point };
+    setRadiusKm(radius);
+  }, []);
+
+  /** Fetch and merge details for one location item (list, event or retry). */
+  const enrichOne = useCallback(
+    async (item: NearbyJob): Promise<NearbyJob | null> => {
+      try {
+        const detail = await detailsLoader.get(item.job_id);
+        return mergeNearbyDetails(item, detail, {
+          providerPoint: metaRef.current.point,
+        });
+      } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } } | null)?.response?.status;
+        // A 404/410 means the job is gone for this pilot: drop it, never leave a
+        // card that opens a dead details screen.
+        if (status === 404 || status === 410) return null;
+        return markNearbyDetailsFailed(item);
+      }
+    },
+    [detailsLoader]
+  );
+
+  /**
+   * Merge a whole location list with details. The loader caps parallelism at 4
+   * and de-duplicates ids, so a 50-job feed never opens 50 sockets at once.
+   * A closed job is dropped; a failed detail keeps its card with a retry state.
+   */
+  const enrichList = useCallback(
+    async (items: NearbyJob[]): Promise<NearbyJob[]> => {
+      const details = await detailsLoader.getMany(items.map((item) => item.job_id));
+      const merged: NearbyJob[] = [];
+      for (const item of items) {
+        const detail = details.get(item.job_id);
+        if (!detail) {
+          // The loader reports a failed id by omitting it; enrichOne already
+          // decided a 404 is gone. A transient failure keeps the card with its
+          // own retry button.
+          merged.push(markNearbyDetailsFailed(item));
+          continue;
+        }
+        const next = mergeNearbyDetails(item, detail, {
+          providerPoint: metaRef.current.point,
+        });
+        if (next) merged.push(next);
+      }
+      return merged;
+    },
+    [detailsLoader]
+  );
 
   /**
    * Read the reason behind a visibility 400 from the three read-only sources the
@@ -160,20 +262,30 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
       if (mode === 'refresh') setRefreshing(true);
 
       try {
-        const { data } = await authApi.getNearbyJobs(buildNearbyJobsQuery());
+        const [{ data }] = await Promise.all([
+          authApi.getNearbyJobs(buildNearbyJobsQuery({ limit: NEARBY_LIMIT_MAX })),
+          loadMeta(),
+        ]);
         if (!sequencer.isCurrent(seq) || !mountedRef.current) return;
-        const list = dedupeNearbyJobs(
-          hideExpiredNearbyJobs(Array.isArray(data) ? data : [], Date.now())
-        );
+        const locations = (Array.isArray(data) ? data : [])
+          .map(parseNearbyLocation)
+          .filter((item): item is NearbyJob => item !== null);
+        const listed = dedupeNearbyJobs(hideExpiredNearbyJobs(locations, Date.now()));
         // A job that IS in a fresh list is available again: forget the verdict
         // an earlier `job.nearby_closed` left behind.
-        for (const job of list) clearNearbyJobGone(job.job_id);
-        jobsRef.current = list;
-        setJobs(list);
+        for (const job of listed) clearNearbyJobGone(job.job_id);
+        // Show the location rows immediately, then replace them with the
+        // details-backed rows (and drop jobs whose details say bidding closed).
+        jobsRef.current = listed;
+        setJobs(listed);
         setStatus('ready');
         setInlineError(false);
         setServerMessage(null);
         setVisibility(null);
+        const detailed = await enrichList(listed);
+        if (!sequencer.isCurrent(seq) || !mountedRef.current) return;
+        jobsRef.current = detailed;
+        setJobs(detailed);
       } catch (error: unknown) {
         if (!sequencer.isCurrent(seq) || !mountedRef.current) return;
         const response = (error as { response?: { status?: number; data?: unknown } } | null)?.response;
@@ -205,7 +317,7 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
         if (sequencer.isCurrent(seq) && mountedRef.current) setRefreshing(false);
       }
     },
-    [loadCause, sequencer]
+    [enrichList, loadCause, loadMeta, sequencer]
   );
 
   /* ----------------------------------------------------------------- focus */
@@ -290,22 +402,30 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
 
   useRealtimeEvent('job.nearby_opened', (event) => {
     if (!enabledRef.current) return;
-    const item = parseNearbyJob((event as { data?: unknown }).data);
+    const item = parseNearbyLocation((event as { data?: unknown }).data);
     if (!item) return;
     const wasNew = isNewNearbyJob(jobsRef.current, item);
     clearNearbyJobGone(item.job_id);
-    const next = upsertNearbyJob(
-      hideExpiredNearbyJobs(jobsRef.current, Date.now()),
-      item
-    ).jobs;
-    jobsRef.current = next;
-    setJobs(next);
-    // An event proves the provider IS visible again: re-read the list rather
-    // than leaving an onboarding card in front of real jobs.
-    if (status === 'onboarding') void load('quiet');
-    // The notice only fires for a job that was not already listed, while the
-    // feed is on screen, and is silently dropped otherwise.
-    if (wasNew && focusedRef.current) setNotice(item);
+    // The event is only a location hint: fetch the details before inserting so
+    // a closed or unreadable job never appears. A details failure keeps the
+    // location row (when it has a title) with its own retry state.
+    void (async () => {
+      const next = await enrichOne(item);
+      if (!mountedRef.current || !enabledRef.current) return;
+      if (!next) return;
+      const list = upsertNearbyJob(
+        hideExpiredNearbyJobs(jobsRef.current, Date.now()),
+        next
+      ).jobs;
+      jobsRef.current = list;
+      setJobs(list);
+      // An event proves the provider IS visible again: re-read the list rather
+      // than leaving an onboarding card in front of real jobs.
+      if (status === 'onboarding') void load('quiet');
+      // The notice only fires for a job that was not already listed, while the
+      // feed is on screen, and is silently dropped otherwise.
+      if (wasNew && next.title.trim() && focusedRef.current) setNotice(next);
+    })();
   });
 
   useRealtimeEvent('job.nearby_closed', (event) => {
@@ -346,6 +466,7 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
     if (!user) {
       resetNearbyAvailability();
       resetNearbyStale();
+      detailsLoader.invalidate();
     }
     return () => {
       resetNearbyAvailability();
@@ -366,6 +487,28 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
   const refresh = useCallback(() => load('refresh'), [load]);
   const retry = useCallback(() => load('initial'), [load]);
 
+  /** Per-card retry: drop the cached failure and merge this one job again. */
+  const retryJob = useCallback(
+    async (jobId: number) => {
+      const current = jobsRef.current.find((job) => job.job_id === jobId);
+      if (!current) return;
+      detailsLoader.invalidate(jobId);
+      const next = await enrichOne(current);
+      if (!mountedRef.current) return;
+      if (!next) {
+        markNearbyJobGone(jobId);
+        const list = removeNearbyJob(jobsRef.current, jobId);
+        jobsRef.current = list;
+        setJobs(list);
+        return;
+      }
+      const list = upsertNearbyJob(jobsRef.current, next).jobs;
+      jobsRef.current = list;
+      setJobs(list);
+    },
+    [detailsLoader, enrichOne]
+  );
+
   return {
     status,
     /** Already filtered by the All/Urgent/Regular chips and "Only my skills". */
@@ -384,6 +527,10 @@ export function useNearbyJobs({ enabled = true }: Options = {}) {
     /** `job.nearby_opened` for a job that was not listed: show the notice. */
     notice,
     dismissNotice: () => setNotice(null),
+    /** The pilot's API-provided radius, or null when the API did not expose it. */
+    radiusKm,
+    /** Retry the details call for one card without disturbing the feed. */
+    retryJob,
     /** Is the socket carrying this feed? False → the 20s polling fallback runs. */
     live: socketStatus === 'open',
     socketStatus,

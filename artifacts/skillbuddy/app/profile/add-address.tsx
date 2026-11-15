@@ -18,6 +18,7 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
+import BottomSheet from '@/components/BottomSheet';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import useAddresses from '@/hooks/useAddresses';
 import useCountries from '@/hooks/useCountries';
@@ -467,15 +468,13 @@ export default function AddAddressScreen() {
     const titleKey = pickerOpen === 'country' ? 'addr_c_country' : pickerOpen === 'county' ? 'addr_c_county' : 'addr_c_city';
 
     return (
-      <Modal visible transparent animationType="fade" onRequestClose={() => setPickerOpen(null)}>
-        <Pressable style={[styles.modalBackdrop, { backgroundColor: c.overlay }]} onPress={() => setPickerOpen(null)}>
-          <Pressable style={[styles.modalSheet, { backgroundColor: c.background, borderColor: c.border }]}>
-            <View style={[styles.modalHead, { borderBottomColor: c.border }]}>
-              <Text style={[styles.modalTitle, { color: c.text }]}>{t(titleKey)}</Text>
-              <TouchableOpacity onPress={() => setPickerOpen(null)} hitSlop={8}>
-                <Feather name="x" size={20} color={c.mutedForeground} />
-              </TouchableOpacity>
-            </View>
+      <BottomSheet
+        visible
+        onClose={() => setPickerOpen(null)}
+        title={t(titleKey)}
+        height={560}
+      >
+        <View style={{ flex: 1 }}>
             {isCountry ? (
               <View style={[styles.searchRow, { borderBottomColor: c.border }]}>
                 <Feather name="search" size={16} color={c.mutedForeground} />
@@ -531,9 +530,8 @@ export default function AddAddressScreen() {
                 }
               />
             )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+        </View>
+      </BottomSheet>
     );
   };
 

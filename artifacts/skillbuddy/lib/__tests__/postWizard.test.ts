@@ -40,6 +40,9 @@ import {
   type DaySelection,
   type TaskDraft,
 } from '../postWizard';
+import { seedClientSlots } from './slotFixtures';
+
+seedClientSlots();
 
 declare const console: { log: (msg: string) => void };
 
@@ -63,10 +66,10 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 // Tuesday 20 October 2026, 14:00 local (matching the other wizard tests).
 const NOW = new Date(2026, 9, 20, 14, 0, 0, 0);
-const SLOT_8_11: TimeChoice = { kind: 'slot', key: 'slot_8_11' };
-const SLOT_11_14: TimeChoice = { kind: 'slot', key: 'slot_11_14' };
-const SLOT_17_20: TimeChoice = { kind: 'slot', key: 'slot_17_20' };
-const SLOT_20_23: TimeChoice = { kind: 'slot', key: 'slot_20_23' };
+const SLOT_8_11: TimeChoice = { kind: 'slot', key: 'MORNING' };
+const SLOT_11_14: TimeChoice = { kind: 'slot', key: 'MIDDAY' };
+const SLOT_17_20: TimeChoice = { kind: 'slot', key: 'EVENING' };
+const SLOT_20_23: TimeChoice = { kind: 'slot', key: 'NIGHT' };
 const ANYTIME_9_12: TimeChoice = {
   kind: 'anytime',
   start: { hour: 9, minute: 0 },
@@ -185,7 +188,7 @@ eq(
   tasksForDay(slotTwo.tasks, '2026-10-28')[1].time?.kind === 'slot'
     ? (tasksForDay(slotTwo.tasks, '2026-10-28')[1].time as { key: string }).key
     : '',
-  'slot_11_14'
+  'MIDDAY'
 );
 eq('the other day keeps its prompt', tasksForDay(slotTwo.tasks, '2026-10-29').length, 1);
 eq('two distinct dates are counted once each', distinctDayCount(slotTwo.tasks), 2);
@@ -206,11 +209,11 @@ eq('the regular window is the survivor', tasksForDay(afterAnytime.tasks, '2026-1
 
 // The cap is MAX_SLOTS_PER_DAY (5) per day.
 const FIVE: TimeChoice[] = [
-  { kind: 'slot', key: 'slot_8_11' },
-  { kind: 'slot', key: 'slot_11_14' },
-  { kind: 'slot', key: 'slot_14_17' },
-  { kind: 'slot', key: 'slot_17_20' },
-  { kind: 'slot', key: 'slot_20_23' },
+  { kind: 'slot', key: 'MORNING' },
+  { kind: 'slot', key: 'MIDDAY' },
+  { kind: 'slot', key: 'AFTERNOON' },
+  { kind: 'slot', key: 'EVENING' },
+  { kind: 'slot', key: 'NIGHT' },
 ];
 let capped = syncTasks([], [day(28)]);
 for (const slot of FIVE) capped = toggleTaskSlot(capped, day28, slot).tasks;
@@ -268,7 +271,7 @@ eq('hours never fall below one', hours[0].hours, 1);
 
 // Moving the time later lowers the hours and reports it.
 const atEight: TaskDraft[] = [
-  { key: keyFor(22, SLOT_8_11), dayKey: '2026-10-22', day: day(22), time: SLOT_8_11, hours: 12 },
+  { key: keyFor(22, SLOT_8_11), dayKey: '2026-10-22', day: day(22), time: SLOT_8_11, hours: 12, timeSlots: [] },
 ];
 const moved = applyTaskTime(atEight, atEight[0].key, SLOT_17_20);
 eq('the new ceiling is applied', moved.tasks[0].hours, 6);
@@ -286,33 +289,27 @@ eq('editing onto an existing window is a no-op', duplicate.tasks.length, 2);
 
 /* ── Deselecting a time and the Anytime window ───────────────────────────── */
 
-eq('a second tap clears the slot', toggleSlot(SLOT_8_11, 'slot_8_11'), null);
-eq('another slot replaces it', toggleSlot(SLOT_8_11, 'slot_17_20')?.kind, 'slot');
+eq('a second tap clears the slot', toggleSlot(SLOT_8_11, 'MORNING'), null);
+eq('another slot replaces it', toggleSlot(SLOT_8_11, 'EVENING')?.kind, 'slot');
 eq(
   'an Anytime window becomes the choice',
-  toggleSlot(ANYTIME_9_12, 'slot_8_11')?.kind,
+  toggleSlot(ANYTIME_9_12, 'MORNING')?.kind,
   'slot'
 );
 
 /* ── Payload: one milestone per task, with its own hours ─────────────────── */
 
 const payloadTasks: TaskDraft[] = [
-  { key: keyFor(20, SLOT_8_11), dayKey: '2026-10-20', day: day(20), time: SLOT_8_11, hours: 2 },
-  { key: keyFor(22, SLOT_17_20), dayKey: '2026-10-22', day: day(22), time: SLOT_17_20, hours: 3 },
-  { key: keyFor(24, null), dayKey: '2026-10-24', day: day(24), time: null, hours: 1 },
+  { key: keyFor(20, SLOT_8_11), dayKey: '2026-10-20', day: day(20), time: SLOT_8_11, hours: 2, timeSlots: ['MORNING'] },
+  { key: keyFor(22, SLOT_17_20), dayKey: '2026-10-22', day: day(22), time: SLOT_17_20, hours: 3, timeSlots: ['EVENING'] },
+  { key: keyFor(24, null), dayKey: '2026-10-24', day: day(24), time: null, hours: 1, timeSlots: [] },
 ];
 const milestones = buildTaskMilestones(payloadTasks);
 eq('a task without a time is not sent', milestones.length, 2);
-eq(
-  'each task uses its own window start',
-  milestones[0].scheduled_at,
-  new Date(2026, 9, 20, 8, 0, 0, 0).toISOString()
-);
-eq(
-  'the second task keeps its own start',
-  milestones[1].scheduled_at,
-  new Date(2026, 9, 22, 17, 0, 0, 0).toISOString()
-);
+eq('the first task carries its own day', milestones[0].date, '2026-10-20');
+eq('the first task carries its own slot', milestones[0].time_slots.join(','), 'MORNING');
+eq('the second task keeps its own day', milestones[1].date, '2026-10-22');
+eq('the second task keeps its own slot', milestones[1].time_slots.join(','), 'EVENING');
 eq('each task carries its own hours', milestones[0].expected_hours, 2);
 eq('the second task its own too', milestones[1].expected_hours, 3);
 
@@ -322,12 +319,13 @@ const sameDay = [
   { ...buildTask(day(28)), time: SLOT_17_20, key: keyFor(28, SLOT_17_20), hours: 3 },
 ];
 const sameDayMilestones = buildTaskMilestones(sameDay);
-eq('two windows on one date make two tasks', sameDayMilestones.length, 2);
+eq('two windows on one date make two milestones (one per task)', sameDayMilestones.length, 2);
 eq(
-  'with their own starts',
-  sameDayMilestones[0].scheduled_at !== sameDayMilestones[1].scheduled_at,
-  true
+  'with both allowed slots on that one task',
+  sameDayMilestones[0].time_slots.join(','),
+  'MORNING'
 );
+eq('first task has expected hours 2', sameDayMilestones[0].expected_hours, 2);
 
 /* ── Delete → renumbering and the empty state ───────────────────────────── */
 

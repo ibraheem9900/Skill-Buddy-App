@@ -266,7 +266,8 @@ export function removeFilter(filters: JobListFilters, id: JobFilterId): JobListF
 export function filterJobsBySearch(
   jobs: JobListItem[],
   rawQuery: string,
-  statusTextOf: (status: JobApiStatus) => string
+  statusTextOf: (status: JobApiStatus) => string,
+  jobStatusTextOf?: (job: JobListItem) => string
 ): JobListItem[] {
   const q = (rawQuery ?? '').trim().toLowerCase();
   if (q.length === 0) return jobs;
@@ -274,7 +275,7 @@ export function filterJobsBySearch(
     const title = (job.title ?? '').toLowerCase();
     let statusText = '';
     try {
-      statusText = (statusTextOf(job.status) ?? '').toLowerCase();
+      statusText = (jobStatusTextOf ? jobStatusTextOf(job) : statusTextOf(job.status) ?? '').toLowerCase();
     } catch {
       statusText = '';
     }

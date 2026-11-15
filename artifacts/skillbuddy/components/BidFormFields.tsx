@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import AmountStepper from '@/components/AmountStepper';
-import { BID_MESSAGE_MAX_CHARS } from '@/lib/bid';
+import { BID_MESSAGE_MAX_CHARS, BID_MIN_CENTS } from '@/lib/bid';
 import { formatCents, parseMoneyToCents } from '@/lib/money';
 
 /**
@@ -118,14 +118,14 @@ export default function BidFormFields({
   return (
     <>
       {/* Offered price — the final total the client pays, VAT included.
-          ONE amount control (round −/+ with press-and-hold, +€1/+€5/+€10, tap
-          to type) backed by INTEGER CENTS, so no long float can appear here
-          and both the Submit and Edit flows share the same rules. */}
+          ONE amount control (round −/+ in €5, +€5/+€10, tap to type) backed by
+          INTEGER CENTS, so no long float can appear here and both the Submit and
+          Edit flows share the same rules. */}
       <Text style={[styles.label, { color: c.text }]}>{t('jobd_bid_price_label')}</Text>
       <AmountStepper
         valueCents={parseMoneyToCents(price)}
-        onChange={(cents) => onPriceChange(formatCents(cents))}
-        minCents={100}
+        onChange={(cents) => onPriceChange(cents === null ? '' : formatCents(cents))}
+        minCents={BID_MIN_CENTS}
         maxCents={9_999_900}
         disabled={disabled}
         error={priceError}
@@ -134,6 +134,9 @@ export default function BidFormFields({
         increaseLabel={t('a11y_increase_amount')}
         placeholder={t('jobd_bid_price_ph')}
       />
+      <Text style={[styles.hint, { color: c.mutedForeground }]}>
+        {t('jobd_bid_price_multiple_hint')}
+      </Text>
       {priceExtra}
 
       {/* Time: the pilot's per-task arrival picker. The old ETA steppers only

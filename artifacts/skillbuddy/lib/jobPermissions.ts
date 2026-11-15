@@ -25,6 +25,7 @@
  */
 
 import type { JobResponse } from '@/types';
+import { resolveJobStatus } from '@/lib/jobStatus';
 
 export type JobActorRole = 'CLIENT' | 'PROVIDER' | null | undefined;
 
@@ -40,7 +41,10 @@ export interface JobPermissionJob
     | 'is_bidding_open'
     | 'status'
     | 'assigned_provider_id'
-  > {}
+  > {
+    bidding_ends_at?: string | null;
+    is_urgent?: boolean;
+  }
 
 export interface JobPermissions {
   /** The signed-in user owns this job AND is acting as the client. */
@@ -76,46 +80,78 @@ export function sameUserId(a: string | number | null | undefined, b: string | nu
   return left === right;
 }
 
+/**
+ * The whole matrix for one job, one signed-in user and one active role.
+ *
+ * `userIds` can contain the /users/me id AND the client-profile id: the two
+ * endpoints do not expose the same numeric id, and `job.client_id` may be
+ * either. Comparing only one of them is what hid every owner button.
+ */
+export function jobPermissionsForIds(
+  job: JobPermissionJob | null | undefined,
+  role: JobActorRole,
+  userIds: ReadonlyArray<string | number | null | undefined>
+): JobPermissions {
+  // Ownership is an id fact, not a mode. RoleContext restores the user's last
+  // chosen role per account, so an owner who used PILOT mode was losing every
+  // owner action when the guard started requiring `role === 'CLIENT'`.
+  const isOwner =
+    !!job && userIds.some((id) => sameUserId(job.client_id, id));
+  // The owner never gets the provider surface, even while the role switch is on
+  // PROVIDER: no "Place a Bid" / pilot view on their own job.
+  const isProviderViewer = role === 'PROVIDER' && !isOwner;
+  const owner = isOwner && !!job;
+
+  const status = job?.status;
+  const resolved = resolveJobStatus(job);
+  const open = status === 'OPEN' && resolved.biddingOpen;
+  const noProvider =
+    job?.assigned_provider_id === null || job?.assigned_provider_id === undefined;
+  const biddingExpired = status === 'OPEN' && !resolved.biddingOpen;
+  const liveStatus = status !== 'CANCELLED' && status !== 'CANCELLED_BY_CLIENT' && status !== 'CANCELLED_BY_PROVIDER' && status !== 'COMPLETED';
+
+  // A draft has no bidding window: the client cannot view bids yet and a pilot
+  // cannot bid. Everything else still defers to the backend flag when it is
+  // present, but an OPEN owner job is never left without its basic actions just
+  // because a list/detail response omitted a derived flag.
+  const notDraft = !!job && status !== 'DRAFT';
+  const canPlaceBid =
+    isProviderViewer &&
+    !!job &&
+    resolved.biddingOpen &&
+    noProvider;
+
+  return {
+    isOwner,
+    isProviderViewer,
+    canEditJob: owner && (status === 'DRAFT' || (open && job!.is_editable !== false)),
+    canEditAddress: owner && (status === 'DRAFT' || (open && job!.is_editable !== false)),
+    canRestartTimer:
+      owner && noProvider && (job!.can_restart_timer === true || biddingExpired),
+    canConvertToRegular:
+      owner && (job!.can_convert_to_regular === true || (job!.is_urgent === true && open)),
+    canConvertToUrgent:
+      owner &&
+      noProvider &&
+      job!.is_urgent !== true &&
+      open,
+    canCancelJob: owner && (job!.is_cancellable === true || liveStatus),
+    canViewBids: owner && notDraft,
+    canAssignProvider: owner && notDraft,
+    canConfirmPayment: owner && status === 'PAYMENT_PENDING',
+    canRepost: owner,
+    canPlaceBid,
+    canViewOwnBid: isProviderViewer && !!job && notDraft && !canPlaceBid,
+  };
+}
+
 /** The whole matrix for one job, one signed-in user and one active role. */
 export function jobPermissions(
   job: JobPermissionJob | null | undefined,
   role: JobActorRole,
   userId: string | number | null | undefined
 ): JobPermissions {
-  // Ownership is an id fact, not a mode. RoleContext restores the user's last
-  // chosen role per account, so an owner who used PILOT mode was losing every
-  // owner action when the guard started requiring `role === 'CLIENT'`.
-  const isOwner = !!job && sameUserId(job.client_id, userId);
-  // The owner never gets the provider surface, even while the role switch is on
-  // PROVIDER: no "Place a Bid" / pilot view on their own job.
-  const isProviderViewer = role === 'PROVIDER' && !isOwner;
-  const owner = isOwner && !!job;
-
-  // A draft has no bidding window: the client cannot view bids yet and a pilot
-  // cannot bid. Everything else defers to the backend's own flags.
-  const notDraft = !!job && job.status !== 'DRAFT';
-  const canPlaceBid =
-    isProviderViewer &&
-    !!job &&
-    job.is_bidding_open === true &&
-    (job.assigned_provider_id === null || job.assigned_provider_id === undefined);
-
-  return {
-    isOwner,
-    isProviderViewer,
-    canEditJob: owner && job!.is_editable === true,
-    canEditAddress: owner && job!.is_editable === true,
-    canRestartTimer: owner && job!.can_restart_timer === true,
-    canConvertToRegular: owner && job!.can_convert_to_regular === true,
-    canConvertToUrgent: owner && job!.can_convert_to_urgent === true,
-    canCancelJob: owner && job!.is_cancellable === true,
-    canViewBids: owner && notDraft,
-    canAssignProvider: owner && notDraft,
-    canConfirmPayment: owner && job?.status === 'PAYMENT_PENDING',
-    canRepost: owner,
-    canPlaceBid,
-    canViewOwnBid: isProviderViewer && !!job && notDraft && !canPlaceBid,
-  };
+  return jobPermissionsForIds(job, role, [userId]);
 }
 
 /** Every action id the owner may run, from the matrix (never from the role alone). */

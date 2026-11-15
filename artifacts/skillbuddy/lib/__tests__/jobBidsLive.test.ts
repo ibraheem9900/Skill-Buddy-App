@@ -199,12 +199,12 @@ const created = bidCreatedNoticeText(
   { bid_id: 41, job_id: 77, provider_id: 9, offered_price: '25.50', eta_minutes: 45, total_score: 80 },
   'en'
 );
-eq('the toast shows the locale price (en)', created?.price, '€25.50');
+eq('the toast shows the whole-euro locale price (en)', created?.price, '€26');
 eq('the toast carries the bid id', created?.bidId, 41);
 eq('45 minutes reads as minutes', JSON.stringify(created?.eta), JSON.stringify({ kind: 'minutes', minutes: 45 }));
 
 const createdDe = bidCreatedNoticeText({ bid_id: 42, offered_price: '1250.00', eta_minutes: 90 }, 'de');
-eq('the toast is localised (de)', createdDe?.price, '1.250,00 €');
+eq('the toast is localised without decimals (de)', createdDe?.price, '1.250 €');
 eq('90 minutes reads as hours + minutes', JSON.stringify(createdDe?.eta), JSON.stringify({ kind: 'hours', hours: 1, minutes: 30 }));
 eq(
   'an out-of-range ETA is dropped rather than printed (schema max 24 h)',

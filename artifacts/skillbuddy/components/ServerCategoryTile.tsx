@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
+import { useLanguage } from '@/context/LanguageContext';
 import RemoteImage from '@/components/RemoteImage';
 import type { CategoryResponse } from '@/types';
 
@@ -19,13 +20,17 @@ import type { CategoryResponse } from '@/types';
 export default function ServerCategoryTile({ category }: { category: CategoryResponse }) {
   const router = useRouter();
   const { colors: c } = useTheme();
+  const { tCat } = useLanguage();
+  // Known category ids have app translations; an unknown server category keeps
+  // its own name as the documented English fallback.
+  const label = tCat(String(category.id)) || category.name;
 
   return (
     <TouchableOpacity
       style={styles.tile}
       activeOpacity={0.85}
       onPress={() => router.push(`/category/${category.id}` as any)}
-      accessibilityLabel={category.description ? `${category.name}. ${category.description}` : category.name}
+      accessibilityLabel={category.description ? `${label}. ${category.description}` : label}
     >
       <View style={[styles.tileCircle, { backgroundColor: c.muted }]}>
         <RemoteImage
@@ -35,11 +40,11 @@ export default function ServerCategoryTile({ category }: { category: CategoryRes
           backgroundColor="transparent"
           fallbackIcon="grid"
           fallbackIconSize={26}
-          accessibilityLabel={category.name}
+          accessibilityLabel={label}
         />
       </View>
       <Text style={[styles.tileLabel, { color: c.text }]} numberOfLines={1}>
-        {category.name}
+        {label}
       </Text>
     </TouchableOpacity>
   );

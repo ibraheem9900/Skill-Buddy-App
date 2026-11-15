@@ -54,6 +54,7 @@ import {
 } from '@/lib/jobAction';
 import { isProviderRole, type JobActorRole } from '@/lib/jobStart';
 import { isJobCancelled, isJobCompleted } from '@/lib/jobDetail';
+import { roundUpFiveCents } from '@/lib/amountStepper';
 import type {
   BidCreateRequest,
   BidRejectRequest,
@@ -69,6 +70,7 @@ import type {
 export { isValidJobId } from '@/lib/jobPublish';
 
 import { formatDistance } from '@/lib/distance';
+import { resolveJobStatus } from '@/lib/jobStatus';
 
 /* ───────────────────────────────────────────────────────────────── money ─── */
 
@@ -80,13 +82,13 @@ const MAX_PRICE_ABS = 1e9;
 export const BID_PRICE_MAX_DECIMALS = 2;
 
 /**
- * The product's bid window, in INTEGER CENTS: €1.00 … €99,999.00.
+ * The product's bid window, in INTEGER CENTS: €5 … €99,999, in €5 steps.
  *
  * BidCreate's schema only says `exclusiveMinimum: 0` and declares no upper
  * bound, so these are the product limits the amount stepper uses; validation
  * enforces the same window so a typed value cannot slip past the stepper.
  */
-export const BID_MIN_CENTS = 100;
+export const BID_MIN_CENTS = 500;
 export const BID_MAX_CENTS = 9_999_900;
 function isUsableNumber(n: number): boolean {
   return Number.isFinite(n) && Math.abs(n) <= MAX_PRICE_ABS;
@@ -106,12 +108,14 @@ export function parseBidPrice(raw: string | number | null | undefined): number |
 }
 
 /**
- * A price as EUR with exactly 2 decimals — "€12.50". null when there is nothing
- * usable, so a card omits the money row rather than printing "€NaN".
+ * A price as whole EUR — "€13". Bids are whole-euro amounts in this product,
+ * so a legacy cent value is rounded for display rather than printing decimals.
+ * null when there is nothing usable, so a card omits the money row rather than
+ * printing "€NaN".
  */
 export function formatBidPrice(raw: string | number | null | undefined): string | null {
   const n = parseBidPrice(raw);
-  return n === null ? null : `€${n.toFixed(2)}`;
+  return n === null ? null : `€${Math.round(n)}`;
 }
 
 /**
@@ -140,6 +144,7 @@ export type BidFormErrorKey =
   | 'bid_err_price_positive'
   | 'bid_err_price_decimals'
   | 'bid_err_price_min'
+  | 'bid_err_price_multiple'
   | 'bid_err_price_too_large'
   | 'bid_err_eta_required'
   | 'bid_err_eta_invalid'
@@ -196,6 +201,11 @@ export function validateBidPrice(
 
   const maxCents = options.maxPrice === undefined ? BID_MAX_CENTS : Math.round(options.maxPrice * 100);
   if (cents > maxCents) return { ok: false, errorKey: 'bid_err_price_too_large' };
+
+  // Bids are whole euros in multiples of five. The keypad and stepper cannot
+  // produce anything else, but a value restored from an older server bid or a
+  // pasted amount still has to pass this exact rule before it is sent.
+  if (cents % 500 !== 0) return { ok: false, errorKey: 'bid_err_price_multiple' };
 
   return { ok: true, value: cents / 100 };
 }
@@ -530,11 +540,10 @@ function trimmedOrNull(value: string | null | undefined): string | null {
 }
 
 /**
- * Prefill the sheet from the bid the server sent. The price is written in the
- * unambiguous dot form (`26.75`), NOT with the device's locale separator: both
- * are accepted, but a dot means a value the provider never touches is re-parsed
- * as exactly the amount it was. An unparseable price prefills EMPTY, which
- * leaves Save disabled until a real price is typed.
+ * Prefill the sheet from the bid the server sent. Legacy cent values are moved
+ * up to the next whole €5 so the prefilled value already satisfies the current
+ * rule. An unparseable price prefills EMPTY, which leaves Save disabled until a
+ * real price is typed.
  */
 export function bidDraftFromBid(
   bid: Pick<BidResponse, 'offered_price' | 'eta_minutes' | 'message'>
@@ -545,7 +554,7 @@ export function bidDraftFromBid(
       ? Math.max(0, Math.min(BID_ETA_MAX_MINUTES, Math.trunc(bid.eta_minutes)))
       : 0;
   return {
-    price: price === null ? '' : price.toFixed(2),
+    price: price === null ? '' : String(roundUpFiveCents(Math.round(price * 100)) / 100),
     etaHours: Math.floor(eta / 60),
     etaMinutes: eta % 60,
     message: typeof bid.message === 'string' ? bid.message : '',
@@ -618,28 +627,30 @@ export function isBidDraftValid(draft: BidDraft): boolean {
  */
 export const BID_ADJUST_STEPS = [-10, -5, 5, 10] as const;
 
-/** The lowest price a chip may produce — the product's €1.00 bid minimum. */
-export const BID_MIN_PRICE = 1;
+/** The lowest price a chip may produce — the product's €5 bid minimum. */
+export const BID_MIN_PRICE = 5;
 
 /**
  * Move the price by `deltaEuros` (± 5 / ± 10) and return the new field text in
  * the same dot form the field is prefilled with. The result is clamped to the
- * schema's window: never below €0.01 and never above the price ceiling the
+ * schema's window: never below €5 and never above the price ceiling the
  * validators use. A chip pressed on an EMPTY or unparseable field starts from
  * zero rather than refusing, so the button never looks broken — a negative chip
- * then lands on the €0.01 minimum.
+ * then lands on the €5 minimum.
  */
 export function adjustBidPrice(priceInput: string, deltaEuros: number): string {
   const base = bidDraftPriceCents({ price: priceInput }) ?? 0;
   const next = base + Math.round(deltaEuros * 100);
   const clamped = Math.min(Math.max(next, Math.round(BID_MIN_PRICE * 100)), MAX_PRICE_ABS * 100);
-  return (clamped / 100).toFixed(2);
+  // The adjust control obeys the same €5 unit as the stepper and validator.
+  const snapped = Math.max(Math.round(BID_MIN_PRICE * 100), Math.round(clamped / 500) * 500);
+  return String(snapped / 100);
 }
 
 /** Whether a chip would change anything: a −10 chip on €0.05 cannot. */
 export function canApplyBidAdjust(priceInput: string, deltaEuros: number): boolean {
   const base = bidDraftPriceCents({ price: priceInput }) ?? 0;
-  return adjustBidPrice(priceInput, deltaEuros) !== (base / 100).toFixed(2);
+  return adjustBidPrice(priceInput, deltaEuros) !== String(Math.round(base / 100));
 }
 
 /**
@@ -690,6 +701,14 @@ export function buildBidUpdateRequest(draft: BidDraft): BidUpdateRequest {
     eta_minutes: bidDraftEtaMinutes(draft),
     message: message.ok ? message.value : null,
   };
+}
+
+/** Add the structured per-milestone times to an existing PUT body. */
+export function withBidMilestones<T extends BidUpdateRequest>(
+  body: T,
+  milestones: NonNullable<BidUpdateRequest['milestones']>
+): T {
+  return { ...body, milestones };
 }
 
 export type BidUpdateErrorKey =
@@ -776,10 +795,18 @@ export function isStaleBid(
  * missing/undefined flag is treated as CLOSED, never as "probably open".
  */
 export function isBiddingOpen(
-  job: Pick<JobResponse, 'is_bidding_open' | 'status'> | null | undefined
+  job:
+    | (Pick<JobResponse, 'is_bidding_open' | 'status'> &
+        Partial<
+          Pick<
+            JobResponse,
+            'bidding_ends_at' | 'remaining_bidding_seconds' | 'created_at' | 'request_type' | 'is_urgent' | 'assigned_provider_id'
+          >
+        >)
+    | null
+    | undefined
 ): boolean {
-  if (!job) return false;
-  return job.is_bidding_open === true && job.status === 'OPEN';
+  return resolveJobStatus(job).biddingOpen;
 }
 
 /**
@@ -793,7 +820,13 @@ export function isBiddingOpen(
  */
 export function canProviderSubmitBid(
   job:
-    | Pick<JobResponse, 'assigned_provider_id' | 'is_bidding_open' | 'status'>
+    | (Pick<JobResponse, 'assigned_provider_id' | 'is_bidding_open' | 'status'> &
+        Partial<
+          Pick<
+            JobResponse,
+            'bidding_ends_at' | 'remaining_bidding_seconds' | 'created_at' | 'request_type' | 'is_urgent'
+          >
+        >)
     | null
     | undefined,
   role: JobActorRole | null | undefined
@@ -814,9 +847,20 @@ export function canProviderSubmitBid(
 export function buildBidCreateRequest(
   offeredPrice: number,
   etaMinutes: number,
-  message: string | null
+  message: string | null,
+  milestones: BidCreateRequest['milestones'] = []
 ): BidCreateRequest {
-  return { offered_price: offeredPrice, eta_minutes: etaMinutes, message };
+  // `eta_minutes` now lives per milestone in the structured body. The old
+  // parameter is kept so callers/tests that only have the legacy value still
+  // compile; it is used only to give a milestone a sensible duration when the
+  // caller passed no explicit milestone list.
+  return {
+    offered_price: offeredPrice,
+    message,
+    milestones: milestones.length > 0
+      ? milestones
+      : [],
+  };
 }
 
 /* ───────────────────────────────────────── 422 detail → the right input ── */
@@ -972,8 +1016,8 @@ export type BidLocale = 'en' | 'de' | 'et' | 'lv' | 'lt';
  * the device — a locale-aware Intl build is not guaranteed to agree, and money
  * is not the place to find out at runtime.
  *
- *   en          "€12.50"        (symbol first, dot decimal)
- *   de/et/lv/lt "12,50 €"       (symbol last, comma decimal)
+ *   en          "€15"           (symbol first, grouped thousands)
+ *   de/et/lv/lt "15 €"          (symbol last, grouped thousands)
  */
 const LOCALE_NUMBER_FORMAT: Record<
   BidLocale,
@@ -993,10 +1037,10 @@ function groupThousands(intPart: string, separator: string): string {
 }
 
 /**
- * A price as EUR in the app's own locale, or null when there is nothing usable
- * (a card then omits the money rather than printing "€NaN"). Precision comes
- * from parseBidPrice, so the docs' absurd generator values are rejected here
- * exactly as they are everywhere else in this module.
+ * A whole-euro price in the app's own locale, or null when there is nothing
+ * usable (a card then omits the money rather than printing "€NaN"). No bid UI
+ * ever displays decimals. Precision comes from parseBidPrice, so the docs'
+ * absurd generator values are rejected here exactly as everywhere else.
  */
 export function formatBidPriceLocale(
   raw: string | number | null | undefined,
@@ -1005,8 +1049,8 @@ export function formatBidPriceLocale(
   const n = parseBidPrice(raw);
   if (n === null) return null;
   const fmt = LOCALE_NUMBER_FORMAT[locale] ?? LOCALE_NUMBER_FORMAT.en;
-  const [whole, fraction] = Math.abs(n).toFixed(2).split('.');
-  const amount = `${groupThousands(whole, fmt.group)}${fmt.decimal}${fraction}`;
+  const whole = String(Math.round(Math.abs(n)));
+  const amount = groupThousands(whole, fmt.group);
   const sign = n < 0 ? '-' : '';
   return fmt.symbolFirst ? `${sign}€${amount}` : `${sign}${amount}${fmt.gap}€`;
 }

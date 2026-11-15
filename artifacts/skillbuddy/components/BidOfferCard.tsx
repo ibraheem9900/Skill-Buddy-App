@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -6,20 +6,27 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
-  bidEtaParts,
   formatBidDistanceLocale,
   formatBidPriceLocale,
   type BidLocale,
 } from '@/lib/bid';
-import { parseProposedTimeLine, proposedTimesSummary } from '@/lib/bidTimes';
+import {
+  arrivalsFromBid,
+  proposedTimesSummary,
+  type BidTaskWindow,
+} from '@/lib/bidTimes';
 import { initialsFor, providerDisplayName } from '@/lib/profileDisplay';
 import { rememberProvider } from '@/lib/publicProfiles';
+import { splitTable } from '@/lib/jobSchedule';
+import { clockOf, formatDayLabel, formatWindowLabel } from '@/lib/timeSlots';
 import type { BidResponse } from '@/types';
 
 interface Props {
   bid: BidResponse;
   /** The app's current language — money/distance are formatted for it. */
   locale: BidLocale;
+  /** The job's task windows — supplies the real DATE for each proposed start. */
+  tasks?: BidTaskWindow[];
   /**
    * The bid came from the server's `recommended` block. Never decided here: the
    * backend owns the split (schema JobBidsResponse), so the badge cannot drift
@@ -75,6 +82,7 @@ interface Props {
 export default function BidOfferCard({
   bid,
   locale,
+  tasks = [],
   recommended,
   isNew,
   onPress,
@@ -85,6 +93,8 @@ export default function BidOfferCard({
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const [photoFailed, setPhotoFailed] = useState(false);
+  const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
+  const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
 
   const { provider } = bid;
 
@@ -104,20 +114,36 @@ export default function BidOfferCard({
    * lib/bidTimes — the technical line itself is never displayed. One time is
    * shown as "Starts 9:30 AM"; several are labelled per task.
    */
-  const proposed = proposedTimesSummary(parseProposedTimeLine(bid.message).arrivals, {
-    am: t('post_sched_am'),
-    pm: t('post_sched_pm'),
+  const arrivals = arrivalsFromBid(bid);
+  const truthyMeridiem = { am: t('post_sched_am'), pm: t('post_sched_pm') };
+  const proposed = proposedTimesSummary(
+    arrivals,
+    truthyMeridiem,
+    {
+      tasks,
+      taskLabel: (n) => t('post_task_n', { n }),
+      dayLabel: (day) => formatDayLabel(day, months, weekdays),
+    }
+  );
+  // Which ALLOWED slot each chosen arrival belongs to (derived from the job's
+  // own slot windows, never guessed from the clock).
+  const arrivalSlotNotes = arrivals.flatMap((arrival) => {
+    const task = tasks.find((entry) => entry.number === arrival.taskNumber);
+    const slot = task?.slots.find(
+      (entry) => arrival.minutes >= entry.startMinutes && arrival.minutes < entry.endMinutes
+    );
+    return slot
+      ? [
+          `${t('post_task_n', { n: arrival.taskNumber })}: ${formatWindowLabel(
+            clockOf(slot.startMinutes),
+            clockOf(slot.endMinutes),
+            truthyMeridiem
+          )}`,
+        ]
+      : [];
   });
   const price = formatBidPriceLocale(bid.offered_price, locale);
   const distance = formatBidDistanceLocale(bid.distance_km, locale);
-  const eta = bidEtaParts(bid.eta_minutes);
-  const etaText = eta
-    ? eta.kind === 'now'
-      ? t('jobd_bid_eta_now')
-      : eta.kind === 'minutes'
-        ? t('jobd_bid_eta_min', { n: eta.minutes })
-        : t('jobd_bid_eta_hm', { h: eta.hours, m: eta.minutes })
-    : null;
   const rating =
     typeof provider.star_rating === 'number' ? provider.star_rating.toFixed(1) : null;
   const photo = provider.profile_photo_url;
@@ -224,11 +250,6 @@ export default function BidOfferCard({
             {price ? (
               <Text style={[styles.price, { color: c.primary }]}>{price}</Text>
             ) : null}
-            {etaText ? (
-              <Text style={[styles.eta, { color: c.mutedForeground }]}>
-                {t('jobd_bid_summary_eta')} · {etaText}
-              </Text>
-            ) : null}
           </View>
         </View>
 
@@ -239,6 +260,12 @@ export default function BidOfferCard({
               {proposed.single ? t('bid_starts', { time: proposed.text }) : proposed.text}
             </Text>
           </View>
+        ) : null}
+
+        {arrivalSlotNotes.length > 0 ? (
+          <Text style={[styles.arrivalText, { color: c.mutedForeground, marginLeft: 16 }]}>
+            {arrivalSlotNotes.join(' · ')}
+          </Text>
         ) : null}
 
         {onViewProfile ? (

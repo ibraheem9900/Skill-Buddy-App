@@ -1,4 +1,5 @@
 import type { JobApiStatus, JobListItem } from '@/types';
+import { resolveJobStatus } from '@/lib/jobStatus';
 
 /**
  * jobRemoval.ts — the pure rules behind the client's "Remove from my list".
@@ -67,11 +68,16 @@ export const REMOVABLE_JOB_STATUSES: readonly JobApiStatus[] = [
  * a row whose state the app cannot read.
  */
 export function canRemoveJob(
-  job: Pick<JobListItem, 'status' | 'is_bidding_open'> | null | undefined
+  job:
+    | (Pick<JobListItem, 'status' | 'is_bidding_open'> &
+        Partial<Pick<JobListItem, 'bidding_ends_at' | 'remaining_bidding_seconds' | 'created_at' | 'request_type'>>)
+    | null
+    | undefined
 ): boolean {
   if (!job || typeof job.status !== 'string') return false;
   if ((REMOVABLE_JOB_STATUSES as readonly string[]).includes(job.status)) return true;
-  return job.status === 'OPEN' && job.is_bidding_open === false;
+  const resolved = resolveJobStatus(job);
+  return resolved.displayStatus === 'BIDDING_CLOSED';
 }
 
 /**
@@ -80,11 +86,15 @@ export function canRemoveJob(
  * explain WHY a row is removable.
  */
 export function removalReason(
-  job: Pick<JobListItem, 'status' | 'is_bidding_open'> | null | undefined
+  job:
+    | (Pick<JobListItem, 'status' | 'is_bidding_open'> &
+        Partial<Pick<JobListItem, 'bidding_ends_at' | 'remaining_bidding_seconds' | 'created_at' | 'request_type'>>)
+    | null
+    | undefined
 ): 'terminal' | 'bidding-closed' | null {
   if (!job || typeof job.status !== 'string') return null;
   if ((REMOVABLE_JOB_STATUSES as readonly string[]).includes(job.status)) return 'terminal';
-  if (job.status === 'OPEN' && job.is_bidding_open === false) return 'bidding-closed';
+  if (resolveJobStatus(job).displayStatus === 'BIDDING_CLOSED') return 'bidding-closed';
   return null;
 }
 

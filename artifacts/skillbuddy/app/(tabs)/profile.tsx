@@ -2,6 +2,8 @@ import React, { useCallback, useRef } from 'react';
 import { Alert, ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import { Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
@@ -416,6 +418,21 @@ function ProfileScreen() {
           </View>
         </Animated.View>
       ))}
+
+      {/* Build identity, exactly where QA can reach it: the app version and the
+          currently-running OTA update id. Both change with a store build / OTA,
+          so a screenshot is enough to prove which bundle is installed. */}
+      <View style={styles.buildInfo}>
+        <Text style={[styles.buildInfoText, { color: c.mutedForeground }]}>
+          {t('profile_build_info', {
+            version: Constants.expoConfig?.version ?? '—',
+            update: Updates.updateId ?? 'embedded',
+          })}
+        </Text>
+        <Text style={[styles.buildInfoText, { color: c.mutedForeground }]}>
+          {`${Updates.channel ?? '—'} · ${Updates.runtimeVersion ?? '—'}`}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
@@ -527,6 +544,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },
+  buildInfo: { alignItems: 'center', gap: 2, paddingHorizontal: 20, paddingTop: 20 },
+  buildInfoText: { fontFamily: 'Manrope_400Regular', fontSize: 10, textAlign: 'center' },
   menuCard: { marginHorizontal: 16, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
   menuIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

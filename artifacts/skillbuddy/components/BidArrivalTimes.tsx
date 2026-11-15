@@ -5,7 +5,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { splitTable } from '@/lib/jobSchedule';
 import {
-  arrivalOptionsFor,
+  arrivalGroupsFor,
   taskWindowLabel,
   type BidTaskWindow,
   type ProposedArrival,
@@ -47,9 +47,17 @@ export default function BidArrivalTimes({
   const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
   const meridiem = { am: t('post_sched_am'), pm: t('post_sched_pm') };
 
-  const choose = (taskNumber: number, minutes: number) => {
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const isToday = (day: Date | null) =>
+    day !== null &&
+    day.getFullYear() === now.getFullYear() &&
+    day.getMonth() === now.getMonth() &&
+    day.getDate() === now.getDate();
+
+  const choose = (taskNumber: number, minutes: number, slotCode: string | null) => {
     const rest = arrivals.filter((entry) => entry.taskNumber !== taskNumber);
-    onChange([...rest, { taskNumber, minutes }].sort((a, b) => a.taskNumber - b.taskNumber));
+    onChange([...rest, { taskNumber, minutes, slotCode }].sort((a, b) => a.taskNumber - b.taskNumber));
   };
 
   return (
@@ -63,9 +71,9 @@ export default function BidArrivalTimes({
       </Text>
 
       {tasks.map((task) => {
-        const chosen = arrivals.find((entry) => entry.taskNumber === task.number)?.minutes ?? null;
-        const options = arrivalOptionsFor(task);
-        const dayLabel = formatDayLabel(task.day, months, weekdays);
+        const chosen = arrivals.find((entry) => entry.taskNumber === task.number);
+        const groups = arrivalGroupsFor(task);
+        const dayLabel = task.day ? formatDayLabel(task.day, months, weekdays) : '';
         const windowLabel = taskWindowLabel(task, meridiem);
         return (
           <View
@@ -89,38 +97,47 @@ export default function BidArrivalTimes({
               </View>
             </View>
 
-            <View style={styles.chips}>
-              {options.map((option) => {
-                const minutes = minutesOf(option) ?? 0;
-                const active = chosen === minutes;
-                return (
-                  <TouchableOpacity
-                    key={`${task.number}-${minutes}`}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: active ? c.primary : c.muted,
-                        borderColor: active ? c.primary : c.border,
-                      },
-                    ]}
-                    onPress={() => choose(task.number, minutes)}
-                    disabled={disabled}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active, disabled }}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.chipText,
-                        { color: active ? c.primaryForeground : c.text },
-                      ]}
-                    >
-                      {formatTimeLabel(option, meridiem)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            {groups.map((group) => (
+              <View key={group.slot?.code ?? 'legacy'} style={styles.group}>
+                <Text style={[styles.groupLabel, { color: c.mutedForeground }]}>
+                  {group.slot?.label ?? windowLabel}
+                </Text>
+                <View style={styles.chips}>
+                  {group.options.map((option) => {
+                    const minutes = minutesOf(option) ?? 0;
+                    const active = chosen?.minutes === minutes;
+                    const past = isToday(task.day) && minutes <= nowMinutes;
+                    return (
+                      <TouchableOpacity
+                        key={`${task.number}-${group.slot?.code ?? 'legacy'}-${minutes}`}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: active ? c.primary : c.muted,
+                            borderColor: active ? c.primary : c.border,
+                            opacity: past ? 0.4 : 1,
+                          },
+                        ]}
+                        onPress={() => choose(task.number, minutes, group.slot?.code ?? null)}
+                        disabled={disabled || past}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active, disabled: disabled || past }}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.chipText,
+                            { color: active ? c.primaryForeground : c.text },
+                          ]}
+                        >
+                          {formatTimeLabel(option, meridiem)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
           </View>
         );
       })}
@@ -162,6 +179,8 @@ const styles = StyleSheet.create({
   // Three equal chips per row: 30 % + gap × 2 always fits the card's content
   // width, and the same basis is used for every chip so none ever differs in
   // size — including a short Anytime window with fewer than six marks.
+  group: { gap: 6 },
+  groupLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 8 },
   chip: {
     flexBasis: '30%',

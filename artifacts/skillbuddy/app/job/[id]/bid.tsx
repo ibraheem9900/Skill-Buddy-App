@@ -27,13 +27,13 @@ import CountdownTimer from '@/components/CountdownTimer';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { useBidSubmit } from '@/hooks/useBidSubmit';
 import { MY_BID_POLL_MS, useMyBid } from '@/hooks/useMyBid';
-import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
+import { formatDateTime } from '@/lib/jobDetail';
+import { useLiveJobStatus } from '@/hooks/useLiveJobStatus';
 import {
   BID_ADJUST_STEPS,
   adjustBidPrice,
   bidDraftEtaMinutes,
   bidDraftFromBid,
-  bidEtaParts,
   bidFieldError,
   bidNextStepKey,
   bidRejectionReason,
@@ -42,6 +42,7 @@ import {
   bidSubmitFailureMessage,
   bidUpdateFailureMessage,
   buildBidUpdateRequest,
+  withBidMilestones,
   canApplyBidAdjust,
   canEditBid,
   canProviderSubmitBid,
@@ -49,7 +50,6 @@ import {
   formatBidPrice,
   hasBidDraftChanged,
   isBidDraftValid,
-  isBiddingOpen,
   shouldOfferBidAdjust,
   shouldResyncAfterBidFailure,
   validateBidMessage,
@@ -59,6 +59,8 @@ import {
   type BidFieldName,
 } from '@/lib/bid';
 import {
+  arrivalsFromBid,
+  buildBidMilestones,
   composeBidMessage,
   etaMinutesForFirstArrival,
   firstMissingArrival,
@@ -147,7 +149,14 @@ export default function PlaceBidScreen() {
   const { status: jobStatus, job, serverMessage, retry, refetch } = useJobDetail(numericId);
   const { createBidForJob, bidSubmitting } = useBidSubmit();
 
-  const biddingOpen = job ? isBiddingOpen(job) : false;
+  // Deep link / reload: nothing is cached, so read the job once. Without this
+  // the form has no tasks, no window and nothing to render.
+  useEffect(() => {
+    if (numericId !== null) void refetch();
+  }, [numericId, refetch]);
+
+  const liveStatus = useLiveJobStatus(job);
+  const biddingOpen = liveStatus.biddingOpen;
 
   /**
    * THIS provider's own bid. The hook owns the three-state answer (exists /
@@ -214,15 +223,8 @@ export default function PlaceBidScreen() {
   const messageRoom = messageRoomFor(arrivals, meridiem);
   const editMessageRoom = messageRoomFor(editArrivals, meridiem);
 
-  /**
-   * The countdown anchor is captured ONCE: the deadline must not be recomputed
-   * from a shrinking `remaining_bidding_seconds` every render.
-   */
-  const anchorRef = useRef(Date.now());
-  const deadline = useMemo(
-    () => (job ? biddingDeadline(job, anchorRef.current) : null),
-    [job]
-  );
+  /** The resolver owns the absolute deadline and live tick. */
+  const deadline = biddingOpen ? liveStatus.deadlineMs : null;
 
   /* ------------------------------------------------------------- connectivity */
 
@@ -284,14 +286,15 @@ export default function PlaceBidScreen() {
    * and one chosen arrival per task.
    */
   /**
-   * The SAME validator the submit path runs, applied live: an amount below
-   * €1.00 or above €99,999.00 shows its translated error as soon as the field
-   * is committed and keeps Submit disabled. An empty field is not flagged here
-   * — tapping Submit is how "price required" is revealed.
+   * The SAME validator the submit path runs, applied live: an empty field, an
+   * amount below €5, a non-multiple of €5 or anything above €99,999 keeps
+   * Submit disabled. The visible error appears once there is text to correct;
+   * an empty field simply stays disabled instead of shouting at a blank form.
    */
   const priceValidation = price.trim().length > 0 ? validateBidPrice(price) : null;
   const livePriceError =
     priceValidation && !priceValidation.ok ? t(priceValidation.errorKey) : null;
+  const priceReady = price.trim().length > 0 && priceValidation?.ok === true;
 
   const validateAll = useCallback((): boolean => {
     const priceResult = validateBidPrice(price);
@@ -317,13 +320,14 @@ export default function PlaceBidScreen() {
     setRetryable(false);
     if (!validateAll()) return;
 
-    // eta_minutes is derived from the EARLIEST chosen arrival; the message is
-    // the provider's words plus the one fixed time line lib/bidTimes owns.
+    // ONE structured milestone per task: the backend's BidCreate now owns the
+    // arrival time and duration, so no time line is appended to the message.
     const outcome = await createBidForJob(
       numericId,
       price,
       String(etaMinutesForFirstArrival(arrivals, tasks)),
-      composeBidMessage(message, arrivals, meridiem) ?? ''
+      message,
+      buildBidMilestones(arrivals, tasks)
     );
 
     if (outcome.ok) {
@@ -397,20 +401,20 @@ export default function PlaceBidScreen() {
   const openEdit = useCallback((bid: BidResponse) => {
     // The saved line is parsed back so the sheet opens on the times the pilot
     // really chose; the message field shows only the pilot's own words.
-    const parsed = parseProposedTimeLine(bid.message);
-    const eta = etaMinutesForFirstArrival(parsed.arrivals, tasks);
+    const arrivals = arrivalsFromBid(bid);
+    const eta = etaMinutesForFirstArrival(arrivals, tasks);
     setEditDraft({
       ...bidDraftFromBid(bid),
-      message: parsed.userMessage,
+      message: stripProposedTimeLine(bid.message),
       etaHours: Math.floor(eta / 60),
       etaMinutes: eta % 60,
     });
-    setEditArrivals(parsed.arrivals);
+    setEditArrivals(arrivals);
     setEditPriceError(null);
     setEditMessageError(null);
     setEditError(null);
     setEditArrivalError(
-      parsed.arrivals.length === 0 && tasks.length > 0
+      arrivals.length === 0 && tasks.length > 0
         ? t('jobd_bid_arrival_legacy')
         : null
     );
@@ -481,7 +485,6 @@ export default function PlaceBidScreen() {
     // offered_price arrives as a NUMERIC STRING (Decimal) on the wire, so it is
     // parsed defensively — the docs' own example generator emits 300-digit values.
     const priceText = formatBidPrice(bid.offered_price);
-    const eta = bidEtaParts(bid.eta_minutes);
     const statusKey = bidStatusLabelKey(bid.status);
     const submitted = formatDateTime(bid.created_at);
     // Only the stamp that belongs to THIS status — the docs' example fills all
@@ -513,37 +516,34 @@ export default function PlaceBidScreen() {
           </View>
         ) : null}
 
-        {eta ? (
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
-              {t('jobd_bid_summary_eta')}
-            </Text>
-            <Text style={[styles.rowValue, { color: c.text }]}>
-              {eta.kind === 'now'
-                ? t('jobd_bid_eta_now')
-                : eta.kind === 'minutes'
-                  ? t('jobd_bid_eta_min', { n: eta.minutes })
-                  : t('jobd_bid_eta_hm', { h: eta.hours, m: eta.minutes })}
-            </Text>
-          </View>
-        ) : null}
-
         {/* The pilot's proposed start(s) — parsed out of the stored message,
             whose technical line is never displayed. */}
         {(() => {
+          const parsedArrivals = arrivalsFromBid(bid);
           const summary = proposedTimesSummary(
-            parseProposedTimeLine(bid.message).arrivals,
-            meridiem
+            parsedArrivals,
+            meridiem,
+            {
+              tasks,
+              taskLabel: (n) => t('post_task_n', { n }),
+              dayLabel: (day) =>
+                day.toLocaleDateString(language, {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                }),
+            }
           );
           if (!summary) return null;
+          const value = summary.single
+            ? t('bid_starts', { time: summary.text })
+            : summary.text;
           return (
             <View style={styles.row}>
               <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
                 {t('jobd_bid_arrival_title')}
               </Text>
-              <Text style={[styles.rowValue, { color: c.text }]}>
-                {summary.single ? t('bid_starts', { time: summary.text }) : summary.text}
-              </Text>
+              <Text style={[styles.rowValue, { color: c.text }]}>{value}</Text>
             </View>
           );
         })()}
@@ -754,7 +754,7 @@ export default function PlaceBidScreen() {
       const priceResult = validateBidPrice(editDraft.price);
       const eta = etaMinutesForFirstArrival(editArrivals, tasks);
       const etaResult = validateEtaMinutes(String(eta));
-      const wireMessage = composeBidMessage(editDraft.message, editArrivals, meridiem);
+      const wireMessage = editDraft.message;
       const messageResult = validateBidMessage(wireMessage ?? '');
       const missing = firstMissingArrival(editArrivals, tasks);
       setEditPriceError(priceResult.ok ? null : t(priceResult.errorKey));
@@ -766,11 +766,14 @@ export default function PlaceBidScreen() {
 
       // The PUT body keeps the schema's three fields; only the message differs
       // from the draft (the line is added here, never typed by the pilot).
-      const body = buildBidUpdateRequest({
-        ...editDraft,
-        etaHours: Math.floor(eta / 60),
-        etaMinutes: eta % 60,
-      });
+      const body = withBidMilestones(
+        buildBidUpdateRequest({
+          ...editDraft,
+          etaHours: Math.floor(eta / 60),
+          etaMinutes: eta % 60,
+        }),
+        buildBidMilestones(editArrivals, tasks)
+      );
       const outcome = await saveEditBid(held.id, { ...body, message: wireMessage });
 
       if (outcome.ok) {
@@ -1164,10 +1167,13 @@ export default function PlaceBidScreen() {
             style={[
               styles.submit,
               { backgroundColor: c.primary },
-              (bidSubmitting || nearbyGone || livePriceError !== null) && styles.submitBusy,
+              (bidSubmitting || nearbyGone || !priceReady || livePriceError !== null) &&
+                styles.submitBusy,
             ]}
             onPress={() => void submit()}
-            disabled={bidSubmitting || nearbyGone || livePriceError !== null}
+            disabled={
+              bidSubmitting || nearbyGone || !priceReady || livePriceError !== null
+            }
             activeOpacity={0.85}
           >
             {bidSubmitting ? (

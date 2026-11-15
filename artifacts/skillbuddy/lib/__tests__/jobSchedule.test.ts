@@ -161,9 +161,9 @@ eq('an ISO string always ends in Z', String(toIsoDateTime(saturday)).endsWith('Z
 eq('toIsoDateTime rejects null', toIsoDateTime(null), null);
 eq('toIsoDateTime rejects an Invalid Date', toIsoDateTime(new Date('nope')), null);
 
-/* --------------------------- what scheduled_at carries in jobCreate */
+/* --------------------------- what the milestone carries in jobCreate */
 
-const CUSTOM_ISO = new Date(2026, 10, 20, 16, 30, 0, 0).toISOString();
+const CUSTOM_DAY = '2026-11-20';
 
 /** The wizard's form values, with only the schedule fields filled in. */
 const formValues = (overrides: Partial<JobFormValues>): JobFormValues => ({
@@ -174,6 +174,7 @@ const formValues = (overrides: Partial<JobFormValues>): JobFormValues => ({
   requestType: 'regular',
   bookingType: 'one_time',
   expectedHours: 2,
+  milestones: [{ date: CUSTOM_DAY, timeSlots: ['MORNING'], expectedHours: 2 }],
   countryId: 1,
   countyId: 1,
   cityId: 1,
@@ -187,32 +188,41 @@ const formValues = (overrides: Partial<JobFormValues>): JobFormValues => ({
 });
 
 eq(
-  'the clock picker\'s instant is what scheduled_at carries',
-  resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO }))[0].scheduled_at,
-  CUSTOM_ISO
+  'the selected local day is what each milestone carries',
+  resolveMilestones(formValues({}))[0].date,
+  CUSTOM_DAY
 );
 eq(
-  'an offset instant is normalised to UTC',
-  resolveMilestones(formValues({ scheduledAtIso: '2026-11-20T16:30:00+02:00' }))[0].scheduled_at,
-  new Date('2026-11-20T16:30:00+02:00').toISOString()
-);
-check(
-  'the resolved instant never loses its Z suffix',
-  String(resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO }))[0].scheduled_at).endsWith('Z')
+  'the selected slot codes ride along',
+  resolveMilestones(formValues({}))[0].time_slots.join(','),
+  'MORNING'
 );
 eq(
-  'an unparseable instant never becomes a null scheduled_at',
-  resolveMilestones(formValues({ scheduledAtIso: 'not-a-date' })).length,
+  'three selected slots stay inside ONE milestone',
+  resolveMilestones(formValues({
+    milestones: [{ date: CUSTOM_DAY, timeSlots: ['MORNING', 'MIDDAY', 'AFTERNOON'], expectedHours: 2 }],
+  }))[0].time_slots.join(','),
+  'MORNING,MIDDAY,AFTERNOON'
+);
+eq(
+  'an unparseable date never becomes a milestone',
+  resolveMilestones(formValues({
+    milestones: [{ date: 'not-a-date', timeSlots: ['MORNING'], expectedHours: 2 }],
+  })).length,
   0
 );
 eq(
-  'a missing instant never becomes a null scheduled_at',
-  resolveMilestones(formValues({ scheduledAtIso: null })).length,
+  'a missing slot list never becomes a milestone',
+  resolveMilestones(formValues({
+    milestones: [{ date: CUSTOM_DAY, timeSlots: [], expectedHours: 2 }],
+  })).length,
   0
 );
 eq(
   'the expected hours ride along as a number',
-  resolveMilestones(formValues({ scheduledAtIso: CUSTOM_ISO, expectedHours: 5 }))[0].expected_hours,
+  resolveMilestones(formValues({
+    milestones: [{ date: CUSTOM_DAY, timeSlots: ['MORNING'], expectedHours: 5 }],
+  }))[0].expected_hours,
   5
 );
 

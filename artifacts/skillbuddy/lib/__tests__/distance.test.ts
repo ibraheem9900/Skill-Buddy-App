@@ -25,6 +25,7 @@ function eq<T>(label: string, actual: T, expected: T) {
 eq('450 m', formatDistance(0.45, 'en'), '450 m');
 eq('50 m', formatDistance(0.05, 'en'), '50 m');
 eq('a tiny positive never becomes 0 m', formatDistance(0.004, 'en'), '10 m');
+eq('0.95 km is 950 m', formatDistance(0.95, 'en'), '950 m');
 eq('a true zero is 0 m', formatDistance(0, 'en'), '0 m');
 eq('metres keep the locale unit', formatDistance(0.45, 'de', { metres: 'm', kilometres: 'km' }), '450 m');
 
@@ -35,8 +36,9 @@ eq('1.84 → 1.8', formatDistance(1.84, 'en'), '1.8 km');
 eq('8 → 8.0 (the boss card)', formatDistance(8, 'en'), '8.0 km');
 eq('a comma locale', formatDistance(8, 'et'), '8,0 km');
 eq('9.94 is still one decimal', formatDistance(9.94, 'en'), '9.9 km');
-eq('9.99 rounds up into the whole-km band, never "10.0 km"', formatDistance(9.99, 'en'), '10 km');
+eq('9.96 is still under 10 km, so it keeps one decimal', formatDistance(9.96, 'en'), '10.0 km');
 eq('10 has no decimal', formatDistance(10, 'en'), '10 km');
+eq('123.4 has no decimal', formatDistance(123.4, 'en'), '123 km');
 eq('12.25 rounds to 12', formatDistance(12.25, 'en'), '12 km');
 eq('1234 km is grouped', formatDistance(1234, 'en'), '1,234 km');
 

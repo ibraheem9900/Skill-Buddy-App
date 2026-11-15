@@ -30,6 +30,7 @@ import {
   nearbyErrorDetail,
   nearbyVisibilityState,
   parseNearbyJob,
+  parseNearbyLocation,
   removeNearbyJob,
   shouldPollNearbyJobs,
   sortNearbyJobs,
@@ -310,6 +311,26 @@ check(
   'a frame missing optional numbers still parses (defaults applied)',
   parseNearbyJob({ job_id: 5, title: 'TEST - ignore' })?.matches_skill === false
 );
+/* ------------------------------------- location feed (two-step contract) */
+
+const locationFrame = { job_id: 63, latitude: 59.3821143, longitude: 24.6662758 };
+const parsedLocation = parseNearbyLocation(locationFrame);
+check('a location-only item parses without a title', parsedLocation !== null);
+equal('the location job_id is kept', parsedLocation?.job_id, 63);
+equal('the location latitude is parsed', parsedLocation?.latitude, 59.3821143);
+equal('the location longitude is parsed', parsedLocation?.longitude, 24.6662758);
+equal('a missing title is blank, not invented', parsedLocation?.title, '');
+check('a location item without distance has an unusable distance', Number.isNaN(parsedLocation?.distance_km));
+const nested = parseNearbyLocation({
+  job_id: 64,
+  location: { lat: '59.3825', lng: '24.6667' },
+  distance_km: '0.049',
+});
+equal('nested lat/lng strings parse', nested?.latitude, 59.3825);
+equal('a numeric-string distance parses', nested?.distance_km, 0.049);
+check('a location item without job_id is rejected', parseNearbyLocation({ latitude: 1, longitude: 2 }) === null);
+check('the old full item still parses through the location adapter', parseNearbyLocation(frame)?.title === frame.title);
+
 check('a NEW frame is reported as new', isNewNearbyJob([existing], frame) === true);
 check('an already-listed frame is not new', isNewNearbyJob([existing], { ...frame, job_id: existing.job_id }) === false);
 check('a null frame is never "new"', isNewNearbyJob([existing], null) === false);

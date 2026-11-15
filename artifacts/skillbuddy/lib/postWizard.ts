@@ -31,7 +31,7 @@
  */
 
 import {
-  FIXED_SLOTS,
+  fixedSlots,
   MAX_MILESTONE_DAYS,
   type MilestoneDraft,
   type TimeChoice,
@@ -41,6 +41,7 @@ import {
   isValidDate,
   localDay,
   selectionWindow,
+  slotByKey,
   sortDays,
   validateTimeChoice,
   type BookingErrorKey,
@@ -90,7 +91,7 @@ export function hasBookableTime(day: Date, now: Date = new Date()): boolean {
   const today = localDay(now);
   if (day.getTime() !== today.getTime()) return day.getTime() > today.getTime();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  return FIXED_SLOTS.some((slot) => slot.start.hour * 60 + slot.start.minute > nowMinutes);
+  return fixedSlots().length > 0 && fixedSlots().some(slot => slot.start.hour * 60 + slot.start.minute > nowMinutes);
 }
 
 /* ── Month label above the strip ─────────────────────────────────────────── */
@@ -131,6 +132,8 @@ export interface TaskDraft {
   time: TimeChoice | null;
   /** This task's own expected hours (default 1). */
   hours: number;
+  /** Array of slot codes (e.g. MORNING, MIDDAY) per task. */
+  timeSlots: string[];
 }
 
 /** `2026-10-21` for a local day (date parts only, never `toISOString`). */
@@ -156,14 +159,14 @@ export function taskKeyOf(dayKeyValue: string, time: TimeChoice | null): string 
 export function buildTask(day: Date, hours: number = MIN_EXPECTED_HOURS): TaskDraft {
   const local = localDay(day);
   const key = dayKey(local);
-  return { key: taskKeyOf(key, null), dayKey: key, day: local, time: null, hours };
+  return { key: taskKeyOf(key, null), dayKey: key, day: local, time: null, hours, timeSlots: []}
 }
 
 /** A fresh task for a day + window. */
 export function buildTaskAt(day: Date, time: TimeChoice, hours: number = MIN_EXPECTED_HOURS): TaskDraft {
   const local = localDay(day);
   const key = dayKey(local);
-  return { key: taskKeyOf(key, time), dayKey: key, day: local, time, hours };
+  return { key: taskKeyOf(key, time), dayKey: key, day: local, time, hours, timeSlots: time.kind === 'slot' ? [time.key] : ['anytime']}
 }
 
 /** Minutes since midnight of a window's start (null when the task has no time). */
@@ -265,6 +268,54 @@ export function setTaskHours(tasks: TaskDraft[], key: string, hours: number): Ta
  * screen can show its short "hours adjusted" notice.
  */
 export function applyTaskTime(
+  tasks: TaskDraft[],
+  key: string,
+  time: TimeChoice | null
+): { tasks: TaskDraft[]; loweredFrom: number | null } {
+  return applyTaskTimeCore(tasks, key, time);
+}
+
+/**
+ * Apply a task's FULL slot set (one task = one day, many slots) and re-clamp
+ * its expected hours to the LATEST allowed slot start. Returns the next list
+ * and, when hours were lowered, the previous value so the screen can explain it.
+ */
+export function applyTaskSlots(
+  tasks: TaskDraft[],
+  key: string,
+  timeSlots: string[],
+  hours?: number
+): { tasks: TaskDraft[]; loweredFrom: number | null } {
+  const codes = Array.from(new Set(timeSlots.filter((code) => typeof code === 'string' && code.length > 0)));
+  if (codes.length === 0) return { tasks, loweredFrom: null };
+
+  const target = tasks.find((task) => task.key === key);
+  if (!target) return { tasks, loweredFrom: null };
+
+  const starts = codes
+    .map((code) => slotByKey(code))
+    .filter((slot): slot is NonNullable<typeof slot> => slot !== null)
+    .map((slot) => slot.start.hour * 60 + slot.start.minute)
+    .sort((a, b) => b - a);
+  const latestStart = starts.length > 0 ? starts[0] : null;
+  const cap = latestStart === null ? null : maxHoursForStart(latestStart);
+
+  const requested = typeof hours === 'number' && Number.isFinite(hours) ? hours : target.hours;
+  const nextHours = cap === null ? Math.max(MIN_EXPECTED_HOURS, requested) : clampHours(requested, cap);
+  const loweredFrom = cap !== null && exceedsHoursCap(requested, cap) ? requested : null;
+
+  const primary = slotByKey(codes[0]);
+  const time: TimeChoice | null = primary ? { kind: 'slot', key: primary.key } : target.time;
+  const newKey = taskKeyOf(target.dayKey, time);
+
+  const updated = tasks.map((task) =>
+    task.key === key ? { ...task, time, timeSlots: codes, hours: nextHours, key: newKey } : task
+  );
+  return { tasks: sortTasks(updated), loweredFrom };
+}
+
+/** The original single-window rules (duplicate-key rejection, hours clamp). */
+function applyTaskTimeCore(
   tasks: TaskDraft[],
   key: string,
   time: TimeChoice | null
@@ -473,11 +524,19 @@ export function buildTaskMilestones(tasks: TaskDraft[]): MilestoneDraft[] {
   return tasks
     .slice(0, MAX_MILESTONE_DAYS)
     .map((task) => {
+      if (task.time == null) return null;
       const win = selectionWindow(task.time);
       if (!win) return null;
       const cap = maxHoursForStart(minutesOf(win.start));
+      const slotKind = task.time.kind;
+      const timeSlots: string[] = slotKind === 'slot'
+        ? [task.time.key]
+        : slotKind === 'anytime'
+        ? ['anytime']
+        : [];
       return {
-        scheduled_at: composeInstant(task.day, win.start.hour, win.start.minute).toISOString(),
+        date: dayKey(task.day),
+        time_slots: timeSlots,
         expected_hours: clampHours(task.hours, cap),
       };
     })

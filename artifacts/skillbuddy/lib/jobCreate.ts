@@ -153,9 +153,11 @@ export function exceedsDescriptionLimit(
 
 /** One booked day of a long-term job, as the wizard's form state holds it. */
 export interface JobMilestoneInput {
-  /** ISO 8601 UTC, composed from the local day + clock time. */
-  scheduledAtIso: string;
-  /** Per-day expected hours (the same value applies to every day). */
+  /** Local calendar date, `YYYY-MM-DD`. */
+  date: string;
+  /** One or more GET /time-slots codes for this ONE task. */
+  timeSlots: string[];
+  /** Per-day expected hours. */
   expectedHours: number;
 }
 
@@ -171,12 +173,7 @@ export interface JobFormValues {
   requestType: 'urgent' | 'regular';
   /** Form uses 'one_time' | 'multi_day'; the API uses ONE_TIME | MULTI_DAY. */
   bookingType: 'one_time' | 'multi_day';
-  /**
-   * ONE_TIME only: the single chosen instant as ISO 8601 UTC (the step-3
-   * Today/Tomorrow choice combined with the clock-picker time).
-   */
-  scheduledAtIso?: string | null;
-  /** MULTI_DAY only: one entry per booked day (1..7). */
+  /** One entry per booked day (1..7). */
   milestones?: JobMilestoneInput[];
   /** Expected hours — the single value for ONE_TIME, per day for MULTI_DAY. */
   expectedHours: number;
@@ -320,32 +317,36 @@ export function composeFormattedAddress(
  *             used as a last resort so the array is never empty.
  */
 export function resolveMilestones(values: JobFormValues): JobMilestoneCreate[] {
-  const hours = clampExpectedHours(values.expectedHours);
-  const single = isoInstant(values.scheduledAtIso);
+  const entries = values.milestones ?? [];
+  const seen = new Set<string>();
+  const out: JobMilestoneCreate[] = [];
+  const dates = entries
+    .map((entry) => ({
+      date: typeof entry.date === 'string' ? entry.date.trim() : '',
+      time_slots: Array.from(new Set((entry.timeSlots ?? []).filter((code) => typeof code === 'string' && code.length > 0))),
+      expected_hours: clampExpectedHours(entry.expectedHours),
+    }))
+    .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.date) && entry.time_slots.length > 0)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-  if (values.bookingType === 'multi_day') {
-    const seen = new Set<string>();
-    const withinWeek: string[] = [];
-    let first = Number.NaN;
-    for (const entry of values.milestones ?? []) {
-      const iso = isoInstant(entry?.scheduledAtIso);
-      if (iso === null || seen.has(iso)) continue;
-      const at = Date.parse(iso);
-      if (!Number.isFinite(first)) first = at;
-      // "Within one week of the first": the wizard books consecutive local
-      // days at ONE clock time, so the allowed offset is exactly the first six
-      // days (MAX_MILESTONE_DAYS entries on days 0..6).
-      if (at - first > (MAX_MILESTONE_DAYS - 1) * 86_400_000) continue;
-      seen.add(iso);
-      withinWeek.push(iso);
-      if (withinWeek.length === MAX_MILESTONE_DAYS) break;
-    }
-    if (withinWeek.length > 0) {
-      return withinWeek.map((scheduled_at) => ({ scheduled_at, expected_hours: hours }));
-    }
+  // The product's window is Today + the next SIX days: an entry more than six
+  // days after the first is never sent, even if a caller hands one in.
+  const firstDay = dates.length > 0 ? Date.parse(`${dates[0].date}T00:00:00Z`) : NaN;
+  const withinWindow = Number.isFinite(firstDay)
+    ? dates.filter((entry) => Date.parse(`${entry.date}T00:00:00Z`) - firstDay <= 6 * 86_400_000)
+    : dates;
+
+  for (const entry of withinWindow) {
+    if (seen.has(entry.date)) continue;
+    seen.add(entry.date);
+    out.push(entry);
+    if (out.length === MAX_MILESTONE_DAYS) break;
   }
-
-  return single ? [{ scheduled_at: single, expected_hours: hours }] : [];
+  if (out.length === 0) {
+    return [];
+  }
+  if (values.bookingType === 'one_time') return [out[0]];
+  return out;
 }
 
 /**

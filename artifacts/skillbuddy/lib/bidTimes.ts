@@ -32,10 +32,10 @@
  * Pure: no React, no axios, no Intl.
  */
 
-import type { JobResponse } from '@/types';
+import type { BidResponse, JobMilestoneResponse, JobResponse } from '@/types';
 import { localDay } from '@/lib/jobBooking';
+import { parseClockValue, parseTimeSlot } from '@/lib/apiTimeSlots';
 import {
-  CLIENT_SLOTS,
   type ClockTime,
   DAY_END_MINUTES,
   deriveSlotOf,
@@ -56,17 +56,31 @@ export const PROPOSED_TIME_PREFIX = 'Proposed time:';
 export const BID_MESSAGE_LIMIT = 1000;
 
 /** One task of the job, as the pilot sees it. */
+export interface BidTaskSlot {
+  code: string;
+  label: string;
+  startMinutes: number;
+  endMinutes: number;
+  arrivalMinutes: number[];
+}
+
 export interface BidTaskWindow {
   /** 1-based "Task N". */
   number: number;
+  /** Server milestone id (needed by the structured BidCreate body). */
+  milestoneId?: number | null;
   /** Local day of the task, or null when the job has no readable instant. */
   day: Date | null;
-  /** Local minutes of the client's window start. */
+  /** Local minutes of the earliest allowed window start. */
   startMinutes: number;
-  /** Local minutes of the client's window end. */
+  /** Local minutes of the latest allowed window end. */
   endMinutes: number;
-  /** True when the client chose Anytime (a custom window). */
+  /** True when the client chose Anytime (a custom/legacy window). */
   anytime: boolean;
+  /** Every allowed API slot for this ONE day/task. */
+  slots: BidTaskSlot[];
+  /** Duration sent as this milestone's eta_minutes (expected hours × 60). */
+  durationMinutes: number;
 }
 
 /**
@@ -75,11 +89,66 @@ export interface BidTaskWindow {
  * Each window comes from the stored schedule line first (an Anytime booking only
  * exists there) and falls back to the job's local start.
  */
+function slotsOfMilestone(milestone: JobMilestoneResponse): BidTaskSlot[] {
+  return (milestone.time_slots ?? [])
+    .map((raw) => {
+      const parsed = parseTimeSlot({ ...raw, id: milestone.id, sort_order: 0 });
+      if (!parsed) return null;
+      return {
+        code: parsed.code,
+        label: parsed.label,
+        startMinutes: parsed.startMinutes,
+        endMinutes: parsed.endMinutes,
+        arrivalMinutes: parsed.arrivalMinutes,
+      };
+    })
+    .filter((slot): slot is BidTaskSlot => slot !== null);
+}
+
+function arrivalMinutesOf(milestone: JobMilestoneResponse): number[] {
+  return Array.from(
+    new Set(
+      (milestone.arrival_options ?? [])
+        .map(parseClockValue)
+        .filter((minutes): minutes is number => minutes !== null)
+    )
+  ).sort((a, b) => a - b);
+}
+
 export function jobTaskWindows(job: JobResponse | null | undefined): BidTaskWindow[] {
   if (!job) return [];
   const milestones = [...(job.milestones ?? [])].sort(
     (a, b) => a.sequence - b.sequence || a.id - b.id
   );
+  if (milestones.length > 0) {
+    // Read the legacy schedule line ONCE for the whole list so task N always
+    // gets segment N, never task 1's window repeated.
+    const legacy = legacyTaskWindows(job, milestones);
+    return milestones.map((milestone, index) => {
+      const slots = slotsOfMilestone(milestone);
+      if (slots.length > 0) {
+        const start = Math.min(...slots.map((slot) => slot.startMinutes));
+        const end = Math.max(...slots.map((slot) => slot.endMinutes));
+        const hours = Number(milestone.expected_hours);
+        return {
+          number: index + 1,
+          milestoneId: milestone.id,
+          day: localStartOf(milestone.scheduled_at)?.day ?? (milestone.scheduled_date ? new Date(`${milestone.scheduled_date}T00:00:00`) : null),
+          startMinutes: start,
+          endMinutes: end,
+          anytime: false,
+          slots,
+          durationMinutes: Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : 60,
+        };
+      }
+      // Legacy milestone without time_slots: fall through to its own segment.
+      return { ...legacy[index], milestoneId: milestone.id, slots: [], number: index + 1 };
+    });
+  }
+  return legacyTaskWindows(job, []);
+}
+
+function legacyTaskWindows(job: JobResponse, milestones: JobMilestoneResponse[]): BidTaskWindow[] {
   const segments = segmentsForTasks(
     parseScheduleSegments(job.description),
     Math.max(1, milestones.length)
@@ -98,30 +167,40 @@ export function jobTaskWindows(job: JobResponse | null | undefined): BidTaskWind
     const derived = deriveSlotOf({ scheduledAt: entry.scheduledAt, segment: entry.segment });
     if (derived?.kind === 'slot') {
       const slot = slotByKey(derived.key);
+      const start = slot?.startMinutes ?? local?.minutes ?? 9 * 60;
+      const end = slot?.endMinutes ?? DAY_END_MINUTES;
       return {
         number: index + 1,
         day: local?.day ?? null,
-        startMinutes: slot?.startMinutes ?? local?.minutes ?? 9 * 60,
-        endMinutes: slot?.endMinutes ?? DAY_END_MINUTES,
+        startMinutes: start,
+        endMinutes: end,
         anytime: false,
+        slots: slot ? [{ code: slot.key, label: slot.label, startMinutes: start, endMinutes: end, arrivalMinutes: slot.arrivalMinutes }] : [],
+        durationMinutes: 60,
       };
     }
     if (derived?.kind === 'anytime') {
+      const start = minutesOf(derived.start) ?? 9 * 60;
+      const end = minutesOf(derived.end) ?? 10 * 60;
       return {
         number: index + 1,
         day: local?.day ?? null,
-        startMinutes: minutesOf(derived.start) ?? 9 * 60,
-        endMinutes: minutesOf(derived.end) ?? 10 * 60,
+        startMinutes: start,
+        endMinutes: end,
         anytime: true,
+        slots: [],
+        durationMinutes: 60,
       };
     }
-    // Nothing readable: offer the first client window so the form is usable.
+    // Nothing readable: a neutral one-hour window keeps the form usable.
     return {
       number: index + 1,
       day: local?.day ?? localDay(new Date()),
-      startMinutes: CLIENT_SLOTS[0].startMinutes,
-      endMinutes: CLIENT_SLOTS[0].endMinutes,
+      startMinutes: 9 * 60,
+      endMinutes: 10 * 60,
       anytime: false,
+      slots: [],
+      durationMinutes: 60,
     };
   });
 }
@@ -138,6 +217,8 @@ export function arrivalOptionsFor(task: BidTaskWindow): ClockTime[] {
     endMinutes: task.endMinutes,
     start: { hour: Math.floor(task.startMinutes / 60), minute: task.startMinutes % 60 },
     end: { hour: Math.floor(task.endMinutes / 60), minute: task.endMinutes % 60 },
+    arrivalMinutes: [],
+    label: '',
   });
   if (marks.length > 0) return marks;
   return [
@@ -148,10 +229,70 @@ export function arrivalOptionsFor(task: BidTaskWindow): ClockTime[] {
   ];
 }
 
-/** One chosen arrival: task number + local minutes. */
+/** One chosen arrival: task number, local minutes and the slot it belongs to. */
 export interface ProposedArrival {
   taskNumber: number;
   minutes: number;
+  slotCode?: string | null;
+}
+
+/** The server's arrival chips grouped by the client's allowed slot. */
+export function arrivalGroupsFor(
+  task: BidTaskWindow
+): Array<{ slot: BidTaskSlot | null; options: ClockTime[] }> {
+  if (task.slots.length === 0) return [{ slot: null, options: arrivalOptionsFor(task) }];
+  return task.slots.map((slot) => ({
+    slot,
+    options: slot.arrivalMinutes.length > 0
+      ? slot.arrivalMinutes.map((minutes) => ({
+          hour: Math.floor(minutes / 60),
+          minute: minutes % 60,
+        }))
+      : arrivalOptionsFor(task),
+  }));
+}
+
+/** `HH:MM` for a `HH:MM:SS`-tolerant stored arrival. */
+export function hhmm(minutes: number): string {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour < 10 ? '0' : ''}${hour}:${minute < 10 ? '0' : ''}${minute}`;
+}
+
+/** Structured arrivals from the server, or the legacy message line. */
+export function arrivalsFromBid(bid: BidResponse | null | undefined): ProposedArrival[] {
+  if (!bid) return [];
+  if (bid.milestones && bid.milestones.length > 0) {
+    return bid.milestones
+      .map((milestone): ProposedArrival | null => {
+        const minutes = parseClockValue(milestone.arrival_time);
+        return minutes === null
+          ? null
+          : { taskNumber: milestone.sequence, minutes, slotCode: null };
+      })
+      .filter((entry): entry is ProposedArrival => entry !== null)
+      .sort((a, b) => a.taskNumber - b.taskNumber);
+  }
+  return parseProposedTimeLine(bid.message).arrivals;
+}
+
+/** BidCreate.milestones[] from the pilot's one-arrival-per-task choices. */
+export function buildBidMilestones(
+  arrivals: ProposedArrival[],
+  tasks: BidTaskWindow[]
+): Array<{ milestone_id: number; arrival_time: string; eta_minutes: number }> {
+  return tasks
+    .filter((task) => task.milestoneId != null)
+    .map((task) => {
+      const chosen = arrivals.find((entry) => entry.taskNumber === task.number);
+      if (!chosen) return null;
+      return {
+        milestone_id: task.milestoneId as number,
+        arrival_time: hhmm(chosen.minutes),
+        eta_minutes: Math.max(1, task.durationMinutes || 60),
+      };
+    })
+    .filter((entry): entry is { milestone_id: number; arrival_time: string; eta_minutes: number } => entry !== null);
 }
 
 /** `Proposed time: Task 1 9:30 AM; Task 2 3:00 PM` (null when nothing chosen). */
@@ -361,22 +502,41 @@ export function taskWindowLabel(
  */
 export function proposedTimesSummary(
   arrivals: ProposedArrival[],
-  meridiem: { am: string; pm: string }
+  meridiem: { am: string; pm: string },
+  options: {
+    /** The job's task windows, used only to add the real task DATE. */
+    tasks?: BidTaskWindow[];
+    /** Localized "Task N" label (the summary itself never hardcodes English). */
+    taskLabel?: (taskNumber: number) => string;
+    /** Localized day label for a task's date. */
+    dayLabel?: (day: Date) => string;
+  } = {}
 ): { single: boolean; text: string } | null {
   const sorted = [...arrivals]
     .filter((entry) => Number.isFinite(entry.minutes))
     .sort((a, b) => a.taskNumber - b.taskNumber);
   if (sorted.length === 0) return null;
-  const clocks = sorted.map((entry) =>
-    formatTimeLabel(
+  const rows = sorted.map((entry) => {
+    const clock = formatTimeLabel(
       { hour: Math.floor(entry.minutes / 60), minute: entry.minutes % 60 },
       meridiem
-    )
-  );
-  if (clocks.length === 1) return { single: true, text: clocks[0] };
+    );
+    const task = options.tasks?.find((item) => item.number === entry.taskNumber);
+    const day = task?.day && options.dayLabel ? options.dayLabel(task.day) : null;
+    return {
+      label: options.taskLabel ? options.taskLabel(entry.taskNumber) : `Task ${entry.taskNumber}`,
+      time: day ? `${day}, ${clock}` : clock,
+      clock,
+    };
+  });
+  if (rows.length === 1) return { single: true, text: rows[0].time };
   return {
     single: false,
-    text: clocks.map((clock, index) => `Task ${sorted[index].taskNumber} ${clock}`).join(' · '),
+    text: rows
+      .map((row) =>
+        options.taskLabel ? `${row.label} · ${row.time}` : `${row.label} ${row.clock}`
+      )
+      .join(' · '),
   };
 }
 

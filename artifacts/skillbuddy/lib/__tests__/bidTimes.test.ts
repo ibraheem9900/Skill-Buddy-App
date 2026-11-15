@@ -5,8 +5,10 @@
  * Run through the same harness as the other lib tests: `pnpm run test`.
  */
 import {
-  appendProposedTimeLine,
+    appendProposedTimeLine,
   arrivalOptionsFor,
+  arrivalsFromBid,
+  buildBidMilestones,
   arrivalsSummary,
   buildProposedTimeLine,
   composeBidMessage,
@@ -23,7 +25,10 @@ import {
   type ProposedArrival,
 } from '../bidTimes';
 import { formatTimeLabel, minutesOf } from '../timeSlots';
+import { seedClientSlots } from './slotFixtures';
 import type { JobResponse } from '../../types';
+
+seedClientSlots();
 
 declare const console: { log: (msg: string) => void };
 
@@ -51,6 +56,8 @@ const task = (overrides: Partial<BidTaskWindow> = {}): BidTaskWindow => ({
   startMinutes: 8 * 60,
   endMinutes: 11 * 60,
   anytime: false,
+  slots: [],
+  durationMinutes: 60,
   ...overrides,
 });
 
@@ -380,7 +387,59 @@ eq(
   proposedTimesSummary(arrivals, MERIDIEM)?.text,
   'Task 1 9:30 AM · Task 2 3:00 PM'
 );
+const datedTasks = [
+  task({ number: 1, day: new Date(2026, 10, 14) }),
+  task({ number: 2, day: new Date(2026, 10, 15) }),
+];
+eq(
+  'each arrival carries its localized task label and real date',
+  proposedTimesSummary(arrivals, MERIDIEM, {
+    tasks: datedTasks,
+    taskLabel: (n) => `Ülesanne ${n}`,
+    dayLabel: (day) => `${day.getDate()}.11`,
+  })?.text,
+  'Ülesanne 1 · 14.11, 9:30 AM · Ülesanne 2 · 15.11, 3:00 PM'
+);
+eq(
+  'one arrival keeps its real date too',
+  proposedTimesSummary([arrivals[0]], MERIDIEM, {
+    tasks: datedTasks,
+    taskLabel: (n) => `Ülesanne ${n}`,
+    dayLabel: (day) => `${day.getDate()}.11`,
+  })?.text,
+  '14.11, 9:30 AM'
+);
 eq('nothing chosen is null', proposedTimesSummary([], MERIDIEM), null);
+
+/* ── Structured bid milestones (the API's own arrival fields) ────────────── */
+
+const structuredBid = {
+  milestones: [
+    { milestone_id: 109, sequence: 1, scheduled_date: '2026-11-15', arrival_time: '12:00', arrival_at: '2026-11-15T10:00:00Z', eta_minutes: 60, ends_at: '2026-11-15T11:00:00Z' },
+    { milestone_id: 110, sequence: 2, scheduled_date: '2026-11-16', arrival_time: '14:30', arrival_at: '2026-11-16T12:30:00Z', eta_minutes: 120, ends_at: '2026-11-16T14:30:00Z' },
+  ],
+} as never;
+
+const structuredArrivals = arrivalsFromBid(structuredBid);
+eq('a structured bid yields one arrival per task', structuredArrivals.length, 2);
+eq('the first arrival keeps its task number', structuredArrivals[0].taskNumber, 1);
+eq('the first arrival is local 12:00', structuredArrivals[0].minutes, 720);
+eq('the second arrival is local 14:30', structuredArrivals[1].minutes, 870);
+
+const bidTasks: BidTaskWindow[] = [
+  { ...task(), number: 1, milestoneId: 109, durationMinutes: 60 },
+  { ...task(), number: 2, milestoneId: 110, durationMinutes: 120 },
+];
+const outbound = buildBidMilestones(structuredArrivals, bidTasks);
+eq('one outbound milestone per task', outbound.length, 2);
+eq('the milestone id is the server id', outbound[0].milestone_id, 109);
+eq('the arrival is sent as HH:MM', outbound[0].arrival_time, '12:00');
+eq('the eta is the task duration', outbound[1].eta_minutes, 120);
+eq(
+  'a missing arrival emits no milestone for that task',
+  buildBidMilestones([structuredArrivals[0]], bidTasks).length,
+  1
+);
 
 console.log(`bidTimes: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {

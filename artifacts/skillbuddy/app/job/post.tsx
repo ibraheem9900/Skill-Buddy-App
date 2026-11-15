@@ -35,14 +35,15 @@ import AttachmentSection from '@/components/AttachmentSection';
 import AddressFormModal from '@/components/AddressFormModal';
 import { authApi } from '@/services/api';
 import useCategories from '@/hooks/useCategories';
+import useTimeSlots from '@/hooks/useTimeSlots';
 import useServiceDetail from '@/hooks/useServiceDetail';
 import { invalidateJobList } from '@/hooks/useJobList';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
-import { isClientProfileMissing, jobStatusLabelKey } from '@/lib/jobList';
+import { isClientProfileMissing } from '@/lib/jobList';
+import { resolveJobStatus } from '@/lib/jobStatus';
 import { splitTable } from '@/lib/jobSchedule';
 import {
-  FIXED_SLOTS,
   MIN_EXPECTED_HOURS,
   type BookingChoice,
   type BookingErrorKey,
@@ -70,6 +71,7 @@ import {
   activeDayOf,
   applyDayTap,
   applyTaskTime,
+  applyTaskSlots,
   buildTaskMilestones,
   dayKey,
   firstUntimedTask,
@@ -503,8 +505,9 @@ export default function PostJobScreen() {
   >(null);
   const [oneTimeDayKind, setOneTimeDayKind] = useState<OneTimeDay>('today');
 
-  /** Single day: one preset slot OR one custom window (null = nothing chosen). */
-  const [timeChoice, setTimeChoice] = useState<TimeChoice | null>(null);
+  /** Single day: ONE task can allow SEVERAL API slots (multi-select). */
+  const [singleSlots, setSingleSlots] = useState<TimeChoice[]>([]);
+  const timeChoice = singleSlots.length > 0 ? singleSlots[singleSlots.length - 1] : null;
 
   /**
    * Multiple days: the strip's selected days + which one is ACTIVE, and one
@@ -672,7 +675,9 @@ export default function PostJobScreen() {
     if (key === STEP_SCHEDULE) {
       const now = new Date();
       if (bookingKind === 'one_time') {
-        const error = validateOneTime(oneTimeDayKind, timeChoice, now);
+        const error = singleSlots.length === 0
+        ? 'post_err_time'
+        : singleSlots.map((choice) => validateTimeChoice(choice, singleDay, now)).find(Boolean) ?? null;
         if (error) next.time = t(error);
         if (hours < MIN_EXPECTED_HOURS) next.hours = t('post_err_hours');
       } else {
@@ -714,19 +719,24 @@ export default function PostJobScreen() {
 
   const validateStep = (index: number) => validateStepKey(steps[index] ?? STEP_DETAILS);
 
+  const singleDay = bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : null;
+
   /** Live schedule problems for the visible step, without pressing Next. */
   const scheduleError = useMemo(() => {
     if (stepKey !== STEP_SCHEDULE) return null;
     const now = new Date();
     if (bookingKind === 'one_time') {
-      const error = validateOneTime(oneTimeDayKind, timeChoice, now);
+      if (singleSlots.length === 0) return t('post_err_time');
+      const error = singleSlots
+        .map((choice) => validateTimeChoice(choice, singleDay, now))
+        .find((entry): entry is BookingErrorKey => entry !== null) ?? null;
       return error ? t(error) : null;
     }
     if (tasks.length === 0) return t('post_err_dates_pick');
     if (firstUntimedTask(tasks, now) >= 0) return t('post_err_day_time');
     const error = validateTasks(tasks, now, { bookingType: 'multi_day' });
     return error ? t(error) : null;
-  }, [stepKey, bookingKind, oneTimeDayKind, timeChoice, tasks, t]);
+  }, [stepKey, bookingKind, oneTimeDayKind, singleSlots, singleDay, tasks, t]);
 
   /** Live problems on the Tasks step (including the two-date minimum). */
   const tasksError = useMemo(() => {
@@ -743,17 +753,45 @@ export default function PostJobScreen() {
     (stepKey === STEP_TASKS && tasksError !== null);
 
   // ── Picker wiring ─────────────────────────────────────────────────────────
-  const singleDay = bookingKind === 'one_time' ? oneTimeDay(oneTimeDayKind) : null;
+  const { status: slotsStatus, refresh: refreshSlots } = useTimeSlots();
+  const slotGate = slotsStatus === 'loading'
+    ? (
+        <View style={[styles.inlineError, { gap: 8 }]}>
+          <ActivityIndicator size="small" color={c.primary} />
+          <Text style={[styles.hint, { color: c.mutedForeground, marginTop: 0 }]}>
+            {t('post_slots_loading')}
+          </Text>
+        </View>
+      )
+    : slotsStatus === 'error'
+      ? (
+          <View style={[styles.inlineError, { flexDirection: 'column', alignItems: 'flex-start' }]}>
+            <Text style={[styles.error, { color: c.destructive, marginTop: 0 }]}>
+              {t('post_slots_error')}
+            </Text>
+            <TouchableOpacity onPress={() => void refreshSlots()}>
+              <Text style={[styles.serviceStateAction, { color: c.primary }]}>
+                {t('post_slots_retry')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )
+      : null;
+
   const activeTask = activeDayOf(daySelection, tasks);
   const activeDay = activeTask?.day ?? null;
   const windowLabel = formatWindowLabel(timeChoice, meridiem);
   const shortWindow = !!timeChoice && windowShorterThanHours(timeChoice, hours);
-  /** The Single-day hours ceiling for the chosen start (null = no time yet). */
+  /** The most restrictive Single-day cap: the LATEST allowed slot's start. */
   const singleHoursCap = useMemo(() => {
-    const win = selectionWindow(timeChoice);
-    if (!win) return null;
-    return maxHoursForStart(minutesOf(win.start));
-  }, [timeChoice]);
+    const starts = singleSlots
+      .map((choice) => selectionWindow(choice))
+      .filter((win): win is { start: { hour: number; minute: number }; end: { hour: number; minute: number } } => win !== null)
+      .map((win) => minutesOf(win.start))
+      .filter((minutes): minutes is number => minutes !== null);
+    if (starts.length === 0) return null;
+    return maxHoursForStart(Math.max(...starts));
+  }, [singleSlots]);
 
   // A new start can lower the ceiling. Lower the value with it and say so — the
   // payload can never carry more hours than the 11 PM rule allows.
@@ -786,7 +824,7 @@ export default function PostJobScreen() {
    */
   const preferredLine = useMemo(() => {
     if (bookingKind === 'one_time') {
-      const win = selectionWindow(timeChoice);
+      const win = selectionWindow(singleSlots[0] ?? null);
       if (!win) return null;
       return buildScheduleLine([
         {
@@ -811,7 +849,7 @@ export default function PostJobScreen() {
         })
         .filter((part): part is NonNullable<typeof part> => part !== null)
     );
-  }, [bookingKind, timeChoice, tasks, meridiem]);
+  }, [bookingKind, singleSlots, tasks, meridiem]);
 
   // ── Addresses ─────────────────────────────────────────────────────────────
   const loadAddresses = useCallback(async () => {
@@ -1051,13 +1089,13 @@ export default function PostJobScreen() {
   );
 
   const showPostedAlert = (created: JobResponse) => {
-    const createdStatusKey = jobStatusLabelKey(created.status);
+    const createdStatus = resolveJobStatus(created);
     showAlert({
       title: t('post_success_title'),
       message:
-        created.status === 'OPEN' || !createdStatusKey
+        createdStatus.displayStatus === 'OPEN'
           ? t('post_success_msg')
-          : t('post_success_msg_status', { status: t(createdStatusKey) }),
+          : t('post_success_msg_status', { status: t(createdStatus.labelKey) }),
       icon: 'check-circle',
       buttons: [{ text: t('post_view_job'), onPress: () => goToJob(created.id) }],
     });
@@ -1192,7 +1230,7 @@ export default function PostJobScreen() {
         : MIN_HOURS_BEFORE_DAY_END;
     const milestones =
       bookingKind === 'one_time'
-        ? buildOneTimeMilestones(oneTimeDay(oneTimeDayKind, now), timeChoice as TimeChoice, chosenHours)
+        ? buildOneTimeMilestones(oneTimeDay(oneTimeDayKind, now), singleSlots, chosenHours)
         : buildTaskMilestones(tasks);
 
     const payload = buildCreateJobRequest({
@@ -1204,9 +1242,9 @@ export default function PostJobScreen() {
       preferredTimeLine: preferredLine,
       requestType: urgency,
       bookingType: bookingKind,
-      scheduledAtIso: milestones[0]?.scheduled_at ?? null,
       milestones: milestones.map((m) => ({
-        scheduledAtIso: m.scheduled_at,
+        date: m.date,
+        timeSlots: m.time_slots,
         expectedHours: Number(m.expected_hours),
       })),
       expectedHours: chosenHours,
@@ -1425,10 +1463,12 @@ export default function PostJobScreen() {
           icon="zap"
           title={t('post_urgent')}
           description={t('post_urgent_desc')}
-          // The web app's gold token (--warning = oklch(0.78 0.16 75) = #F2A618).
-          accent={c.urgentText}
+          // The web app's gold token (--warning = oklch(0.78 0.16 75)). The
+          // icon and check sit ON the gold fill, so they use its dark foreground
+          // rather than the old brown-on-brown pair that made them invisible.
+          accent={c.gold}
           accentSoft={c.urgentBg}
-          onAccent={c.urgentText}
+          onAccent={c.goldForeground}
           idle={c.muted}
           border={c.border}
           titleColor={c.text}
@@ -1556,6 +1596,20 @@ export default function PostJobScreen() {
     );
   };
 
+  /** Multi-select for the single day's ONE task; Anytime stays exclusive. */
+  const toggleSingleSlot = (choice: TimeChoice) => {
+    setSingleSlots((prev) => {
+      if (choice.kind === 'anytime') {
+        return prev.some((entry) => entry.kind === 'anytime') ? [] : [choice];
+      }
+      if (prev.some((entry) => entry.kind === 'anytime')) return [choice];
+      const exists = prev.some((entry) => entry.kind === 'slot' && entry.key === choice.key);
+      return exists
+        ? prev.filter((entry) => !(entry.kind === 'slot' && entry.key === choice.key))
+        : [...prev, choice];
+    });
+  };
+
   const renderSingleDay = () => (
     <>
       <Text style={[styles.label, { color: c.text }]}>{t('post_date')}</Text>
@@ -1568,6 +1622,7 @@ export default function PostJobScreen() {
               style={[styles.chip, { backgroundColor: active ? c.primary : c.muted }]}
               onPress={() => {
                 setOneTimeDayKind(kind);
+                setSingleSlots([]);
                 clearError('date');
                 clearError('time');
               }}
@@ -1583,14 +1638,14 @@ export default function PostJobScreen() {
       </View>
 
       <Text style={[styles.label, { color: c.text }]}>{t('post_time')}</Text>
+      <Text style={[styles.hint, { color: c.mutedForeground }]}>{t('post_slots_hint')}</Text>
+      {slotGate}
       <TimeChoices
         choice={timeChoice}
         day={singleDay}
-        onChange={(next) => {
-          setTimeChoice(next);
-          clearError('time');
-          clearError('date');
-        }}
+        onChange={(next) => setSingleSlots(next ? [next] : [])}
+        selected={singleSlots}
+        onToggle={toggleSingleSlot}
       />
       {shortWindow ? (
         <Text style={[styles.hint, { color: c.mutedForeground }]}>
@@ -1656,8 +1711,9 @@ export default function PostJobScreen() {
             {t('post_time_for_day', { day: formatDayLabel(activeTask.day, months, weekdays) })}
           </Text>
           <Text style={[styles.hint, { color: c.mutedForeground, marginBottom: 8 }]}>
-            {t('post_time_multi_hint', { n: MAX_SLOTS_PER_DAY })}
+            {t('post_slots_hint')}
           </Text>
+          {slotGate}
           <TimeChoices
             choice={activeTask.time}
             day={activeTask.day}
@@ -1736,11 +1792,25 @@ export default function PostJobScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        tasks.map((task, index) => {
-          const taskWindow = formatWindowLabel(task.time, meridiem);
-          const untimed = validateTimeChoice(task.time, task.day, new Date()) !== null;
-          const cap = taskHoursCap(task);
-          const atCap = cap !== null && task.hours >= cap;
+        tasks
+          .filter((task, index, list) => list.findIndex((entry) => entry.dayKey === task.dayKey) === index)
+          .map((task, index) => {
+          const group = tasksForDay(tasks, task.dayKey);
+          // EVERY allowed slot of the day is shown, not just the first.
+          const taskWindow = group
+            .flatMap((entry) =>
+              entry.timeSlots && entry.timeSlots.length > 0
+                ? entry.timeSlots.map((code) =>
+                    formatWindowLabel({ kind: 'slot', key: code } as TimeChoice, meridiem)
+                  )
+                : [formatWindowLabel(entry.time, meridiem)]
+            )
+            .filter(Boolean)
+            .join(', ');
+          const untimed = group.some((entry) => validateTimeChoice(entry.time, entry.day, new Date()) !== null);
+          const cap = Math.min(...group.map((entry) => taskHoursCap(entry) ?? 0).filter((value) => value > 0));
+          const groupHours = Math.max(...group.map((entry) => entry.hours));
+          const atCap = Number.isFinite(cap) && groupHours >= cap;
           return (
             <Animated.View
               key={task.key}
@@ -1779,7 +1849,16 @@ export default function PostJobScreen() {
                   <Feather name="edit-2" size={15} color={c.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => removeTask(task)}
+                  onPress={() => {
+                    setTasks((prev) => prev.filter((entry) => entry.dayKey !== task.dayKey));
+                    setDaySelection((prev) => {
+                      const remainingDays = prev.days.filter((day) => dayKey(day) !== task.dayKey);
+                      return activeAfterDelete(remainingDays, task.dayKey);
+                    });
+                    setTaskEditorKey((current) => (current === task.key ? null : current));
+                    clearError('time');
+                    clearError('date');
+                  }}
                   hitSlop={8}
                   style={styles.taskAction}
                   accessibilityRole="button"
@@ -1799,22 +1878,22 @@ export default function PostJobScreen() {
                     onPress={() =>
                       setTasks((prev) =>
                         prev.map((entry) =>
-                          entry.key === task.key
+                          entry.dayKey === task.dayKey
                             ? { ...entry, hours: Math.max(MIN_EXPECTED_HOURS, entry.hours - 1) }
                             : entry
                         )
                       )
                     }
-                    disabled={task.hours <= MIN_EXPECTED_HOURS}
+                    disabled={groupHours <= MIN_EXPECTED_HOURS}
                     accessibilityRole="button"
                     accessibilityLabel={`${t('post_task_hours')} -1`}
                   >
                     <Feather name="minus" size={14} color={c.text} />
                   </TouchableOpacity>
                   <Text style={[styles.taskStepperValue, { color: c.text }]}>
-                    {task.hours === 1
-                      ? t('post_hours_value', { n: task.hours })
-                      : t('post_hours_value_plural', { n: task.hours })}
+                    {groupHours === 1
+                      ? t('post_hours_value', { n: groupHours })
+                      : t('post_hours_value_plural', { n: groupHours })}
                   </Text>
                   <TouchableOpacity
                     style={[
@@ -1824,7 +1903,7 @@ export default function PostJobScreen() {
                     onPress={() =>
                       setTasks((prev) =>
                         prev.map((entry) =>
-                          entry.key === task.key
+                          entry.dayKey === task.dayKey
                             ? { ...entry, hours: clampHours(entry.hours + 1, cap ?? MIN_EXPECTED_HOURS) }
                             : entry
                         )
@@ -2101,13 +2180,13 @@ export default function PostJobScreen() {
         onClose={() => setTaskEditorKey(null)}
         task={editingTask}
         index={editingTaskIndex < 0 ? 0 : editingTaskIndex}
-        onSave={(time) => {
+        onSave={(slots, hours) => {
           if (!editingTask) return;
           const index = tasks.findIndex((entry) => entry.key === editingTask.key);
-          const { tasks: next, loweredFrom } = applyTaskTime(tasks, editingTask.key, time);
+          const { tasks: next, loweredFrom } = applyTaskSlots(tasks, editingTask.key, slots, hours);
           setTasks(next);
           if (loweredFrom !== null) {
-            const updated = next.find((entry) => entry.key === editingTask.key);
+            const updated = next.find((entry) => entry.dayKey === editingTask.dayKey);
             if (updated) setTaskHoursNotice({ n: index + 1, hours: updated.hours });
           }
           clearError('time');

@@ -55,6 +55,8 @@ export function useBidSubmit() {
       priceInput: string,
       etaInput: string,
       messageInput: string,
+      /** One structured arrival per job milestone (BidCreate.milestones). */
+      milestones: { milestone_id: number; arrival_time: string; eta_minutes: number }[],
       /**
        * Optional client-side ceiling for offered_price. The live schema sets NO
        * maximum (only `exclusiveMinimum: 0`), so the only bound the app applies
@@ -79,7 +81,7 @@ export function useBidSubmit() {
       try {
         const { data } = await authApi.createBid(
           jobId,
-          buildBidCreateRequest(price.value, eta.value, message.value)
+          buildBidCreateRequest(price.value, eta.value, message.value, milestones)
         );
         // The job's own flags change once a bid exists, and the list rows show
         // bid counts, so both caches are dropped rather than patched.

@@ -21,20 +21,18 @@ import JobCard from '@/components/JobCard';
 import EmptyState from '@/components/EmptyState';
 import NearbyJobsFeed from '@/components/NearbyJobsFeed';
 import MyBidsFeed from '@/components/MyBidsFeed';
-import JobsFilterSheet from '@/components/JobsFilterSheet';
+import JobsSortSheet from '@/components/JobsSortSheet';
 import TabGreenHeader from '@/components/TabGreenHeader';
+import { filterJobsBySearch, isClientProfileMissing, resolveJobsViewState } from '@/lib/jobList';
+import { resolveJobStatus } from '@/lib/jobStatus';
+import useJobList from '@/hooks/useJobList';
 import {
-  EMPTY_JOB_FILTERS,
-  activeFilterCount,
-  activeFilterIds,
-  filterJobsBySearch,
-  isClientProfileMissing,
-  jobStatusLabelKey,
-  removeFilter,
-  resolveJobsViewState,
-  type JobFilterId,
-} from '@/lib/jobList';
-import useJobList, { hasActiveFilters } from '@/hooks/useJobList';
+  DEFAULT_JOB_SORT,
+  hasDistanceData,
+  sortJobs,
+  type JobSort,
+  type JobSortKey,
+} from '@/lib/jobSort';
 import {
   addHiddenId,
   filterHiddenJobs,
@@ -107,7 +105,8 @@ function JobsScreen() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { activeRole } = useRole();
   const [providerTab, setProviderTab] = useState<ProviderTab>('available');
-  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [sortSheetOpen, setSortSheetOpen] = useState(false);
+  const [sort, setSort] = useState<JobSort>(DEFAULT_JOB_SORT);
   /** What the user typed — updates instantly so every keystroke is visible. */
   const [searchText, setSearchText] = useState('');
   /** The filtering query — a 300 ms-debounced copy of searchText. */
@@ -136,8 +135,6 @@ function JobsScreen() {
     inlineError,
     serverMessage,
     failure,
-    filters,
-    setFilters,
     refresh,
     retry,
     loadMore,
@@ -223,14 +220,11 @@ function JobsScreen() {
     [hiddenJobIds, showToast, t, userId]
   );
 
-  const filtered = hasActiveFilters(filters);
-  const filterCount = activeFilterCount(filters);
-  const filterIds = activeFilterIds(filters);
   const searchActive = query.trim().length > 0;
 
   // ONE decision for the whole screen: a 200 + [] is an empty state (never an
   // error), and an error card only appears when nothing is on screen.
-  const view = resolveJobsViewState({ status, jobCount: jobs.length, hasFilters: filtered });
+  const view = resolveJobsViewState({ status, jobCount: jobs.length, hasFilters: false });
 
   /**
    * The visible rows: the server-filtered list narrowed by the search text.
@@ -239,10 +233,12 @@ function JobsScreen() {
    */
   const searched = useMemo(() => {
     if (!searchActive) return jobs;
-    return filterJobsBySearch(jobs, query, (statusValue) => {
-      const key = jobStatusLabelKey(statusValue);
-      return key ? t(key) : String(statusValue ?? '');
-    });
+    return filterJobsBySearch(
+      jobs,
+      query,
+      () => '',
+      (job) => t(resolveJobStatus(job).labelKey)
+    );
   }, [jobs, query, searchActive, t]);
 
   /**
@@ -251,20 +247,16 @@ function JobsScreen() {
    * matches the cards on screen.
    */
   const visibleJobs = useMemo(
-    () => filterHiddenJobs(searched, hiddenJobIds),
-    [searched, hiddenJobIds]
+    () => sortJobs(filterHiddenJobs(searched, hiddenJobIds), sort),
+    [searched, hiddenJobIds, sort]
   );
 
-  /** The label of one active-filter chip (translated, never a raw enum). */
-  const filterChipLabel = (id: JobFilterId): string => {
-    if (id === 'status') {
-      const key = filters.status ? jobStatusLabelKey(filters.status) : null;
-      return key ? t(key) : '';
-    }
-    if (id === 'requestType') {
-      return filters.requestType === 'URGENT' ? t('jobs_urgent') : t('jobs_regular');
-    }
-    return t('jobs_filter_bidding');
+  const distanceAvailable = useMemo(() => hasDistanceData(jobs), [jobs]);
+  const sortLabelKey: Record<JobSortKey, TranslationKey> = {
+    time: 'jobs_sort_time',
+    amount: 'jobs_sort_amount',
+    distance: 'jobs_sort_distance',
+    hours: 'jobs_sort_hours',
   };
 
   const clearSearch = () => {
@@ -275,13 +267,19 @@ function JobsScreen() {
   /** One action for the Reset button and the search-empty state. */
   const clearAll = () => {
     clearSearch();
-    setFilters(EMPTY_JOB_FILTERS);
+    setSort(DEFAULT_JOB_SORT);
   };
 
   const openJob = (job: JobListItem) => {
     // Details come from GET /api/v1/jobs/{job_id} on that screen — the list
     // item has no description or address to pass along.
-    router.push(`/job/${job.id}` as any);
+    // `JobListItem` carries no distance; only a feed item that does adds it.
+    const maybeDistance = (job as unknown as { distance_km?: unknown }).distance_km;
+    const distance =
+      typeof maybeDistance === 'number' && Number.isFinite(maybeDistance)
+        ? maybeDistance
+        : undefined;
+    router.push({ href: `/job/${job.id}`, params: distance !== undefined ? { distance } : {} } as any);
   };
 
   /**
@@ -406,9 +404,8 @@ function JobsScreen() {
           providerMode
             ? null
             : {
-                count: filterCount,
-                onPress: () => setFilterSheetOpen(true),
-                label: t('jobs_filter_title'),
+                onPress: () => setSortSheetOpen(true),
+                label: t('jobs_sort_title'),
               }
         }
       />
@@ -453,47 +450,21 @@ function JobsScreen() {
         </>
       ) : (
         <>
-          {/* ONE slim summary row: the active-filter chips (each removable) with
-              a Reset action, and the result count. It wraps, so it can never
-              push anything off-screen however long a translated label is. */}
+          {/* ONE slim summary row: the active sort (a button, not a filter
+              popup) and the result count. */}
           <View style={[styles.summaryRow, { borderBottomColor: c.border }]}>
-            <View style={styles.summaryChips}>
-              {filterIds.length === 0 ? (
-                <Text style={[styles.allJobs, { color: c.mutedForeground }]}>
-                  {t('jobs_all_jobs_quiet')}
-                </Text>
-              ) : (
-                filterIds.map((id) => (
-                  <TouchableOpacity
-                    key={id}
-                    style={[styles.activeChip, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
-                    onPress={() => setFilters(removeFilter(filters, id))}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${filterChipLabel(id)} — ${t('jobs_filter_remove')}`}
-                  >
-                    <Text
-                      style={[styles.activeChipText, { color: c.primary }]}
-                      numberOfLines={1}
-                    >
-                      {filterChipLabel(id)}
-                    </Text>
-                    <Feather name="x" size={12} color={c.primary} />
-                  </TouchableOpacity>
-                ))
-              )}
-              {filterCount > 0 || searchActive ? (
-                <TouchableOpacity
-                  onPress={clearAll}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('jobs_search_clear')}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Text style={[styles.resetLink, { color: c.primary }]}>
-                    {t('jobs_filter_reset')}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+            <TouchableOpacity
+              style={[styles.activeChip, { backgroundColor: c.primaryLight, borderColor: c.primary }]}
+              onPress={() => setSortSheetOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('jobs_sort_title')}
+            >
+              <Feather name="sliders" size={12} color={c.primary} />
+              <Text style={[styles.activeChipText, { color: c.primary }]} numberOfLines={1}>
+                {t(sortLabelKey[sort.key])}
+              </Text>
+              <Feather name={sort.direction === 'asc' ? 'arrow-up' : 'arrow-down'} size={11} color={c.primary} />
+            </TouchableOpacity>
             <Text style={[styles.resultCount, { color: c.mutedForeground }]}>
               {t('jobs_result_count', { n: visibleJobs.length })}
             </Text>
@@ -531,7 +502,7 @@ function JobsScreen() {
                 // condition is a list the user emptied HIMSELF by removing
                 // finished jobs — same "no jobs" state, never an error.
                 view === 'empty' ||
-                (visibleJobs.length === 0 && !searchActive && !filtered) ? (
+                (visibleJobs.length === 0 && !searchActive) ? (
                   <EmptyState
                     icon="briefcase"
                     title={t('jobs_empty_title')}
@@ -547,15 +518,7 @@ function JobsScreen() {
                     actionLabel={t('jobs_search_clear')}
                     onAction={clearAll}
                   />
-                ) : (
-                  <EmptyState
-                    icon="filter"
-                    title={t('jobs_empty_filtered_title')}
-                    subtitle={t('jobs_empty_filtered_sub')}
-                    actionLabel={t('jobs_filter_reset')}
-                    onAction={() => setFilters(EMPTY_JOB_FILTERS)}
-                  />
-                )
+                ) : null
               }
               ListFooterComponent={footer()}
               renderItem={({ item, index }) => (
@@ -595,14 +558,12 @@ function JobsScreen() {
             </View>
           ) : null}
 
-          <JobsFilterSheet
-            visible={filterSheetOpen}
-            onClose={() => setFilterSheetOpen(false)}
-            value={filters}
-            onApply={(next) => {
-              setFilterSheetOpen(false);
-              setFilters(next);
-            }}
+          <JobsSortSheet
+            visible={sortSheetOpen}
+            onClose={() => setSortSheetOpen(false)}
+            value={sort}
+            onChange={setSort}
+            disabledKeys={distanceAvailable ? [] : ['distance']}
           />
         </>
       )}

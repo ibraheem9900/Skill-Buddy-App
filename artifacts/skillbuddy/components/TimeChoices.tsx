@@ -4,11 +4,11 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
-  FIXED_SLOTS,
+  fixedSlots,
   formatWindowLabel,
-  hasSlotStarted,
   type TimeChoice,
 } from '@/lib/jobBooking';
+import { slotAvailableToday } from '@/lib/timeSlots';
 import { toggleSlot, toggleAnytime } from '@/lib/postWizard';
 
 /**
@@ -74,10 +74,10 @@ export default function TimeChoices({
   return (
     <View>
       <View style={styles.grid}>
-        {FIXED_SLOTS.map((slot) => {
+        {fixedSlots().map((slot) => {
           const slotChoice: TimeChoice = { kind: 'slot', key: slot.key };
           const active = isChosen(slotChoice);
-          const started = hasSlotStarted(slotChoice, day);
+          const started = !slotAvailableToday(slotChoice, day);
           const off = disabled || started;
           return (
             <TouchableOpacity
@@ -160,7 +160,7 @@ function AnytimeSlot({
   onPress: () => void;
 }) {
   const { colors: c } = useTheme();
-  const started = hasSlotStarted(choice, day);
+  const started = !slotAvailableToday(choice, day);
   const off = disabled || started;
   return (
     <TouchableOpacity

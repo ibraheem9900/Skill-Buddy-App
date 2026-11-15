@@ -32,6 +32,7 @@
  */
 
 import { parseApiIsoUtc } from '@/lib/jobDetail';
+import type { ApiTimeSlot } from '@/lib/apiTimeSlots';
 
 /* ── Clock values ────────────────────────────────────────────────────────── */
 
@@ -59,7 +60,7 @@ export function clockOf(minutes: number): ClockTime {
 /* ── The five client windows ─────────────────────────────────────────────── */
 
 export interface ClientSlot {
-  /** Stable identity, also used by lib/jobBooking's legacy `key`s. */
+  /** API `code` (MORNING, MIDDAY, …) — the value sent in milestones. */
   key: string;
   /** Local minutes since midnight at which the window opens. */
   startMinutes: number;
@@ -67,26 +68,31 @@ export interface ClientSlot {
   endMinutes: number;
   start: ClockTime;
   end: ClockTime;
+  /** The server's own 30-minute arrival marks, parsed. */
+  arrivalMinutes: number[];
+  label: string;
 }
 
-function slot(key: string, startHour: number, endHour: number): ClientSlot {
-  return {
-    key,
-    startMinutes: startHour * 60,
-    endMinutes: endHour * 60,
-    start: { hour: startHour, minute: 0 },
-    end: { hour: endHour, minute: 0 },
-  };
-}
+/**
+ * The ACTIVE server slots. Empty until GET /api/v1/time-slots (or the persisted
+ * last-good copy) is loaded; every screen reads this one registry so no fixed
+ * 8–11/11–2/… list exists anywhere in the app any more.
+ */
+export const CLIENT_SLOTS: ClientSlot[] = [];
 
-/** The five windows, in the order they appear in the wizard. */
-export const CLIENT_SLOTS: ClientSlot[] = [
-  slot('slot_8_11', 8, 11),
-  slot('slot_11_14', 11, 14),
-  slot('slot_14_17', 14, 17),
-  slot('slot_17_20', 17, 20),
-  slot('slot_20_23', 20, 23),
-];
+/** Replace the registry with the server's slots (called by useTimeSlots). */
+export function setClientSlots(slots: ApiTimeSlot[]): void {
+  const next = slots.map((slot) => ({
+    key: slot.code,
+    startMinutes: slot.startMinutes,
+    endMinutes: slot.endMinutes,
+    start: clockOf(slot.startMinutes),
+    end: clockOf(slot.endMinutes),
+    arrivalMinutes: slot.arrivalMinutes,
+    label: slot.label,
+  }));
+  CLIENT_SLOTS.splice(0, CLIENT_SLOTS.length, ...next);
+}
 
 /** 11:00 PM — the end of the working day for expected-hours arithmetic. */
 export const DAY_END_MINUTES = 23 * 60;
@@ -94,19 +100,18 @@ export const DAY_END_MINUTES = 23 * 60;
 /** The smallest bookable expected-hours value. */
 export const MIN_EXPECTED_HOURS = 1;
 
-/**
- * The largest cap any start can give — the earliest window's own ceiling. It is
- * only an upper bound for the API/README; the real cap is always computed from
- * the task's start with `maxHoursForStart`.
- */
-export const MAX_DAILY_EXPECTED_HOURS = Math.floor(
-  (DAY_END_MINUTES - CLIENT_SLOTS[0].startMinutes) / 60
-);
+/** Absolute upper bound for the hours stepper (8 AM → 11 PM). */
+export const MAX_DAILY_EXPECTED_HOURS = 15;
 
-/** A slot by its stable key, or null. */
+/** A slot by its API code, or null when the registry has not loaded it. */
 export function slotByKey(key: string | null | undefined): ClientSlot | null {
   if (typeof key !== 'string') return null;
   return CLIENT_SLOTS.find((entry) => entry.key === key) ?? null;
+}
+
+/** Is the registry populated? Screens show the slot failure state until it is. */
+export function hasClientSlots(): boolean {
+  return CLIENT_SLOTS.length > 0;
 }
 
 /** The window containing this clock reading (start ≤ m < end), or null. */
@@ -146,10 +151,52 @@ export function selectionWindowOf(
   if (!choice) return null;
   if (choice.kind === 'slot') {
     const entry = slotByKey(choice.key);
-    return entry ? { start: entry.start, end: entry.end } : null;
+    if (entry) return { start: entry.start, end: entry.end };
+    // A TimeChoice built before the registry loaded may carry its own bounds.
+    const start = (choice as { start?: ClockTime }).start;
+    const end = (choice as { end?: ClockTime }).end;
+    if (start && end && minutesOf(start) !== null && minutesOf(end) !== null) {
+      return { start, end };
+    }
+    return null;
   }
   if (minutesOf(choice.start) === null || minutesOf(choice.end) === null) return null;
   return { start: choice.start, end: choice.end };
+}
+
+/**
+ * Can this slot still be booked TODAY? A slot stays open while at least one of
+ * its server arrival marks is in the future; a past-start slot with no future
+ * mark is closed. Future days are always open.
+ */
+export function slotAvailableToday(
+  choice:
+    | { kind: 'slot'; key: string }
+    | { kind: 'anytime'; start: ClockTime; end: ClockTime }
+    | null
+    | undefined,
+  day: Date | null,
+  now: Date = new Date()
+): boolean {
+  if (!choice || !day) return true;
+  if (
+    day.getFullYear() !== now.getFullYear() ||
+    day.getMonth() !== now.getMonth() ||
+    day.getDate() !== now.getDate()
+  ) {
+    return true;
+  }
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  if (choice.kind === 'anytime') {
+    const end = minutesOf(choice.end);
+    return end === null || end > nowMinutes;
+  }
+  const slot = slotByKey(choice.key);
+  if (!slot) return true;
+  if (slot.arrivalMinutes.length > 0) {
+    return slot.arrivalMinutes.some((minutes) => minutes > nowMinutes);
+  }
+  return slot.endMinutes > nowMinutes;
 }
 
 /* ── Pilot arrival marks ─────────────────────────────────────────────────── */
@@ -173,9 +220,10 @@ export function pilotTimesForSlot(
 ): ClockTime[] {
   const entry = typeof target === 'string' ? slotByKey(target) : target ?? null;
   if (!entry) return [];
+  // The server's arrival_options are authoritative; only fall back to the
+  // half-hour grid when a legacy/custom window has no options.
+  if (entry.arrivalMinutes.length > 0) return entry.arrivalMinutes.map(clockOf);
   const marks: ClockTime[] = [];
-  // First mark at or after the start, so an exact :00/:30 start is included and
-  // 9:20 begins at 9:30. `endMinutes` is never reached.
   const first = Math.ceil(entry.startMinutes / PILOT_STEP_MINUTES) * PILOT_STEP_MINUTES;
   for (let minutes = first; minutes < entry.endMinutes; minutes += PILOT_STEP_MINUTES) {
     marks.push(clockOf(minutes));

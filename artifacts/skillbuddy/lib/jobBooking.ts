@@ -35,14 +35,17 @@
 
 import type { JobBookingType } from '@/types';
 import {
+  clampHours,
   CLIENT_SLOTS,
   MAX_DAILY_EXPECTED_HOURS,
+  slotAvailableToday,
   canStartBeforeDayEnd,
   formatTimeLabel as formatClockLabel,
   formatWindowLabel as formatClockWindow,
   maxHoursForStart,
   minutesOf,
   selectionWindowOf,
+  slotByKey as timeSlotByKey,
   slotContaining,
 } from '@/lib/timeSlots';
 
@@ -89,9 +92,10 @@ export interface ClockTime {
   minute: number;
 }
 
-/** One milestone exactly as JobMilestoneCreate expects it. */
+/** One milestone exactly as JobMilestoneCreate expects it (one per day). */
 export interface MilestoneDraft {
-  scheduled_at: string;
+  date: string;
+  time_slots: string[];
   expected_hours: number;
 }
 
@@ -104,15 +108,14 @@ export interface FixedSlot {
   end: ClockTime;
 }
 
-/**
- * 8–11, 11–14, 14–17, 17–20, 20–23 — the SAME five windows, in the same order,
- * read from lib/timeSlots (the single source of truth for every slot time).
- */
-export const FIXED_SLOTS: FixedSlot[] = CLIENT_SLOTS.map((entry) => ({
-  key: entry.key,
-  start: { hour: entry.start.hour, minute: entry.start.minute },
-  end: { hour: entry.end.hour, minute: entry.end.minute },
-}));
+/** The API slots in the wizard shape. Empty until useTimeSlots has loaded. */
+export function fixedSlots(): FixedSlot[] {
+  return CLIENT_SLOTS.map((entry) => ({
+    key: entry.key,
+    start: { hour: entry.start.hour, minute: entry.start.minute },
+    end: { hour: entry.end.hour, minute: entry.end.minute },
+  }));
+}
 
 /** What the wizard's Time section holds. */
 export type TimeChoice =
@@ -121,7 +124,8 @@ export type TimeChoice =
 
 /** A fixed slot by key, or null for an unknown key. */
 export function slotByKey(key: string): FixedSlot | null {
-  return FIXED_SLOTS.find((slot) => slot.key === key) ?? null;
+  const entry = timeSlotByKey(key);
+  return entry ? { key: entry.key, start: entry.start, end: entry.end } : null;
 }
 
 /** The start/end window a choice describes (delegates to lib/timeSlots). */
@@ -165,9 +169,8 @@ export function validateTimeChoice(
   if (startMinutes === null || endMinutes === null) return 'post_err_time';
   if (endMinutes <= startMinutes) return 'post_err_time_window';
   if (!canStartBeforeDayEnd(startMinutes)) return 'post_err_time_late';
-  if (isValidDate(day) && isSameLocalDay(day, now)) {
-    const at = composeInstant(day, win.start.hour, win.start.minute);
-    if (at.getTime() <= now.getTime()) return 'post_err_time_past';
+  if (isValidDate(day) && isSameLocalDay(day, now) && !slotAvailableToday(choice, day, now)) {
+    return 'post_err_time_past';
   }
   return null;
 }
@@ -454,35 +457,60 @@ export function validateMultiDay(
 
 /* ── Milestones ──────────────────────────────────────────────────────────── */
 
-/**
- * ONE_TIME milestones: exactly one, at the START of the chosen window.
- * `expected_hours` is a number on the wire.
- */
-export function buildOneTimeMilestones(
-  day: Date,
-  choice: TimeChoice,
-  expectedHours: number
-): MilestoneDraft[] {
-  const win = selectionWindow(choice);
-  if (!win) return [];
-  const at = composeInstant(day, win.start.hour, win.start.minute);
-  return [{ scheduled_at: at.toISOString(), expected_hours: expectedHours }];
+/** `YYYY-MM-DD` for a local calendar day. */
+function dateKey(day: Date): string {
+  const month = day.getMonth() + 1;
+  const date = day.getDate();
+  return `${day.getFullYear()}-${month < 10 ? `0${month}` : month}-${date < 10 ? `0${date}` : date}`;
+}
+
+/** The API codes of a day's allowed choices (Anytime = every server slot). */
+export function codesOfChoices(choices: TimeChoice[]): string[] {
+  const codes = new Set<string>();
+  for (const choice of choices) {
+    if (choice.kind === 'anytime') {
+      for (const slot of CLIENT_SLOTS) codes.add(slot.key);
+    } else {
+      codes.add(choice.key);
+    }
+  }
+  return Array.from(codes);
 }
 
 /**
- * MULTI_DAY milestones: one per SELECTED day (they need not be consecutive),
- * each at the same window start, each carrying the same per-day expected hours.
+ * ONE_TIME milestone: ONE day, every chosen slot as allowed options. The latest
+ * chosen start drives the expected-hours cap (the most restrictive slot).
  */
-export function buildMultiDayMilestones(
-  days: Date[],
-  choice: TimeChoice,
+export function buildOneTimeMilestones(
+  day: Date,
+  choice: TimeChoice | TimeChoice[],
   expectedHours: number
 ): MilestoneDraft[] {
-  const win = selectionWindow(choice);
-  if (!win) return [];
+  const choices = Array.isArray(choice) ? choice : [choice];
+  const windows = choices.map(selectionWindow).filter((w): w is { start: ClockTime; end: ClockTime } => w !== null);
+  if (windows.length === 0) return [];
+  const latest = Math.max(...windows.map((w) => minutesOf(w.start) ?? 0));
+  return [{
+    date: dateKey(day),
+    time_slots: codesOfChoices(choices),
+    expected_hours: clampHours(expectedHours, maxHoursForStart(latest)),
+  }];
+}
+
+/** MULTI_DAY: one milestone per selected day, same allowed slots, 11 PM cap. */
+export function buildMultiDayMilestones(
+  days: Date[],
+  choice: TimeChoice | TimeChoice[],
+  expectedHours: number
+): MilestoneDraft[] {
+  const choices = Array.isArray(choice) ? choice : [choice];
+  const windows = choices.map(selectionWindow).filter((w): w is { start: ClockTime; end: ClockTime } => w !== null);
+  if (windows.length === 0) return [];
+  const latest = Math.max(...windows.map((w) => minutesOf(w.start) ?? 0));
   return sortDays(days).map((day) => ({
-    scheduled_at: composeInstant(day, win.start.hour, win.start.minute).toISOString(),
-    expected_hours: expectedHours,
+    date: dateKey(day),
+    time_slots: codesOfChoices(choices),
+    expected_hours: clampHours(expectedHours, maxHoursForStart(latest)),
   }));
 }
 

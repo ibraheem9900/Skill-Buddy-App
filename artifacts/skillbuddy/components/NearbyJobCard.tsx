@@ -1,10 +1,12 @@
 import React from 'react';
+import { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CountdownTimer from '@/components/CountdownTimer';
-import { formatDistanceKm, isUrgentRequest, nearbyDeadline, type NearbyJob } from '@/lib/nearbyJobs';
+import { formatDistanceKm, isUrgentRequest, type NearbyJob } from '@/lib/nearbyJobs';
+import { useLiveJobStatus } from '@/hooks/useLiveJobStatus';
 
 /**
  * One card of the provider "Available jobs" feed.
@@ -31,15 +33,32 @@ interface Props {
   categoryName?: string | null;
   serviceName?: string | null;
   onPress: () => void;
+  /** Reload this card's details after a failed call. */
+  onRetry?: () => void;
 }
 
-export default function NearbyJobCard({ job, categoryName, serviceName, onPress }: Props) {
+export default function NearbyJobCard({ job, categoryName, serviceName, onPress, onRetry }: Props) {
   const { colors: c } = useTheme();
   const { t, language } = useLanguage();
 
   const urgent = isUrgentRequest(job.request_type);
-  const deadline = nearbyDeadline(job);
-  const distance = formatDistanceKm(job.distance_km, language);
+  const statusInput = useMemo(
+    () => ({
+      status: 'OPEN' as const,
+      is_bidding_open: true,
+      bidding_ends_at: job.bidding_ends_at,
+      request_type: job.request_type,
+      is_urgent: urgent,
+    }),
+    [job.bidding_ends_at, job.request_type, urgent]
+  );
+  const liveStatus = useLiveJobStatus(statusInput);
+  const deadline = liveStatus.biddingOpen ? liveStatus.deadlineMs : null;
+  const formattedDistance = formatDistanceKm(job.distance_km, language);
+  // Only a distance this app computed from API coordinates is approximate;
+  // the server's own distance_km is shown exactly as sent.
+  const distance = formattedDistance && job.distance_approximate ? `~${formattedDistance}` : formattedDistance;
+  const hours = (job.expected_hours ?? '').trim();
   const category = (categoryName ?? '').trim();
   const service = (serviceName ?? '').trim();
 
@@ -106,6 +125,30 @@ export default function NearbyJobCard({ job, categoryName, serviceName, onPress 
         </View>
       ) : null}
 
+      {hours ? (
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}>
+            <Feather name="clock" size={12} color={c.mutedForeground} />
+            <Text style={[styles.metaText, { color: c.mutedForeground }]}>
+              {t('nearby_card_hours', { n: hours })}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {job.detailsError ? (
+        <TouchableOpacity
+          style={[styles.retryRow, { borderColor: c.border }]}
+          onPress={onRetry}
+          disabled={!onRetry}
+          accessibilityRole="button"
+          accessibilityLabel={t('nearby_card_retry')}
+        >
+          <Feather name="refresh-cw" size={12} color={c.primary} />
+          <Text style={[styles.retryRowText, { color: c.primary }]}>{t('nearby_card_retry')}</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {job.matches_skill ? (
         <View style={[styles.skillBadge, { backgroundColor: c.primaryLight }]}>
           <Feather name="award" size={12} color={c.primary} />
@@ -115,7 +158,7 @@ export default function NearbyJobCard({ job, categoryName, serviceName, onPress 
 
       <View style={[styles.timerRow, { borderTopColor: c.border }]}>
         <Text style={[styles.timerLabel, { color: c.mutedForeground }]}>
-          {t('nearby_card_bidding_ends')}
+          {liveStatus.biddingOpen ? t('nearby_card_bidding_ends') : t(liveStatus.labelKey)}
         </Text>
         {deadline !== null ? (
           <CountdownTimer endsAt={deadline} urgency={urgent ? 'urgent' : 'regular'} compact />
@@ -168,4 +211,15 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   timerLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
+  retryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  retryRowText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11 },
 });

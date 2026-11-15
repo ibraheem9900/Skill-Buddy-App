@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { getSecureItem } from '@/lib/secureStorage';
 import { ACCESS_TOKEN_KEY, BASE_URL, refreshAccessToken } from '@/services/api';
 import {
   buildRealtimeUrl,
@@ -40,7 +40,7 @@ let authFailureHandler: (() => void) | null = null;
  */
 export const realtime: RealtimeService = createRealtimeService({
   buildUrl: (accessToken) => buildRealtimeUrl(BASE_URL, accessToken),
-  getToken: () => SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
+  getToken: () => getSecureItem(ACCESS_TOKEN_KEY),
   refreshToken: async () => {
     try {
       // The REST client's own single-flight refresh: a 401 on REST and a 1008
@@ -99,7 +99,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     // reads storage once; the service re-reads the token for every connection.
     let cancelled = false;
     void (async () => {
-      const token = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+      const token = await getSecureItem(ACCESS_TOKEN_KEY);
       if (cancelled || !token) return;
       realtime.connect();
     })();

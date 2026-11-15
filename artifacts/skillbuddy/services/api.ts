@@ -1,7 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import { deleteSecureItem, getSecureItem, setSecureItem } from '@/lib/secureStorage';
 import { buildListJobsQuery } from '@/lib/jobList';
 import { buildMyBidsQuery } from '@/lib/myBids';
+import { recordServerDate } from '@/lib/serverClock';
 import { isValidBidId } from '@/lib/bid';
 import { isValidJobId } from '@/lib/jobPublish';
 import type { NearbyJob } from '@/lib/nearbyJobs';
@@ -28,7 +29,7 @@ export const api = axios.create({
 // Request: attach Bearer token
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    const token = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+    const token = await getSecureItem(ACCESS_TOKEN_KEY);
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -60,7 +61,7 @@ export function refreshAccessToken(): Promise<string> {
 
   const run = (async (): Promise<string> => {
     try {
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      const refreshToken = await getSecureItem(REFRESH_TOKEN_KEY);
       if (!refreshToken) throw new Error('No refresh token');
 
       // POST /api/v1/auth/refresh — refresh_token in the JSON body is the
@@ -72,14 +73,14 @@ export function refreshAccessToken(): Promise<string> {
         refresh_token: refreshToken,
       });
 
-      await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
-      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
+      await setSecureItem(ACCESS_TOKEN_KEY, data.access_token);
+      await setSecureItem(REFRESH_TOKEN_KEY, data.refresh_token);
 
       if (data.user) onUserRefreshed?.(data.user);
       return data.access_token as string;
     } catch (refreshErr) {
-      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await deleteSecureItem(ACCESS_TOKEN_KEY);
+      await deleteSecureItem(REFRESH_TOKEN_KEY);
       onSessionExpired?.();
       throw refreshErr;
     } finally {
@@ -93,7 +94,11 @@ export function refreshAccessToken(): Promise<string> {
 
 // Response: handle 401 with silent token refresh
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // Keep the deadline resolver on the server's clock when the header is present.
+    recordServerDate(res.headers?.date);
+    return res;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 

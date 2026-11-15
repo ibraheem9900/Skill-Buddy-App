@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { authApi } from '@/services/api';
 import type { CertificationResponse } from '@/types';
+import { normalizeCertification } from '@/lib/certificationDetail';
 import { registerSessionReset } from '@/lib/sessionReset';
 
 /**
@@ -97,19 +98,25 @@ export function useCertifications() {
     const found = cache.find((c) => c.id === certificationId);
     if (found) return found; // cached — no network call at all
 
-    if (cacheStatus !== 'ready') {
-      try {
-        const { data } = await authApi.getCertification(certificationId);
-        return data;
-      } catch (err: any) {
-        const status = err?.response?.status;
-        if (status === 404) return null;
-        setErrorMessage('cert_err_network');
-        throw err;
-      }
+    // Always fetch when the row is MISSING from the cache. The previous version
+    // returned null whenever the list cache was already `ready`, so a direct
+    // open of a row that was not in that list never loaded the certificate.
+    try {
+      const { data } = await authApi.getCertification(certificationId);
+      const row = normalizeCertification(data, certificationId);
+      if (!row) return null;
+      cache = [...cache.filter((entry) => entry.id !== row.id), row];
+      cachedTotal = Math.max(cachedTotal, cache.length);
+      setCertifications(cache);
+      setTotal(cachedTotal);
+      return row;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) return null;
+      setErrorMessage('cert_err_network');
+      throw err;
     }
-    return null;
-  }, [cache, cacheStatus]);
+  }, []);
 
   /**
    * DELETE /api/v1/certifications/{certification_id} — removes an uploaded

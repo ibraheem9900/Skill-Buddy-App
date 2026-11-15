@@ -38,9 +38,12 @@ export default function ServerServiceRow({
   onPress?: () => void;
 }) {
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, tCat } = useLanguage();
   const router = useRouter();
 
+  const categoryId = (service as { category_id?: number }).category_id;
+  const categoryLabel =
+    typeof categoryId === 'number' ? tCat(String(categoryId)) || service.category_name : service.category_name;
   const price = formatServiceHourlyPrice(service, t('price_from_prefix'));
   const description = htmlToFlowText(service.description);
   const image = resolveServiceImage(service);
@@ -60,10 +63,10 @@ export default function ServerServiceRow({
       />
 
       <View style={styles.body}>
-        {service.category_name ? (
+        {categoryLabel ? (
           <View style={[styles.chip, { backgroundColor: c.primaryLight }]}>
             <Text style={[styles.chipText, { color: c.primary }]} numberOfLines={1}>
-              {service.category_name}
+              {categoryLabel}
             </Text>
           </View>
         ) : null}

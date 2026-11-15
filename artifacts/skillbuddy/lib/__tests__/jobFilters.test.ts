@@ -260,12 +260,14 @@ const POPUPS = [
 for (const file of POPUPS) {
   const source = code(read(file));
   check(`${file}: no slide/zoom entrance`, !/SlideIn|ZoomIn|springify|animationType="slide"/.test(source));
-  check(`${file}: no vertical movement`, !/translateY/.test(source));
 }
 
 const sheet = read('components/BottomSheet.tsx');
 check('the shared sheet fades in with the shared duration', sheet.includes('POPUP_FADE_IN_MS'));
 check('the shared sheet fades out with the shared duration', sheet.includes('POPUP_FADE_OUT_MS'));
+check('the shared sheet supports drag-to-dismiss', sheet.includes('PanResponder'));
+check('the shared sheet dismisses past 25%', sheet.includes('DISMISS_FRACTION = 0.25'));
+check('the shared sheet snaps back', sheet.includes('withSpring'));
 
 const alert = read('context/AlertModalContext.tsx');
 check('the app alert fades in and out', alert.includes('FadeIn.duration(POPUP_FADE_IN_MS)') && alert.includes('FadeOut.duration(POPUP_FADE_OUT_MS)'));

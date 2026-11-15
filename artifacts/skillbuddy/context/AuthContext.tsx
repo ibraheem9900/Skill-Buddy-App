@@ -1,5 +1,4 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   authApi,
@@ -8,6 +7,7 @@ import {
   setSessionExpiredHandler,
   setUserRefreshedHandler,
 } from '@/services/api';
+import { deleteSecureItem, getSecureItem, setSecureItem } from '@/lib/secureStorage';
 import type { User } from '@/types';
 import { resetUserSession } from '@/lib/sessionReset';
 
@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const [onboarding, token] = await Promise.all([
           AsyncStorage.getItem(ONBOARDING_KEY),
-          SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
+          getSecureItem(ACCESS_TOKEN_KEY),
         ]);
         setHasSeenOnboarding(onboarding === 'true');
         if (token) await fetchUser();
@@ -139,14 +139,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // account's rows. See lib/sessionReset for the full bug story.
     resetUserSession();
     const { data } = await authApi.login(email, password);
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
+    await setSecureItem(ACCESS_TOKEN_KEY, data.access_token);
+    await setSecureItem(REFRESH_TOKEN_KEY, data.refresh_token);
     const ok = await fetchUser();
     if (!ok) {
       // Tokens stored but /me failed — clean up so the app is not left in a
       // half-authenticated state.
-      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await deleteSecureItem(ACCESS_TOKEN_KEY);
+      await deleteSecureItem(REFRESH_TOKEN_KEY);
       throw new Error('Unable to load user profile after login. Please try again.');
     }
   }, [fetchUser]);
@@ -157,8 +157,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Same reset as login (and the one that fixes the cross-account address
     // edit): a signed-out process must not keep any account's cached rows.
     resetUserSession();
-    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await deleteSecureItem(ACCESS_TOKEN_KEY);
+    await deleteSecureItem(REFRESH_TOKEN_KEY);
     setUser(null);
   }, []);
 
@@ -187,12 +187,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const socialLogin = useCallback(async (provider: 'google' | 'apple', idToken: string) => {
     resetUserSession();
     const { data } = await authApi.socialLogin(provider, idToken);
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.access_token);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refresh_token);
+    await setSecureItem(ACCESS_TOKEN_KEY, data.access_token);
+    await setSecureItem(REFRESH_TOKEN_KEY, data.refresh_token);
     const ok = await fetchUser();
     if (!ok) {
-      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await deleteSecureItem(ACCESS_TOKEN_KEY);
+      await deleteSecureItem(REFRESH_TOKEN_KEY);
       throw new Error('Unable to load user profile after social login.');
     }
   }, [fetchUser]);

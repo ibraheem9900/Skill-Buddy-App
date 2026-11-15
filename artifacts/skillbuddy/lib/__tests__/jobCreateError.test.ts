@@ -280,7 +280,7 @@ const base = {
   description: 'ignore',
   requestType: 'regular' as const,
   bookingType: 'one_time' as const,
-  scheduledAtIso: '2026-10-20T09:00:00.000Z',
+  milestones: [{ date: '2026-10-20', timeSlots: ['MORNING'], expectedHours: 2 }],
   expectedHours: 2,
   countryId: 1,
   countyId: 2,

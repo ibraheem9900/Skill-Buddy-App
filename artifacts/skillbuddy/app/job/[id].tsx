@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter, useRoute } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
@@ -123,7 +123,7 @@ import {
 } from '@/lib/jobDetail';
 import { sanitizeRichText } from '@/lib/sanitizeRichText';
 import { useJobPermissions } from '@/hooks/useJobPermissions';
-import { existingCoordinates, haversineKm } from '@/lib/coordinates';
+import { existingCoordinates } from '@/lib/coordinates';
 import { formatDistance } from '@/lib/distance';
 import { splitTable } from '@/lib/jobSchedule';
 import {
@@ -168,6 +168,7 @@ export default function BiddingDashboardScreen() {
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const route = useRoute();
   const { colors: c } = useTheme();
   const { t, language } = useLanguage();
   // Translated tables for the LOCAL schedule labels (never Intl, never UTC).
@@ -1430,13 +1431,34 @@ export default function BiddingDashboardScreen() {
         ? existingCoordinates({ latitude: addr.latitude, longitude: addr.longitude })
         : null;
       const myPoint = existingCoordinates(user?.address ?? null);
-      if (jobPoint && myPoint) {
+      // Show distance from route params (carried from nearby-jobs feed) first,
+      // otherwise hide the tile (JobResponse has no distance_km; no client-side computation).
+      const rawRouteDistance = (route?.params as { distance?: unknown } | undefined)?.distance;
+      const routeDistance =
+        typeof rawRouteDistance === 'number' && Number.isFinite(rawRouteDistance)
+          ? rawRouteDistance
+          : typeof rawRouteDistance === 'string' && rawRouteDistance.trim() !== '' && Number.isFinite(Number(rawRouteDistance))
+          ? Number(rawRouteDistance)
+          : undefined;
+      if (routeDistance !== undefined) {
         infoTiles.push({
           key: 'distance',
           heading: t('jobd_tile_distance'),
           value: (
             <Text style={infoValueStyle}>
-              {formatDistance(haversineKm(myPoint, jobPoint), language)}
+              {formatDistance(routeDistance, language)}
+            </Text>
+          ),
+        });
+      } else if (jobPoint && myPoint) {
+        // Show the route distance only if it came from params; otherwise hide
+        // rather than computing client-side (Part 6: no device-computed distance).
+        infoTiles.push({
+          key: 'distance',
+          heading: t('jobd_tile_distance'),
+          value: (
+            <Text style={infoValueStyle}>
+              &nbsp;
             </Text>
           ),
         });
@@ -2147,6 +2169,15 @@ export default function BiddingDashboardScreen() {
             <>
               <View style={styles.sectionHeaderRow}>
                 <Text style={[styles.sectionTitle, { color: c.text }]}>{t('jobd_milestones')}</Text>
+                {perms.canEditAddress && milestones.length > 1 ? (
+                  <TouchableOpacity
+                    onPress={() => router.push(`/job/${serverJob.id}/edit-tasks` as any)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                  >
+                    <Text style={[styles.bodyLine, { color: c.primary }]}>{t('jobd_edit_tasks')}</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
               {milestones.map((m, i) => {
                 const mHours = parseExpectedHours(m.expected_hours);
@@ -2160,7 +2191,12 @@ export default function BiddingDashboardScreen() {
                   scheduleWeekdays
                 );
                 const mWindow =
-                  segment && local
+                  m.time_slots && m.time_slots.length > 0
+                    ? m.time_slots
+                        .map((slot) => slot.label || slot.window || slot.code)
+                        .filter(Boolean)
+                        .join(', ')
+                    : segment && local
                     ? formatWindowLabel(
                         clockOf(segment.startMinutes),
                         segment.endMinutes !== null ? clockOf(segment.endMinutes) : local.clock,

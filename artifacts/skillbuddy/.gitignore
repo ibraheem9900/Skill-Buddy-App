@@ -37,6 +37,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# local live-test credentials and evidence
+.freebuff/
+
 # typescript
 *.tsbuildinfo
 .vercel

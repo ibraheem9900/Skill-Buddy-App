@@ -48,6 +48,7 @@ const TEST_FILES = [
   'jobBidsLive.test.js',
   'jobBiddingOptions.test.js',
   'nearbyJobs.test.js',
+  'nearbyDetails.test.js',
   'nearbyStale.test.js',
   'providerSkills.test.js',
   'providerAddress.test.js',
@@ -80,6 +81,8 @@ const TEST_FILES = [
   'amountStepper.test.js',
   'jobPermissions.test.js',
   'repostJob.test.js',
+  'certificationDetail.test.js',
+  'apiTimeSlots.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

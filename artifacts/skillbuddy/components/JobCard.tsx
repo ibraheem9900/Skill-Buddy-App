@@ -1,17 +1,15 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
-  jobStatusLabelKey,
-  jobStatusTone,
   parseExpectedHours,
-  resolveBiddingEndsAt,
 } from '@/lib/jobList';
 import { canRemoveJob } from '@/lib/jobRemoval';
 import type { JobListItem } from '@/types';
 import CountdownTimer from './CountdownTimer';
+import { useLiveJobStatus } from '@/hooks/useLiveJobStatus';
 
 /**
  * A card in the client job list.
@@ -68,11 +66,12 @@ export default function JobCard({
   /** The status rule from lib/jobRemoval — terminal jobs only. */
   const removable = !!onRemove && canRemoveJob(job);
 
-  const statusKey = jobStatusLabelKey(job.status);
+  const liveStatus = useLiveJobStatus(job);
+  const statusKey = liveStatus.labelKey;
   // The shared tone rule (lib/jobList) keeps this chip's colour identical to
   // the Job Details badge for the same status: green for aiming/active/complete,
   // neutral in between, red for the cancelled variants.
-  const statusTone = jobStatusTone(job.status);
+  const statusTone = liveStatus.tone;
   const hours = parseExpectedHours(job.expected_hours);
   const milestoneCount = job.milestones?.length ?? 0;
 
@@ -81,10 +80,7 @@ export default function JobCard({
 
   // A deadline is only meaningful while bidding is actually open. Prefer the
   // absolute bidding_ends_at; fall back to remaining_bidding_seconds.
-  const deadline = useMemo(
-    () => (job.is_bidding_open ? resolveBiddingEndsAt(job, Date.now()) : null),
-    [job]
-  );
+  const deadline = liveStatus.biddingOpen ? liveStatus.deadlineMs : null;
 
   return (
     <Animated.View style={{ opacity: fade }}>

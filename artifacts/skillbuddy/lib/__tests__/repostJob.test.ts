@@ -50,7 +50,9 @@ const base = {
     {
       id: 1,
       sequence: 1,
-      scheduled_at: '2026-11-08T06:00:00Z',
+      scheduled_date: '2026-11-08',
+      time_slots: [{ code: 'MORNING', label: '8:00 AM - 11:00 AM', start_time: '08:00', end_time: '11:00', window: '08:00-11:00', arrival_options: ['08:00', '08:30'] }],
+      scheduled_at: null,
       expected_hours: '3',
       status: 'PENDING',
       created_at: '',
@@ -84,8 +86,7 @@ eq('city id comes from the nested object', address?.city_id, 3);
 eq('the pin latitude is parsed from the wire string', address?.latitude, 59.396799);
 
 const single = buildRepostJobRequest(base, {
-  scheduled_at: '2026-11-09T07:00:00Z',
-  expected_hours: 4,
+  milestones: [{ date: '2026-11-09', time_slots: ['MIDDAY'], expected_hours: 4 }],
 });
 check('a single-day repost builds', single.ok);
 if (single.ok) {
@@ -97,7 +98,8 @@ if (single.ok) {
   eq('booking type is carried', body.booking_type, 'ONE_TIME');
   eq('a repost is not a draft', body.is_draft, false);
   eq('one task survives', body.milestones.length, 1);
-  eq('the edited start replaces the old start', body.milestones[0].scheduled_at, '2026-11-09T07:00:00Z');
+  eq('the edited day replaces the old day', body.milestones[0].date, '2026-11-09');
+  eq('the edited slots replace the old slots', body.milestones[0].time_slots.join(','), 'MIDDAY');
   eq('the edited hours replace the old hours', body.milestones[0].expected_hours, 4);
   eq('the address is the old address', body.address.city_id, 3);
   check('no attachment field is invented', !JSON.stringify(body).includes('attachments'));
@@ -113,12 +115,12 @@ const multi = {
   booking_type: 'MULTI_DAY',
   request_type: 'URGENT',
   milestones: [
-    { ...base.milestones![0], id: 1, sequence: 1, scheduled_at: '2026-11-08T06:00:00Z' },
-    { ...base.milestones![0], id: 2, sequence: 2, scheduled_at: '2026-11-10T06:00:00Z' },
+    { ...base.milestones![0], id: 1, sequence: 1, scheduled_date: '2026-11-08' },
+    { ...base.milestones![0], id: 2, sequence: 2, scheduled_date: '2026-11-10' },
   ],
 } as unknown as JobResponse;
 
-const multiOut = buildRepostJobRequest(multi, { expected_hours: 9 });
+const multiOut = buildRepostJobRequest(multi, {});
 check('a multi-day repost builds', multiOut.ok);
 if (multiOut.ok) {
   eq('both days survive', multiOut.body.milestones.length, 2);

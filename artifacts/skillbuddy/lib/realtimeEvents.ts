@@ -86,16 +86,23 @@ export interface JobBiddingClosedData {
   job_id: number;
 }
 
-/** `job.nearby_opened`. */
+/**
+ * `job.nearby_opened`. The backend is reducing this frame to the location
+ * hint (`job_id`, possibly coordinates): the feed then fetches the job's
+ * details from the normal API. The old display fields stay optional so both
+ * shapes are accepted while the switch happens.
+ */
 export interface JobNearbyOpenedData {
   job_id: number;
-  service_id: number;
-  category_id: number;
-  title: string;
-  request_type: string;
-  bidding_ends_at: string;
-  distance_km: number;
-  matches_skill: boolean;
+  latitude?: number;
+  longitude?: number;
+  service_id?: number;
+  category_id?: number;
+  title?: string;
+  request_type?: string;
+  bidding_ends_at?: string;
+  distance_km?: number;
+  matches_skill?: boolean;
 }
 
 /** `job.nearby_closed`. */

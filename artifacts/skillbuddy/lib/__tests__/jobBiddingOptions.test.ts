@@ -139,21 +139,26 @@ const formBase = {
   isDraft: false,
 };
 
-/** A UTC ISO instant `dayOffset` days from a fixed anchor, at 09:00Z. */
-const at = (dayOffset: number, hour = 9) =>
-  new Date(Date.UTC(2026, 9, 10 + dayOffset, hour, 0, 0)).toISOString();
+/** A local date key `dayOffset` days from a fixed anchor. */
+const at = (dayOffset: number) => {
+  const day = new Date(2026, 9, 10 + dayOffset);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+};
 
 const multi = (days: string[]) => ({
   ...formBase,
   bookingType: 'multi_day' as const,
-  milestones: days.map((scheduledAtIso) => ({ scheduledAtIso, expectedHours: 2 })),
+  milestones: days.map((date) => ({ date, timeSlots: ['MORNING'], expectedHours: 2 })),
 });
 
-const oneTime = (scheduledAtIso: string | null, extra: string[] = []) => ({
+const oneTime = (date: string | null, extra: string[] = []) => ({
   ...formBase,
   bookingType: 'one_time' as const,
-  scheduledAtIso,
-  milestones: extra.map((iso) => ({ scheduledAtIso: iso, expectedHours: 2 })),
+  milestones: [
+    ...(date ? [{ date, timeSlots: ['MORNING'], expectedHours: 2 }] : []),
+    ...extra.map((other) => ({ date: other, timeSlots: ['MORNING'], expectedHours: 2 })),
+  ],
 });
 
 // MULTI_DAY ALWAYS sends REGULAR, whatever the form said.
@@ -180,8 +185,8 @@ eq(
   1
 );
 eq(
-  '…and it is the one-time instant, not a stray entry',
-  buildCreateJobRequest(oneTime(at(0), [at(1)])).milestones[0].scheduled_at,
+  '…and it is the one-time day, not a stray entry',
+  buildCreateJobRequest(oneTime(at(0), [at(1)])).milestones[0].date,
   at(0)
 );
 eq(
@@ -202,7 +207,7 @@ eq(
   7
 );
 eq(
-  'duplicate scheduled_at values are dropped (live: no duplicate times)',
+  'duplicate dates are dropped (live: no duplicate task days)',
   buildCreateJobRequest(multi([at(0), at(0), at(1), at(1), at(1)])).milestones.length,
   2
 );
@@ -218,20 +223,19 @@ eq(
 );
 const orderKept = buildCreateJobRequest(multi([at(0), at(2), at(1)]));
 check(
-  'the wizard order of the surviving milestones is kept',
-  orderKept.milestones[0].scheduled_at === at(0) &&
-    orderKept.milestones[1].scheduled_at === at(2) &&
-    orderKept.milestones[2].scheduled_at === at(1)
+  'the surviving milestones are chronological',
+  orderKept.milestones[0].date === at(0) &&
+    orderKept.milestones[1].date === at(1) &&
+    orderKept.milestones[2].date === at(2)
 );
 eq(
-  'an empty multi-day list falls back to the single instant',
+  'an empty multi-day list resolves to no tasks',
   resolveMilestones({
     ...formBase,
     bookingType: 'multi_day',
     milestones: [],
-    scheduledAtIso: at(0),
   }).length,
-  1
+  0
 );
 
 // The builder refuses to PRODUCE the two title payloads the live backend rejects.

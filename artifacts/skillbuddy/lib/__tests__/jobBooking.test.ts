@@ -14,7 +14,7 @@
  * Run through the same harness as the other lib tests: `pnpm run test`.
  */
 import {
-  FIXED_SLOTS,
+  fixedSlots,
   MAX_MILESTONE_DAYS,
   applyBookingKind,
   applyRequestType,
@@ -77,7 +77,10 @@ import {
   stripPreferredTimeLine,
   withPreferredTimeLine,
 } from '../jobCreate';
+import { seedClientSlots } from './slotFixtures';
 import type { AddressResponse } from '../../types';
+
+seedClientSlots();
 
 declare const console: { log: (msg: string) => void };
 
@@ -103,9 +106,9 @@ const MERIDIEM = { am: 'AM', pm: 'PM' };
 
 // A fixed "now": Tuesday 20 October 2026, 14:00 local.
 const NOW = new Date(2026, 9, 20, 14, 0, 0, 0);
-const SLOT_8_11: TimeChoice = { kind: 'slot', key: 'slot_8_11' };
-const SLOT_14_17: TimeChoice = { kind: 'slot', key: 'slot_14_17' };
-const SLOT_17_20: TimeChoice = { kind: 'slot', key: 'slot_17_20' };
+const SLOT_8_11: TimeChoice = { kind: 'slot', key: 'MORNING' };
+const SLOT_14_17: TimeChoice = { kind: 'slot', key: 'AFTERNOON' };
+const SLOT_17_20: TimeChoice = { kind: 'slot', key: 'EVENING' };
 const ANYTIME_9_12: TimeChoice = {
   kind: 'anytime',
   start: { hour: 9, minute: 0 },
@@ -118,7 +121,7 @@ eq('multiple days map to MULTI_DAY', bookingTypeFor('multi_day'), 'MULTI_DAY');
 eq('the documented week is 7 days', MAX_MILESTONE_DAYS, 7);
 
 // ── The five fixed slots ──────────────────────────────────────────────────
-eq('there are five fixed slots', FIXED_SLOTS.length, 5);
+eq('there are five server slots', fixedSlots().length, 5);
 eq(
   'the first slot is 8:00 AM - 11:00 AM',
   formatWindowLabel(SLOT_8_11, MERIDIEM),
@@ -126,15 +129,15 @@ eq(
 );
 eq(
   'the last slot is 8:00 PM - 11:00 PM',
-  formatWindowLabel({ kind: 'slot', key: FIXED_SLOTS[4].key }, MERIDIEM),
+  formatWindowLabel({ kind: 'slot', key: fixedSlots()[4].key }, MERIDIEM),
   '8:00 PM - 11:00 PM'
 );
 eq(
   'the third slot is 2:00 PM - 5:00 PM',
-  formatWindowLabel({ kind: 'slot', key: FIXED_SLOTS[2].key }, MERIDIEM),
+  formatWindowLabel({ kind: 'slot', key: fixedSlots()[2].key }, MERIDIEM),
   '2:00 PM - 5:00 PM'
 );
-eq('slotByKey finds a real slot', slotByKey('slot_11_14')?.start.hour, 11);
+eq('slotByKey finds a real slot', slotByKey('MIDDAY')?.start.hour, 11);
 eq('slotByKey rejects an unknown key', slotByKey('nope'), null);
 eq('an unknown slot has no window', formatWindowLabel({ kind: 'slot', key: 'nope' }, MERIDIEM), '');
 eq(
@@ -313,40 +316,33 @@ eq(
 const single = buildOneTimeMilestones(oneTimeDay('tomorrow', NOW), ANYTIME_9_12, 3);
 eq('one-time sends exactly one milestone', single.length, 1);
 eq('one-time carries the expected hours', single[0].expected_hours, 3);
-eq('one-time starts at the window start', new Date(single[0].scheduled_at).getHours(), 9);
+eq('one-time carries the local date', single[0].date, '2026-10-21');
+eq('Anytime carries every server slot code', single[0].time_slots.join(','), 'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT');
 
 const chosen = [new Date(2026, 9, 20), new Date(2026, 9, 22), new Date(2026, 9, 25)];
 const multi = buildMultiDayMilestones(chosen, SLOT_8_11, 4);
 eq('three selected days produce three milestones', multi.length, 3);
 eq(
   'each milestone lands on its own selected day',
-  multi.map((m) => new Date(m.scheduled_at).getDate()).join(','),
-  '20,22,25'
+  multi.map((m) => m.date).join(','),
+  '2026-10-20,2026-10-22,2026-10-25'
 );
-eq('every milestone keeps the slot start', multi.every((m) => new Date(m.scheduled_at).getHours() === 8), true);
+eq('every milestone keeps the chosen slot code', multi.every((m) => m.time_slots.join(',') === 'MORNING'), true);
 eq('every milestone carries the per-day hours', multi.every((m) => m.expected_hours === 4), true);
 eq(
-  'milestones are ISO 8601 UTC',
-  multi.every((m) => /Z$/.test(m.scheduled_at) && !Number.isNaN(new Date(m.scheduled_at).getTime())),
+  'the dates are plain local YYYY-MM-DD values',
+  multi.every((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.date)),
   true
 );
 eq(
-  'a UTC instant round-trips to the same local day and hour',
-  (() => {
-    const back = new Date(multi[0].scheduled_at);
-    return back.getDate() === 20 && back.getHours() === 8;
-  })(),
-  true
+  'a later allowed slot lowers the hours ceiling',
+  buildMultiDayMilestones([new Date(2026, 9, 20)], SLOT_17_20, 24)[0].expected_hours,
+  6
 );
 eq(
-  'an evening slot keeps the local day',
-  new Date(buildMultiDayMilestones([new Date(2026, 9, 20)], { kind: 'slot', key: 'slot_20_23' }, 2)[0].scheduled_at).getDate(),
-  20
-);
-eq(
-  'a midnight-crossing UTC date still belongs to the chosen local day',
-  new Date(composeInstant(new Date(2026, 9, 20), 8, 0).toISOString()).getDate(),
-  20
+  'the latest allowed start wins when several slots are chosen',
+  buildMultiDayMilestones([new Date(2026, 9, 20)], [SLOT_8_11, SLOT_17_20], 24)[0].expected_hours,
+  6
 );
 eq('no window means no milestones', buildOneTimeMilestones(start20, { kind: 'slot', key: 'nope' }, 2).length, 0);
 
@@ -544,7 +540,7 @@ const base = {
 const oneTimeBody = buildCreateJobRequest({
   ...base,
   bookingType: 'one_time',
-  scheduledAtIso: composeInstant(new Date(2026, 9, 21), 9, 0).toISOString(),
+  milestones: [{ date: '2026-10-21', timeSlots: ['MORNING'], expectedHours: 2 }],
   preferredTimeLine: LINE,
 });
 eq('one-time body uses the ONE_TIME enum', oneTimeBody.booking_type, 'ONE_TIME');
@@ -561,7 +557,8 @@ const multiBody = buildCreateJobRequest({
   bookingType: 'multi_day',
   requestType: 'urgent',
   milestones: chosen.map((day) => ({
-    scheduledAtIso: composeInstant(day, 8, 0).toISOString(),
+    date: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`,
+    timeSlots: ['MORNING'],
     expectedHours: 2,
   })),
   preferredTimeLine: LINE,
@@ -574,7 +571,8 @@ const capped = buildCreateJobRequest({
   ...base,
   bookingType: 'multi_day',
   milestones: Array.from({ length: 9 }, (_, i) => ({
-    scheduledAtIso: composeInstant(new Date(2026, 9, 20 + i), 9, 0).toISOString(),
+    date: `2026-10-${String(20 + i).padStart(2, '0')}`,
+    timeSlots: ['MORNING'],
     expectedHours: 2,
   })),
 });
@@ -584,12 +582,11 @@ const empty = resolveMilestones({
   ...base,
   bookingType: 'multi_day',
   milestones: [],
-  scheduledAtIso: composeInstant(new Date(2026, 9, 21), 9, 0).toISOString(),
 });
-eq('an empty multi-day list falls back to the single instant', empty.length, 1);
+eq('an empty multi-day list resolves to no tasks', empty.length, 0);
 eq(
   'a draft flag is passed through verbatim',
-  buildCreateJobRequest({ ...base, bookingType: 'one_time', scheduledAtIso: null, isDraft: true }).is_draft,
+  buildCreateJobRequest({ ...base, bookingType: 'one_time', milestones: [], isDraft: true }).is_draft,
   true
 );
 

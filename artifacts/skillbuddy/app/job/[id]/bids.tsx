@@ -32,14 +32,19 @@ import { useRejectBid } from '@/hooks/useRejectBid';
 import { useRestartJobTimer } from '@/hooks/useRestartJobTimer';
 import { useConvertJobToRegular } from '@/hooks/useConvertJobToRegular';
 import { useConvertJobToUrgent } from '@/hooks/useConvertJobToUrgent';
-import { biddingDeadline, formatDateTime } from '@/lib/jobDetail';
+import { formatDateTime } from '@/lib/jobDetail';
+import { useLiveJobStatus } from '@/hooks/useLiveJobStatus';
 import { isPaymentPending } from '@/lib/jobPayment';
 import { bidCreatedNoticeText } from '@/lib/jobBidsLive';
 import {
-  parseProposedTimeLine,
+  arrivalsFromBid,
   proposedTimesSummary,
   stripProposedTimeLine,
+  jobTaskWindows,
+  type BidTaskWindow,
 } from '@/lib/bidTimes';
+import { splitTable } from '@/lib/jobSchedule';
+import { formatDayLabel } from '@/lib/timeSlots';
 import {
   canRestartJobTimer,
   isRestartNotAllowed,
@@ -58,7 +63,6 @@ import {
   acceptBidFailureMessage,
   BID_SORT_IDS,
   BID_SORT_LABEL_KEY,
-  bidEtaParts,
   bidRejectReasonFieldError,
   bidSelectionMatches,
   bidStatusLabelKey,
@@ -68,7 +72,6 @@ import {
   formatBidDistanceLocale,
   formatBidPriceLocale,
   isBidPending,
-  isBiddingOpen,
   rejectBidFailureMessage,
   shouldResyncAfterAcceptFailure,
   shouldResyncAfterRejectFailure,
@@ -92,12 +95,14 @@ const RECOMMENDED_MAX = 3;
  */
 function ProviderSheet({
   bid,
+  tasks,
   locale,
   onAccept,
   onReject,
   onClose,
 }: {
   bid: BidResponse | null;
+  tasks: BidTaskWindow[];
   locale: BidLocale;
   /**
    * The CLIENT's Accept action for THIS offer, or null when it may not be
@@ -116,6 +121,8 @@ function ProviderSheet({
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
+  const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
 
   const row = (label: string, value: string | null) =>
     value === null ? null : (
@@ -125,22 +132,22 @@ function ProviderSheet({
       </View>
     );
 
-  const eta = bid ? bidEtaParts(bid.eta_minutes) : null;
-  const etaText = eta
-    ? eta.kind === 'now'
-      ? t('jobd_bid_eta_now')
-      : eta.kind === 'minutes'
-        ? t('jobd_bid_eta_min', { n: eta.minutes })
-        : t('jobd_bid_eta_hm', { h: eta.hours, m: eta.minutes })
-    : null;
   const statusKey = bid ? bidStatusLabelKey(bid.status) : null;
   const submitted = bid ? formatDateTime(bid.created_at) : null;
   /** The pilot's proposed start(s); the stored line is never shown raw. */
   const proposed = bid
-    ? proposedTimesSummary(parseProposedTimeLine(bid.message).arrivals, {
-        am: t('post_sched_am'),
-        pm: t('post_sched_pm'),
-      })
+    ? proposedTimesSummary(
+        arrivalsFromBid(bid),
+        {
+          am: t('post_sched_am'),
+          pm: t('post_sched_pm'),
+        },
+        {
+          tasks,
+          taskLabel: (n) => t('post_task_n', { n }),
+          dayLabel: (day) => formatDayLabel(day, months, weekdays),
+        }
+      )
     : null;
 
   return (
@@ -172,7 +179,6 @@ function ProviderSheet({
                 : proposed.text
               : null
           )}
-          {row(t('jobd_bid_summary_eta'), etaText)}
           {row(
             t('cbids_provider_rating'),
             typeof bid.provider.star_rating === 'number'
@@ -342,6 +348,14 @@ export default function JobBidsScreen() {
   const locale = language as BidLocale;
 
   const { job, status: jobStatus, refetch: refetchJob, applyJob } = useJobDetail(jobId);
+  // A direct open (deep link, reload, notification) has no cached job: fetch it
+  // once, otherwise the window/status block can never leave its loading state.
+  useEffect(() => {
+    if (jobId !== null) void refetchJob();
+  }, [jobId, refetchJob]);
+  const liveStatus = useLiveJobStatus(job);
+  /** The job's tasks, paired with every proposed start so the DATE is shown. */
+  const tasks = useMemo(() => jobTaskWindows(job), [job]);
   const { activeRole } = useRole();
   const showAlert = useAppAlert();
 
@@ -382,7 +396,7 @@ export default function JobBidsScreen() {
   const [rejectRecheck, setRejectRecheck] = useState(false);
   const { rejectBid, rejecting } = useRejectBid();
 
-  const biddingOpen = job ? isBiddingOpen(job) : false;
+  const biddingOpen = liveStatus.biddingOpen;
 
   /**
    * Is realtime live on this screen?
@@ -395,7 +409,7 @@ export default function JobBidsScreen() {
    * that moment the screen shows a decision rather than a race.
    */
   const live =
-    acceptedBid === null && job != null && job.assigned_provider_id == null && job.status === 'OPEN';
+    acceptedBid === null && job != null && job.assigned_provider_id == null && biddingOpen;
 
   /**
    * The confirmation dialogs PAUSE the list, exactly as the old poll was paused:
@@ -455,13 +469,11 @@ export default function JobBidsScreen() {
    * the deadline announced by the event itself is used instead — the countdown
    * must never briefly show the OLD window after the backend moved it.
    */
-  const deadline = useMemo(
-    () => endsAtOverride ?? (job ? biddingDeadline(job, Date.now()) : null),
-    [endsAtOverride, job]
-  );
+  const deadline = endsAtOverride ?? (biddingOpen ? liveStatus.deadlineMs : null);
 
   /** The window is live if the API says so, or if an extension just moved it. */
-  const windowOpen = biddingOpen || endsAtOverride !== null;
+  const jobReady = job != null && jobStatus === 'ready';
+  const windowOpen = jobReady && (biddingOpen || endsAtOverride !== null);
 
   /** A window can be extended: the same deadline must expire exactly once. */
   const lastExpiredDeadline = useRef<number | null>(null);
@@ -1205,7 +1217,12 @@ export default function JobBidsScreen() {
               {t('cbids_selected_title')}
             </Text>
           </View>
-          <BidOfferCard bid={selectedBid} locale={locale} onPress={() => setSheetBid(selectedBid)} />
+          <BidOfferCard
+            bid={selectedBid}
+            tasks={tasks}
+            locale={locale}
+            onPress={() => setSheetBid(selectedBid)}
+          />
           {(() => {
             const stamp = bidStatusStamp(selectedBid);
             const stampText = stamp ? formatDateTime(stamp.value) : null;
@@ -1232,6 +1249,18 @@ export default function JobBidsScreen() {
               </View>
             );
           })()}
+        </View>
+      ) : jobStatus === 'loading' || jobStatus === 'idle' ? (
+        <View
+          style={[
+            styles.closedBanner,
+            { backgroundColor: c.muted, borderColor: c.border, marginTop: 12 },
+          ]}
+        >
+          <ActivityIndicator size="small" color={c.primary} />
+          <Text style={[styles.closedText, { color: c.mutedForeground }]}>
+            {t('cbids_window_loading')}
+          </Text>
         </View>
       ) : windowOpen && deadline !== null ? (
         <View style={{ marginTop: 12 }}>
@@ -1466,6 +1495,7 @@ export default function JobBidsScreen() {
       renderItem={({ item }) => (
         <BidOfferCard
           bid={item}
+          tasks={tasks}
           locale={locale}
           recommended={recommendedTop.some((r) => r.id === item.id)}
           isNew={newBidIds.includes(item.id)}
@@ -1526,6 +1556,7 @@ export default function JobBidsScreen() {
     />
       <ProviderSheet
         bid={sheetBid}
+        tasks={tasks}
         locale={locale}
         onAccept={
           sheetBid && canAcceptBid(sheetBid, job, activeRole)

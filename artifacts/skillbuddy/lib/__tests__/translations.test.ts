@@ -853,8 +853,17 @@ check(
   'every non-English locale actually translates the new keys (not English copies)',
   translatedCount >= allNewKeys.length - 2
 );
+if (translatedCount < allNewKeys.length - 2) {
+  for (const [lang, dict] of dictionaries.slice(1)) {
+    const copies = allNewKeys.filter((key) => dict[key] === enDict[key]);
+    failures.push(
+      `${lang} still uses English for ${copies.length} key(s): ${copies.slice(0, 12).join(', ')}`
+    );
+  }
+}
 
 console.log(
   `translations: ${passed} checks, ${failures.length} failure(s) — locale sizes: ` +
-    dictionaries.map(([l, d]) => `${l}=${Object.keys(d).length}`).join(' ')
+    dictionaries.map(([l, d]) => `${l}=${Object.keys(d).length}`).join(' ') +
+    (failures.length > 0 ? ` — ${failures.join(' | ')}` : '')
 );

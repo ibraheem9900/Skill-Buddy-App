@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,7 +20,9 @@ import useServices from '@/hooks/useServices';
 import useNearbyJobs from '@/hooks/useNearbyJobs';
 import NearbyJobCard from '@/components/NearbyJobCard';
 import EmptyState from '@/components/EmptyState';
+import JobsSortSheet from '@/components/JobsSortSheet';
 import { SkeletonBox } from '@/components/SkeletonCard';
+import { DEFAULT_JOB_SORT, hasDistanceData, hasSortData, sortJobs, type JobSort, type JobSortKey } from '@/lib/jobSort';
 import type { NearbyChecklistKey, NearbyJobKind } from '@/lib/nearbyJobs';
 import type { TranslationKey } from '@/context/LanguageContext';
 
@@ -56,8 +58,10 @@ const KIND_LABELS: { key: NearbyJobKind; labelKey: TranslationKey }[] = [
 
 export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
   const { colors: c } = useTheme();
-  const { t } = useLanguage();
+  const { t, tCat } = useLanguage();
   const router = useRouter();
+  const [sort, setSort] = useState<JobSort>(DEFAULT_JOB_SORT);
+  const [sortOpen, setSortOpen] = useState(false);
 
   const { categories, load: loadCategories } = useCategories();
   const { services, load: loadServices } = useServices();
@@ -78,6 +82,8 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
     dismissNotice,
     live,
     activeSkills,
+    radiusKm,
+    retryJob,
   } = useNearbyJobs({ enabled });
 
   // The card's labels come from the caches the rest of the app already fills.
@@ -91,11 +97,12 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
     const map = new Map<number, string>();
     for (const category of categories ?? []) {
       if (typeof category?.id === 'number' && typeof category.name === 'string') {
-        map.set(category.id, category.name);
+        const translated = tCat(String(category.id));
+        map.set(category.id, translated || category.name);
       }
     }
     return map;
-  }, [categories]);
+  }, [categories, tCat]);
 
   const serviceNames = useMemo(() => {
     const map = new Map<number, string>();
@@ -108,6 +115,17 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
   }, [services]);
 
   const filtered = filters.kind !== 'ALL' || filters.onlyMatchingSkills;
+  const sortedJobs = useMemo(() => sortJobs(jobs, sort), [jobs, sort]);
+  const sortLabelKey: Record<JobSortKey, TranslationKey> = {
+    time: 'jobs_sort_time',
+    amount: 'jobs_sort_amount',
+    distance: 'jobs_sort_distance',
+    hours: 'jobs_sort_hours',
+  };
+  const disabledSortKeys: JobSortKey[] = [];
+  if (!hasSortData(jobs, 'amount')) disabledSortKeys.push('amount');
+  if (!hasDistanceData(jobs)) disabledSortKeys.push('distance');
+  if (!hasSortData(jobs, 'hours')) disabledSortKeys.push('hours');
 
   /* ----------------------------------------------------------- sub-views */
 
@@ -349,7 +367,7 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
       ) : null}
 
       <FlatList
-        data={jobs}
+        data={sortedJobs}
         keyExtractor={(job) => String(job.job_id)}
         contentContainerStyle={{ padding: 20, paddingBottom: bottomInset + 20, gap: 12, flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
@@ -358,11 +376,32 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
         }
         ListHeaderComponent={
           totalCount > 0 ? (
-            <Text style={[styles.countText, { color: c.mutedForeground }]}>
-              {totalCount === 1
-                ? t('nearby_count_one', { n: totalCount })
-                : t('nearby_count_many', { n: totalCount })}
-            </Text>
+            <View style={styles.listHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.countText, { color: c.mutedForeground }]}>
+                  {totalCount === 1
+                    ? t('nearby_count_one', { n: totalCount })
+                    : t('nearby_count_many', { n: totalCount })}
+                </Text>
+                {radiusKm !== null ? (
+                  <Text style={[styles.radiusText, { color: c.mutedForeground }]}>
+                    {t('nearby_within_radius', { n: radiusKm })}
+                  </Text>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                style={[styles.sortBtn, { borderColor: c.border, backgroundColor: c.card }]}
+                onPress={() => setSortOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('jobs_sort_title')}
+              >
+                <Feather name="sliders" size={12} color={c.primary} />
+                <Text style={[styles.sortBtnText, { color: c.primary }]} numberOfLines={1}>
+                  {t(sortLabelKey[sort.key])}
+                </Text>
+                <Feather name={sort.direction === 'asc' ? 'arrow-up' : 'arrow-down'} size={11} color={c.primary} />
+              </TouchableOpacity>
+            </View>
           ) : null
         }
         ListEmptyComponent={
@@ -382,19 +421,48 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
             />
           )
         }
-        renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 60).duration(350)}>
-            <NearbyJobCard
-              job={item}
-              categoryName={categoryNames.get(item.category_id) ?? null}
-              serviceName={serviceNames.get(item.service_id) ?? null}
-              onPress={() => router.push(`/job/${item.job_id}` as any)}
-            />
-          </Animated.View>
-        )}
+        renderItem={({ item, index }) => {
+          const previous = index > 0 ? sortedJobs[index - 1] : null;
+          const showGroup = !previous || previous.matches_skill !== item.matches_skill;
+          // A location-only item (new contract) has no title until its details
+          // arrive: show a skeleton instead of a blank card.
+          if (!item.detailsLoaded && !item.detailsError && !item.title.trim()) {
+            return (
+              <View style={[styles.skeletonCard, { backgroundColor: c.card, borderColor: c.border }]}>
+                <SkeletonBox height={16} style={{ width: '35%' }} />
+                <SkeletonBox height={16} style={{ width: '75%', marginTop: 10 }} />
+                <SkeletonBox height={12} style={{ width: '45%', marginTop: 8 }} />
+              </View>
+            );
+          }
+          return (
+            <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 60).duration(350)}>
+              {showGroup ? (
+                <Text style={[styles.groupText, { color: c.mutedForeground }]}>
+                  {t(item.matches_skill ? 'nearby_group_matching' : 'nearby_group_other')}
+                </Text>
+              ) : null}
+              <NearbyJobCard
+                job={item}
+                categoryName={categoryNames.get(item.category_id) ?? null}
+                serviceName={serviceNames.get(item.service_id) ?? null}
+                onPress={() => router.push(`/job/${item.job_id}` as any)}
+                onRetry={() => void retryJob(item.job_id)}
+              />
+            </Animated.View>
+          );
+        }}
       />
 
       {noticeBanner}
+
+      <JobsSortSheet
+        visible={sortOpen}
+        onClose={() => setSortOpen(false)}
+        value={sort}
+        onChange={setSort}
+        disabledKeys={disabledSortKeys}
+      />
     </View>
   );
 }
@@ -406,6 +474,11 @@ const styles = StyleSheet.create({
   skillChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1 },
   chipText: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   countText: { fontFamily: 'Manrope_500Medium', fontSize: 12, marginBottom: 4 },
+  radiusText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
+  groupText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, marginTop: 4 },
+  listHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 },
+  sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6, maxWidth: 170 },
+  sortBtnText: { fontFamily: 'Manrope_500Medium', fontSize: 11 },
   skeletonCard: { borderWidth: 1, borderRadius: 14, padding: 14 },
   stateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   stateCard: {

@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Dimensions,
+  KeyboardAvoidingView,
   Modal,
+  PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, {
@@ -13,6 +16,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,9 +24,9 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { POPUP_FADE_IN_MS, POPUP_FADE_OUT_MS } from '@/lib/motion';
 
-/** The shared fade curve: ease-out in, ease-in out (see lib/motion). */
 const POPUP_EASING_IN = Easing.out(Easing.quad);
 const POPUP_EASING_OUT = Easing.in(Easing.quad);
+const DISMISS_FRACTION = 0.25;
 
 interface Props {
   visible: boolean;
@@ -36,34 +40,24 @@ interface Props {
   footer?: React.ReactNode;
   /** Scrollable content. */
   children?: React.ReactNode;
-  /**
-   * Optional fixed height. Defaults to the shared 72%-of-window clamp; a short,
-   * single-purpose sheet (the two-row time range) passes its own height so it
-   * never opens with a screenful of empty space.
-   */
+  /** Optional fixed height. Defaults to the shared 72%-of-window clamp. */
   height?: number;
 }
 
-const WINDOW = Dimensions.get('window');
-
 /**
- * One sheet, used by EVERY picker on the Post-a-Job screen (country, county,
- * city, category, service, custom date & time) so all of them are positioned
- * and styled identically.
+ * One bottom sheet for the whole app.
  *
- * Positioning contract:
- *  - the sheet has a FIXED height (a fraction of the window, clamped), so its
- *    top edge always lands in the same place and its header + search field are
- *    immediately visible — it can never be pushed off the bottom of the screen
- *    by a long list. The list itself scrolls INSIDE the sheet.
- *  - the bottom safe-area inset is padded, so the last row is never hidden
- *    behind the Android/iOS navigation bar.
+ * Fade-in only on open (the app-wide motion rule), then:
+ *  - drag the handle or the header down to dismiss,
+ *  - release past ~25% of the sheet height or with downward velocity,
+ *  - snap back otherwise,
+ *  - the backdrop fades with the drag,
+ *  - the Android back button closes it,
+ *  - the sheet stays above the navigation bar with a safe-area pad,
+ *  - the sheet resizes above the keyboard.
  *
- * Animation: FADE ONLY. The sheet is anchored at its final position and only
- * its opacity (plus the backdrop's) animates — see lib/motion. There is no
- * translateY, no spring and no scale, so the surface never slides up from the
- * bottom; the close fade finishes before the modal unmounts instead of snapping
- * shut.
+ * The content owns its scrolling and is not part of the drag gesture, so a
+ * scroll can never fight the dismiss.
  */
 export default function BottomSheet({
   visible,
@@ -77,20 +71,23 @@ export default function BottomSheet({
 }: Props) {
   const { colors: c } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
 
-  // Kept mounted while the close animation plays.
   const [rendered, setRendered] = useState(visible);
   const progress = useSharedValue(0);
+  const dragY = useSharedValue(0);
 
-  const sheetHeight =
-    height ??
-    Math.round(
-      Math.min(Math.max(WINDOW.height * 0.72, 340), Math.max(WINDOW.height - insets.top - 24, 340))
-    );
+  const sheetHeight = useMemo(() => {
+    const maxHeight = Math.max(windowHeight - insets.top - 24, 240);
+    const desired =
+      height ?? Math.min(Math.max(windowHeight * 0.72, 340), maxHeight);
+    return Math.round(Math.min(desired, maxHeight));
+  }, [height, windowHeight, insets.top]);
 
   useEffect(() => {
     if (visible) {
       setRendered(true);
+      dragY.value = 0;
       progress.value = withTiming(1, {
         duration: POPUP_FADE_IN_MS,
         easing: POPUP_EASING_IN,
@@ -106,13 +103,48 @@ export default function BottomSheet({
         if (finished) runOnJS(setRendered)(false);
       }
     );
-    // `rendered` is intentionally not a dependency: it must not restart the
-    // animation when the close callback flips it.
+    // `rendered` is intentionally omitted: the close animation must not restart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // The shared rule: opacity only, on the backdrop AND on the sheet.
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        // Let taps (the X button) reach their child; only a real downward move
+        // starts the drag.
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_evt, gesture) => Math.abs(gesture.dy) > 2,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_evt, gesture) => {
+          dragY.value = Math.max(0, gesture.dy);
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          const shouldDismiss =
+            gesture.dy > sheetHeight * DISMISS_FRACTION || gesture.vy > 1.1;
+          if (shouldDismiss) {
+            dragY.value = withTiming(sheetHeight, { duration: 180 }, (finished) => {
+              'worklet';
+              if (finished) runOnJS(onClose)();
+            });
+          } else {
+            dragY.value = withSpring(0, { damping: 22, stiffness: 240 });
+          }
+        },
+        onPanResponderTerminate: () => {
+          dragY.value = withSpring(0, { damping: 22, stiffness: 240 });
+        },
+      }),
+    [dragY, onClose, sheetHeight]
+  );
+
   const fadeStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: progress.value * Math.max(0, 1 - dragY.value / Math.max(sheetHeight * 1.5, 1)),
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ translateY: dragY.value }],
+  }));
 
   if (!rendered) return null;
 
@@ -125,49 +157,57 @@ export default function BottomSheet({
       onRequestClose={onClose}
     >
       <View style={styles.root}>
-        <Animated.View style={[StyleSheet.absoluteFill, fadeStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
           <Pressable
-            style={[StyleSheet.absoluteFill, styles.backdrop, { backgroundColor: c.overlay }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: c.overlay }]}
             onPress={onClose}
             accessibilityRole="button"
             accessibilityLabel={title}
           />
         </Animated.View>
 
-        <Animated.View
-          style={[
-            styles.sheet,
-            {
-              height: sheetHeight,
-              paddingBottom: Math.max(insets.bottom, 12),
-              backgroundColor: c.surface,
-              borderColor: c.border,
-              shadowColor: c.shadowMd,
-            },
-            fadeStyle,
-          ]}
+        <KeyboardAvoidingView
+          pointerEvents="box-none"
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.keyboardWrap}
         >
-          <View style={[styles.handle, { backgroundColor: c.border }]} />
+          <Animated.View
+            accessibilityViewIsModal
+            style={[
+              styles.sheet,
+              {
+                height: sheetHeight,
+                paddingBottom: Math.max(insets.bottom, 16),
+                backgroundColor: c.surface,
+                borderColor: c.border,
+                shadowColor: c.shadowMd,
+              },
+              sheetStyle,
+            ]}
+          >
+            <View {...panResponder.panHandlers} style={styles.dragArea}>
+              <View style={[styles.handle, { backgroundColor: c.border }]} />
+              <View style={[styles.head, { borderBottomColor: c.border }]}>
+                <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
+                  {title}
+                </Text>
+                <TouchableOpacity
+                  onPress={onClose}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={title}
+                >
+                  <Feather name="x" size={20} color={c.mutedForeground} />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-          <View style={[styles.head, { borderBottomColor: c.border }]}>
-            <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
-              {title}
-            </Text>
-            <TouchableOpacity
-              onPress={onClose}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityRole="button"
-              accessibilityLabel={title}
-            >
-              <Feather name="x" size={20} color={c.mutedForeground} />
-            </TouchableOpacity>
-          </View>
-
-          {header}
-          {body}
-          <View style={styles.body}>{children}</View>
-          {footer}
-        </Animated.View>
+            {header}
+            {body}
+            <View style={styles.body}>{children}</View>
+            {footer}
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -175,7 +215,7 @@ export default function BottomSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: {},
+  keyboardWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
@@ -186,7 +226,8 @@ const styles = StyleSheet.create({
     shadowRadius: 22,
     shadowOffset: { width: 0, height: -6 },
   },
-  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, marginTop: 10 },
+  dragArea: { paddingTop: 10 },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2 },
   head: {
     flexDirection: 'row',
     alignItems: 'center',

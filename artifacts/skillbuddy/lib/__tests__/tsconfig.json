@@ -46,6 +46,7 @@
     "./jobBidsLive.test.ts",
     "./jobBiddingOptions.test.ts",
     "./nearbyJobs.test.ts",
+    "./nearbyDetails.test.ts",
     "./nearbyStale.test.ts",
     "./providerSkills.test.ts",
     "./providerAddress.test.ts",
@@ -78,6 +79,8 @@
     "./distance.test.ts",
     "./amountStepper.test.ts",
     "./jobPermissions.test.ts",
-    "./repostJob.test.ts"
+    "./repostJob.test.ts",
+    "./certificationDetail.test.ts",
+    "./apiTimeSlots.test.ts"
   ]
 }
