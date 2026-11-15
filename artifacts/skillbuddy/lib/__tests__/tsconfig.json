@@ -81,6 +81,7 @@
     "./jobPermissions.test.ts",
     "./repostJob.test.ts",
     "./certificationDetail.test.ts",
+    "./jobRoute.test.ts",
     "./apiTimeSlots.test.ts"
   ]
 }

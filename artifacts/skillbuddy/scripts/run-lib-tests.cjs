@@ -25,6 +25,7 @@ const TEST_FILES = [
   'jobStatus.test.js',
   'jobRestartTimer.test.js',
   'jobConvert.test.js',
+  'jobRoute.test.js',
   'jobAssign.test.js',
   'jobPayment.test.js',
   'jobStart.test.js',
