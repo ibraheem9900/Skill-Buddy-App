@@ -416,8 +416,15 @@ export default function EditJobScreen() {
               // DATE ONLY: the window label below already starts with the same
               // clock, which is what printed "8:00 AM · 8:00 AM - 11:00 PM".
               const when = local ? formatDayLabel(local.day, months, weekdays) : '';
+              // readiness: EVERY allowed slot of this day. The stored schedule
+              // line only knows ONE window, which is why a 3-slot task showed 1.
+              const slotWindows = (m.time_slots ?? [])
+                .map((slot) => slot.label || slot.window || slot.code)
+                .filter((label): label is string => !!label);
               const window =
-                segment && segment.endMinutes !== null
+                slotWindows.length > 0
+                  ? slotWindows.join(', ')
+                  : segment && segment.endMinutes !== null
                   ? formatWindowLabel(
                       clockOf(segment.startMinutes),
                       clockOf(segment.endMinutes),

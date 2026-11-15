@@ -329,6 +329,32 @@ eq(
 );
 eq('first task has expected hours 2', sameDayMilestones[0].expected_hours, 2);
 
+/* ── ROUND 18: EVERY selected slot reaches the wire ───────────────────────── */
+
+const multiSlotTask: TaskDraft = {
+  ...buildTask(day(20)),
+  time: SLOT_8_11,
+  key: keyFor(20, SLOT_8_11),
+  hours: 3,
+  timeSlots: ['MORNING', 'MIDDAY', 'AFTERNOON'],
+};
+const multiSlotPayload = buildTaskMilestones([multiSlotTask]);
+eq('all three slots are sent for one task', multiSlotPayload[0].time_slots.join(','), 'MORNING,MIDDAY,AFTERNOON');
+eq(
+  'hours are capped by the LATEST allowed start (2 PM -> 9 h), not the first',
+  buildTaskMilestones([{ ...multiSlotTask, hours: 15 }])[0].expected_hours,
+  9
+);
+eq(
+  'a task whose slots are unset still sends its single window',
+  buildTaskMilestones([{ ...buildTask(day(22)), time: SLOT_17_20, key: keyFor(22, SLOT_17_20), hours: 2 }])[0].time_slots.join(','),
+  'EVENING'
+);
+
+// The single-window path REPLACES the slot set (no stale extras left behind).
+const replaced = applyTaskTime([multiSlotTask], multiSlotTask.key, SLOT_17_20).tasks[0];
+eq('changing the window collapses the set to that one slot', replaced.timeSlots.join(','), 'EVENING');
+
 /* ── Delete → renumbering and the empty state ───────────────────────────── */
 
 const three: TaskDraft[] = syncTasks([], [day(20), day(22), day(24)]);

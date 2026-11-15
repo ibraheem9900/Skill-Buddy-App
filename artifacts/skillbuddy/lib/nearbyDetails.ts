@@ -13,6 +13,7 @@
  */
 
 import { haversineKm } from '@/lib/coordinates';
+import { parseApiIsoUtc } from '@/lib/jobDetail';
 import type { NearbyJob } from '@/lib/nearbyJobs';
 
 /** The subset of JobResponse the feed needs. */
@@ -63,9 +64,11 @@ export function isOpenForBids(detail: NearbyJobDetail | null | undefined, now: n
   const status = typeof detail.status === 'string' ? detail.status.toUpperCase() : '';
   if (status !== 'OPEN') return false;
   if (detail.is_bidding_open === false) return false;
-  const deadline =
-    typeof detail.bidding_ends_at === 'string' ? Date.parse(detail.bidding_ends_at) : Number.NaN;
-  if (Number.isFinite(deadline) && deadline <= now) return false;
+  // GET /jobs/{id} sends bidding_ends_at WITHOUT a zone marker ("…T13:20:18"),
+  // which is UTC. Date.parse would read it as DEVICE-LOCAL — two hours in the
+  // past in Tallinn — and drop every fresh job a second after it appears.
+  const deadline = parseApiIsoUtc(detail.bidding_ends_at);
+  if (deadline && deadline.getTime() <= now) return false;
   return true;
 }
 

@@ -82,6 +82,17 @@ check(
   !isOpenForBids(detail({ bidding_ends_at: '2026-11-14T08:00:00Z' }), NOW)
 );
 check('a lowercase status still matches', isOpenForBids(detail({ status: 'open' }), NOW));
+// ROUND 18: GET /jobs/{id} sends bidding_ends_at WITHOUT a zone marker. Reading
+// that as device-local (Tallinn, UTC+2) put a fresh job's deadline in the PAST
+// and made every card vanish one second after the feed showed it.
+check(
+  'a marker-less (UTC) deadline still in the future is visible',
+  isOpenForBids(detail({ bidding_ends_at: '2026-11-14T11:31:08' }), NOW)
+);
+check(
+  'a marker-less deadline already past is still dropped',
+  !isOpenForBids(detail({ bidding_ends_at: '2026-11-14T08:00:00' }), NOW)
+);
 
 /* ---------------------------------------------------------------- merging */
 

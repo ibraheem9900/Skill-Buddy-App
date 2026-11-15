@@ -27,6 +27,7 @@
 
 import type { RealtimeStatus } from '@/lib/realtime';
 import { formatDistance } from '@/lib/distance';
+import { parseApiIsoUtc } from '@/lib/jobDetail';
 
 /** Query-parameter bounds, from the live OpenAPI schema. */
 export const NEARBY_LIMIT_MIN = 1;
@@ -213,8 +214,10 @@ export function removeNearbyJob(jobs: readonly NearbyJob[], jobId: number): Near
 
 /** Epoch ms of the item's deadline, or null when the server sent something unusable. */
 export function nearbyDeadline(item: NearbyJob): number | null {
-  const parsed = typeof item?.bidding_ends_at === 'string' ? Date.parse(item.bidding_ends_at) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : null;
+  // Same UTC rule as isOpenForBids: a marker-less timestamp is server UTC, not
+  // device-local, or a live job is pruned as "expired" by the local timer.
+  const parsed = parseApiIsoUtc(item?.bidding_ends_at);
+  return parsed ? parsed.getTime() : null;
 }
 
 /**

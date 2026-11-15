@@ -334,7 +334,14 @@ function applyTaskTimeCore(
         acc.tasks.push(task);
         return acc;
       }
-      const withTime: TaskDraft = { ...task, time, key: newKey };
+      // The single-window path REPLACES the task's allowed slots: leaving the
+      // old set in place would post slots the user no longer sees.
+      const withTime: TaskDraft = {
+        ...task,
+        time,
+        key: newKey,
+        timeSlots: time?.kind === 'slot' ? [time.key] : [],
+      };
       const cap = taskHoursCap(withTime);
       if (cap === null) {
         acc.tasks.push({ ...withTime, hours: Math.max(MIN_EXPECTED_HOURS, task.hours) });
@@ -559,16 +566,32 @@ export function buildTaskMilestones(tasks: TaskDraft[]): MilestoneDraft[] {
       if (task.time == null) return null;
       const win = selectionWindow(task.time);
       if (!win) return null;
-      const cap = maxHoursForStart(minutesOf(win.start));
       const slotKind = task.time.kind;
+      // EVERY slot the user allowed for this day goes on the wire. Sending only
+      // the first one is what made a job posted with 3 slots come back with 1.
+      const selected = slotKind === 'slot'
+        ? (task.timeSlots && task.timeSlots.length > 0
+            ? task.timeSlots
+            : [task.time.key]
+          ).filter((code) => slotByKey(code) !== null)
+        : [];
       const timeSlots: string[] = slotKind === 'slot'
-        ? [task.time.key]
+        ? selected
         : slotKind === 'anytime'
         ? ['anytime']
         : [];
+      // The hours ceiling follows the LATEST allowed start, not the first one:
+      // 8 AM + 8 PM must not promise 15 hours.
+      const latestStart = selected.reduce<number | null>((latest, code) => {
+        const slot = slotByKey(code);
+        if (!slot) return latest;
+        const start = slot.start.hour * 60 + slot.start.minute;
+        return latest === null || start > latest ? start : latest;
+      }, null);
+      const cap = maxHoursForStart(latestStart ?? minutesOf(win.start));
       return {
         date: dayKey(task.day),
-        time_slots: timeSlots,
+        time_slots: timeSlots.length > 0 ? timeSlots : ['anytime'],
         expected_hours: clampHours(task.hours, cap),
       };
     })
