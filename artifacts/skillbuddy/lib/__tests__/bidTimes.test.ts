@@ -6,6 +6,7 @@
  */
 import {
     appendProposedTimeLine,
+  arrivalGroupsFor,
   arrivalOptionsFor,
   arrivalsFromBid,
   buildBidMilestones,
@@ -440,6 +441,49 @@ eq(
   buildBidMilestones([structuredArrivals[0]], bidTasks).length,
   1
 );
+
+/* ── ROUND 18: every allowed slot is its own group, one arrival per task ──── */
+
+const allDayJob = {
+  id: 1,
+  description: 'TEST-R18 all day',
+  scheduled_at: '2026-11-16T06:00:00',
+  milestones: [
+    {
+      id: 501,
+      sequence: 1,
+      scheduled_date: '2026-11-16',
+      expected_hours: '3.00',
+      time_slots: [
+        { code: 'MORNING', label: '8:00 AM - 11:00 AM', start_time: '08:00', end_time: '11:00', arrival_options: ['08:00', '08:30', '09:00', '09:30', '10:00', '10:30'] },
+        { code: 'MIDDAY', label: '11:00 AM - 2:00 PM', start_time: '11:00', end_time: '14:00', arrival_options: ['11:00', '11:30', '12:00', '12:30', '13:00', '13:30'] },
+        { code: 'AFTERNOON', label: '2:00 PM - 5:00 PM', start_time: '14:00', end_time: '17:00', arrival_options: ['14:00', '14:30', '15:00', '15:30', '16:00', '16:30'] },
+        { code: 'EVENING', label: '5:00 PM - 8:00 PM', start_time: '17:00', end_time: '20:00', arrival_options: ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30'] },
+        { code: 'NIGHT', label: '8:00 PM - 11:00 PM', start_time: '20:00', end_time: '23:00', arrival_options: ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'] },
+      ],
+    },
+  ],
+} as unknown as JobResponse;
+
+const allDayTasks = jobTaskWindows(allDayJob);
+eq('an all-day job is ONE task for the pilot', allDayTasks.length, 1);
+eq('with all five allowed slots', allDayTasks[0].slots.length, 5);
+const allDayGroups = arrivalGroupsFor(allDayTasks[0]);
+eq('rendered as FIVE groups (one per slot)', allDayGroups.length, 5);
+eq('each group is named by its slot', allDayGroups.map((g) => g.slot?.code).join(','), 'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT');
+eq('the first group offers 08:00', allDayGroups[0].options[0].hour, 8);
+eq('the last group ends at 22:30', minutesOf(allDayGroups[4].options[allDayGroups[4].options.length - 1]), 22 * 60 + 30);
+eq('every group has six half-hour marks', allDayGroups.every((g) => g.options.length === 6), true);
+
+// ONE arrival per task: choosing in another group replaces the previous choice.
+const pickMorning = [{ taskNumber: 1, minutes: 9 * 60, slotCode: 'MORNING' }];
+const pickNight = pickMorning.filter((entry) => entry.taskNumber !== 1).concat([{ taskNumber: 1, minutes: 21 * 60, slotCode: 'NIGHT' }]);
+eq('switching group leaves exactly ONE arrival for the task', pickNight.length, 1);
+eq('and it is the new one', pickNight[0].minutes, 21 * 60);
+eq('so the outbound bid has ONE milestone', buildBidMilestones(pickNight as ProposedArrival[], allDayTasks).length, 1);
+eq('carrying the NIGHT arrival', buildBidMilestones(pickNight as ProposedArrival[], allDayTasks)[0].arrival_time, '21:00');
+eq('the task is complete with one arrival', hasEveryArrival(pickNight as ProposedArrival[], allDayTasks), true);
+eq('and incomplete with none', hasEveryArrival([], allDayTasks), false);
 
 console.log(`bidTimes: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {

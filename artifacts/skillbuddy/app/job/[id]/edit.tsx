@@ -18,11 +18,20 @@ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollV
 import BrandedLoader from '@/components/BrandedLoader';
 import DateStrip from '@/components/DateStrip';
 import TimeChoices from '@/components/TimeChoices';
+import TaskEditSheet from '@/components/TaskEditSheet';
+import { authApi } from '@/services/api';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import useTimeSlots from '@/hooks/useTimeSlots';
 import { useRepostJob } from '@/hooks/useRepostJob';
 import { splitTable } from '@/lib/jobSchedule';
-import { selectionWindow, type TimeChoice } from '@/lib/jobBooking';
+import { selectionWindow, slotByKey, type TimeChoice } from '@/lib/jobBooking';
+import {
+  applyTaskSlots,
+  buildTask,
+  normalizeDraftTasks,
+  slotCodesOf,
+  type TaskDraft,
+} from '@/lib/postWizard';
 import {
   DAY_END_MINUTES,
   clampHours,
@@ -92,8 +101,18 @@ export default function EditJobScreen() {
     Partial<Record<JobEditField, JobEditErrorKey>>
   >({});
   const [hoursNotice, setHoursNotice] = useState<number | null>(null);
+  /**
+   * ROUND 18: the job's tasks, as ONE entry per day carrying every allowed
+   * slot. Seeded from the server through normalizeDraftTasks, edited with the
+   * SAME multi-slot sheet the wizard uses, and sent as `milestones` with the
+   * repost (the only edit path left — the old /edit-tasks screen is gone).
+   */
+  const [tasks, setTasks] = useState<TaskDraft[] | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const { repost, reposting } = useRepostJob();
   const prefilled = useRef(false);
+  const editingTask = tasks?.find((task) => task.key === editingKey) ?? null;
+  const editingIndex = tasks?.findIndex((task) => task.key === editingKey) ?? -1;
 
   const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
   const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
@@ -107,6 +126,26 @@ export default function EditJobScreen() {
   useEffect(() => {
     if (!job || prefilled.current) return;
     setForm(jobToEditValues(job));
+    // Seed the task editor: every milestone becomes its day's task, all slots.
+    const milestones = [...(job.milestones ?? [])].sort(
+      (a, b) => a.sequence - b.sequence || a.id - b.id
+    );
+    if (milestones.length > 0) {
+      const drafts: TaskDraft[] = milestones.map((milestone) => {
+        const dateKey = milestone.scheduled_date ?? localDateKey(new Date());
+        const day = parseLocalDateKey(dateKey) ?? new Date();
+        const hours = Math.max(1, Number.parseInt(String(milestone.expected_hours ?? '1'), 10) || 1);
+        return {
+          ...buildTask(day, hours),
+          dayKey: dateKey,
+          hours,
+          timeSlots: (milestone.time_slots ?? []).map((slot) => slot.code),
+        };
+      });
+      setTasks(normalizeDraftTasks(drafts));
+    } else {
+      setTasks(null);
+    }
     prefilled.current = true;
   }, [job]);
 
@@ -187,6 +226,44 @@ export default function EditJobScreen() {
     const outcome = await repost(job, body, t('repost_cancel_reason'));
 
     if (outcome.ok) {
+      // The repost copies the OLD milestones. If the tasks were edited here,
+      // PATCH the NEW job with one milestone per day (date + every slot +
+      // hours) — proven live in Round 17/18. A failure is reported, never
+      // swallowed: the job exists either way.
+      if (tasks && tasks.length > 0) {
+        const before = JSON.stringify(
+          [...(job.milestones ?? [])]
+            .sort((a, b) => a.sequence - b.sequence)
+            .map((milestone) => ({
+              date: milestone.scheduled_date ?? '',
+              slots: (milestone.time_slots ?? []).map((slot) => slot.code),
+            }))
+        );
+        const after = JSON.stringify(
+          tasks.map((task) => ({ date: task.dayKey, slots: task.timeSlots }))
+        );
+        if (before !== after) {
+          try {
+            await authApi.updateJob(outcome.job.id, {
+              milestones: tasks.map((task) => ({
+                date: task.dayKey,
+                time_slots: task.timeSlots,
+                expected_hours: Math.max(1, task.hours),
+              })),
+            });
+          } catch (error: unknown) {
+            showAlert({
+              title: t('repost_success_title'),
+              message:
+                (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+                t('jobd_edit_err_server'),
+              icon: 'alert-circle',
+            });
+            router.replace(`/job/${outcome.job.id}` as any);
+            return;
+          }
+        }
+      }
       showAlert({
         title: t('repost_success_title'),
         message: outcome.feeCharged
@@ -250,7 +327,7 @@ export default function EditJobScreen() {
         { text: t('repost_notice_cancel'), style: 'cancel' },
       ],
     });
-  }, [form, reposting, job, meridiem, repost, showAlert, t, router]);
+  }, [form, reposting, job, meridiem, repost, showAlert, t, router, tasks]);
 
   const header = (title: string) => (
     <View style={[styles.header, { backgroundColor: c.background, borderBottomColor: c.border }]}>
@@ -407,33 +484,35 @@ export default function EditJobScreen() {
 
         {multiDay ? (
           <>
-            {/* MULTI_DAY: JobUpdate has no milestones field, so the tasks are
-                shown with their real local times and cannot be edited here. */}
+            {/* MULTI_DAY: ONE row per day showing its date and EVERY allowed
+                slot. Tapping a row opens the multi-slot editor; "Save and
+                repost" sends the edited `milestones`. */}
             <Text style={[styles.label, { color: c.text }]}>{t('post_tasks')}</Text>
-            {storedMilestones.map((m, index) => {
-              const segment = segments[index] ?? null;
-              const local = localStartOf(m.scheduled_at);
-              // DATE ONLY: the window label below already starts with the same
-              // clock, which is what printed "8:00 AM · 8:00 AM - 11:00 PM".
-              const when = local ? formatDayLabel(local.day, months, weekdays) : '';
-              // readiness: EVERY allowed slot of this day. The stored schedule
-              // line only knows ONE window, which is why a 3-slot task showed 1.
-              const slotWindows = (m.time_slots ?? [])
-                .map((slot) => slot.label || slot.window || slot.code)
-                .filter((label): label is string => !!label);
-              const window =
-                slotWindows.length > 0
-                  ? slotWindows.join(', ')
-                  : segment && segment.endMinutes !== null
-                  ? formatWindowLabel(
-                      clockOf(segment.startMinutes),
-                      clockOf(segment.endMinutes),
-                      meridiem
-                    )
-                  : null;
+
+            {(tasks ?? []).map((task, index) => {
+              const codes = slotCodesOf(task);
+              // EVERY allowed slot of the day; all five read as one line.
+              const windowLabel =
+                codes.length === 5
+                  ? t('post_time_all_day', {
+                      from: formatTimeLabel(clockOf(8 * 60), meridiem),
+                      to: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+                    })
+                  : codes
+                      .map((code) => {
+                        const slot = slotByKey(code);
+                        return slot ? formatWindowLabel(slot.start, slot.end, meridiem) : '';
+                      })
+                      .filter(Boolean)
+                      .join(', ');
+              const when = formatDayLabel(task.day, months, weekdays);
               return (
-                <View
-                  key={m.id}
+                <TouchableOpacity
+                  key={task.key}
+                  onPress={() => setEditingKey(task.key)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('post_task_edit_title', { n: index + 1 })}
                   style={[styles.taskRow, { backgroundColor: c.card, borderColor: c.border }]}
                 >
                   <View style={[styles.taskBadge, { backgroundColor: c.primary }]}>
@@ -446,10 +525,11 @@ export default function EditJobScreen() {
                       {t('post_task_n', { n: index + 1 })}
                     </Text>
                     <Text style={[styles.taskMeta, { color: c.mutedForeground }]}>
-                      {window ? `${when} · ${window}` : when}
+                      {`${when} · ${windowLabel || t('post_task_time_missing')}`}
                     </Text>
                   </View>
-                </View>
+                  <Feather name="edit-2" size={15} color={c.primary} />
+                </TouchableOpacity>
               );
             })}
           </>
@@ -614,6 +694,20 @@ export default function EditJobScreen() {
           </Text>
         </TouchableOpacity>
       </KeyboardAwareScrollViewCompat>
+
+      {/* The SAME multi-slot editor the wizard uses: rows with Change/Delete,
+          "Add slot", and the 11 PM hours re-clamp. */}
+      <TaskEditSheet
+        visible={editingTask !== null}
+        onClose={() => setEditingKey(null)}
+        task={editingTask}
+        index={editingIndex < 0 ? 0 : editingIndex}
+        onSave={(slots, hours) => {
+          if (!editingTask) return;
+          setTasks((current) => (current ? applyTaskSlots(current, editingTask.key, slots, hours).tasks : current));
+          setEditingKey(null);
+        }}
+      />
     </View>
   );
 }
