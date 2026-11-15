@@ -1872,6 +1872,7 @@ const et = {
   post_date_start: 'Algus',
   post_days_selected_of: 'Valitud {n}/{total} päeva',
   post_time_anytime: '8AM-11PM (Igal ajal)',
+  post_time_all_day: 'Kogu päev · {from} - {to}',
   post_time_slot_started: 'Juba alanud',
   post_slots_hint: 'Vali üks või mitu ajavahemikku',
   post_slots_loading: 'Ajavahemike laadimine…',

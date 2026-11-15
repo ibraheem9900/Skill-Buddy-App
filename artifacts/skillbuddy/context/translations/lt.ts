@@ -1871,6 +1871,7 @@ const lt = {
   post_date_start: 'Pradžia',
   post_days_selected_of: 'Pasirinkta {n} iš {total} dienų',
   post_time_anytime: '8AM-11PM (Bet kuriuo metu)',
+  post_time_all_day: 'Visą dieną · {from} - {to}',
   post_time_slot_started: 'Jau prasidėjo',
   post_slots_hint: 'Pasirink vieną ar daugiau laiko tarpų',
   post_slots_loading: 'Įkeliami laiko tarpai…',

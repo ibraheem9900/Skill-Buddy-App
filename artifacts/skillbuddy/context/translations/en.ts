@@ -1925,6 +1925,7 @@ const en = {
   post_date_start: 'Start',
   post_days_selected_of: '{n} of {total} days selected',
   post_time_anytime: '8AM-11PM (Anytime)',
+  post_time_all_day: 'All day · {from} - {to}',
   post_time_slot_started: 'Already started',
   post_slots_hint: 'Choose one or more time slots',
   post_slots_loading: 'Loading time slots…',

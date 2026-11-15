@@ -166,7 +166,12 @@ export function buildTask(day: Date, hours: number = MIN_EXPECTED_HOURS): TaskDr
 export function buildTaskAt(day: Date, time: TimeChoice, hours: number = MIN_EXPECTED_HOURS): TaskDraft {
   const local = localDay(day);
   const key = dayKey(local);
-  return { key: taskKeyOf(key, time), dayKey: key, day: local, time, hours, timeSlots: time.kind === 'slot' ? [time.key] : ['anytime']}
+  const codes = time.kind === 'slot' ? [time.key] : allSlotCodes();
+  return withDaySlots(
+    { key: taskKeyOf(key, null), dayKey: key, day: local, time, hours, timeSlots: codes },
+    codes,
+    hours
+  );
 }
 
 /** Minutes since midnight of a window's start (null when the task has no time). */
@@ -214,22 +219,15 @@ export function meetsMultipleDayMinimum(tasks: TaskDraft[]): boolean {
  *     chronological — several tasks may share a day.
  */
 export function syncTasks(tasks: TaskDraft[], days: Date[]): TaskDraft[] {
-  const byDay = new Map<string, TaskDraft[]>();
-  for (const task of tasks) {
-    const key = task.dayKey || dayKey(task.day);
-    const bucket = byDay.get(key);
-    if (bucket) bucket.push(task);
-    else byDay.set(key, [task]);
-  }
+  // ONE task per day: several legacy per-slot cards of a day become that day's
+  // single card carrying all of their slots (normalizeDraftTasks).
+  const byDay = new Map<string, TaskDraft>();
+  for (const task of normalizeDraftTasks(tasks)) byDay.set(task.dayKey, task);
   const next: TaskDraft[] = [];
   for (const day of sortDays(days.filter(isValidDate))) {
     const key = dayKey(day);
     const existing = byDay.get(key);
-    if (existing && existing.length > 0) {
-      for (const task of existing) next.push({ ...task, dayKey: key, day: localDay(day) });
-    } else {
-      next.push(buildTask(day));
-    }
+    next.push(existing ? { ...existing, dayKey: key, day: localDay(day) } : buildTask(day));
   }
   return sortTasks(next);
 }
@@ -306,7 +304,7 @@ export function applyTaskSlots(
 
   const primary = slotByKey(codes[0]);
   const time: TimeChoice | null = primary ? { kind: 'slot', key: primary.key } : target.time;
-  const newKey = taskKeyOf(target.dayKey, time);
+  const newKey = taskKeyOf(target.dayKey, null);
 
   const updated = tasks.map((task) =>
     task.key === key ? { ...task, time, timeSlots: codes, hours: nextHours, key: newKey } : task
@@ -322,12 +320,8 @@ function applyTaskTimeCore(
 ): { tasks: TaskDraft[]; loweredFrom: number | null } {
   const target = tasks.find((task) => task.key === key);
   if (!target) return { tasks, loweredFrom: null };
-  const newKey = taskKeyOf(target.dayKey, time);
-  // Editing a card onto a window that day already has would create a duplicate
-  // (date, slot) pair; the grid is the place to toggle those, so ignore it here.
-  if (tasks.some((task) => task.key === newKey && task.key !== key)) {
-    return { tasks, loweredFrom: null };
-  }
+  // ONE task per day: the identity is the day, never the window.
+  const newKey = taskKeyOf(target.dayKey, null);
   const result = tasks.reduce<{ tasks: TaskDraft[]; loweredFrom: number | null }>(
     (acc, task) => {
       if (task.key !== key) {
@@ -432,10 +426,128 @@ export function activeAfterDelete(days: Date[], removedKey: string): DaySelectio
 
 /* ── Several windows on one day ──────────────────────────────────────────── */
 
-/** The window a day already carries (null while it still has its prompt). */
+/**
+ * EVERY slot code the API offers, in `sort_order` (MORNING … NIGHT).
+ * "Anytime" is NEVER a code on the wire: it is simply all five of these.
+ */
+export function allSlotCodes(): string[] {
+  return fixedSlots().map((slot) => slot.key);
+}
+
+/** API codes a task allows, in chronological order, duplicates and junk removed. */
+export function slotCodesOf(task: TaskDraft): string[] {
+  const raw = task.timeSlots && task.timeSlots.length > 0
+    ? task.timeSlots
+    : task.time && task.time.kind === 'slot'
+    ? [task.time.key]
+    : [];
+  return orderSlotCodes(raw);
+}
+
+/** Chronological, de-duplicated, known-codes-only (unknown codes are dropped). */
+export function orderSlotCodes(codes: readonly string[]): string[] {
+  const known = fixedSlots();
+  const order = new Map(known.map((slot, index) => [slot.key, index]));
+  const unique = Array.from(new Set(codes.filter((code) => order.has(code))));
+  unique.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return unique;
+}
+
+/** The TimeChoice a slot set implies: its first (earliest) slot, or null. */
+export function timeOfSlots(codes: readonly string[]): TimeChoice | null {
+  const ordered = orderSlotCodes(codes);
+  return ordered.length > 0 ? { kind: 'slot', key: ordered[0] } : null;
+}
+
+/** The hours ceiling of a slot set: the LATEST allowed start until 11 PM. */
+export function hoursCapOfSlots(codes: readonly string[]): number | null {
+  const ordered = orderSlotCodes(codes);
+  const latest = ordered[ordered.length - 1];
+  const slot = latest ? slotByKey(latest) : null;
+  if (!slot) return null;
+  return maxHoursForStart(slot.start.hour * 60 + slot.start.minute);
+}
+
+/**
+ * Build/repair the ONE task a day owns, from its full slot set.
+ * `codes` empty keeps the day (its card shows "choose a time").
+ */
+export function withDaySlots(task: TaskDraft, codes: readonly string[], hours?: number): TaskDraft {
+  const ordered = orderSlotCodes(codes);
+  const cap = hoursCapOfSlots(ordered);
+  const requested = typeof hours === 'number' && Number.isFinite(hours) ? hours : task.hours;
+  return {
+    ...task,
+    key: taskKeyOf(task.dayKey, null),
+    time: timeOfSlots(ordered),
+    timeSlots: ordered,
+    hours: cap === null ? Math.max(MIN_EXPECTED_HOURS, requested) : clampHours(requested, cap),
+  };
+}
+
+/**
+ * Collapse a task list to ONE TASK PER DAY (the product rule): the slots of
+ * every legacy per-slot task of a day are unioned into that day's task, the
+ * legacy `ANYTIME` pseudo-code expands to all five real codes, and unknown
+ * codes are dropped with a `console.warn`. Hours keep the largest value seen.
+ */
+export function normalizeDraftTasks(tasks: readonly TaskDraft[]): TaskDraft[] {
+  const all = allSlotCodes();
+  const byDay = new Map<string, { task: TaskDraft; codes: string[]; hours: number }>();
+  for (const task of tasks) {
+    const key = task.dayKey || dayKey(task.day);
+    if (!key) continue;
+    const raw = task.timeSlots && task.timeSlots.length > 0 ? [...task.timeSlots] : [];
+    if (task.time && task.time.kind === 'slot') raw.push(task.time.key);
+    if (task.time && task.time.kind === 'anytime') raw.push('ANYTIME');
+    const codes: string[] = [];
+    for (const code of raw) {
+      if (typeof code !== 'string' || code.length === 0) continue;
+      const upper = code.toUpperCase();
+      if (upper === 'ANYTIME' || upper === 'ANY') {
+        codes.push(...all);
+      } else if (all.includes(upper)) {
+        codes.push(upper);
+      } else if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn(`[postWizard] dropping unknown time slot code: ${code}`);
+      }
+    }
+    const existing = byDay.get(key);
+    if (existing) {
+      existing.codes.push(...codes);
+      existing.hours = Math.max(existing.hours, task.hours || MIN_EXPECTED_HOURS);
+    } else {
+      byDay.set(key, { task: { ...task, dayKey: key }, codes, hours: task.hours || MIN_EXPECTED_HOURS });
+    }
+  }
+  const next = Array.from(byDay.values()).map((entry) =>
+    withDaySlots({ ...entry.task, dayKey: dayKey(entry.task.day) || entry.task.dayKey }, entry.codes, entry.hours)
+  );
+  return sortTasks(next);
+}
+
+/** True when a day allows every API slot (what "Anytime" means). */
+export function isAllDaySlots(codes: readonly string[]): boolean {
+  const all = allSlotCodes();
+  return all.length > 0 && orderSlotCodes(codes).length === all.length;
+}
+
+/** The day's single task (created on demand), never a second card for the day. */
+export function dayTask(tasks: TaskDraft[], day: Date): { tasks: TaskDraft[]; task: TaskDraft } {
+  const local = localDay(day);
+  const key = dayKey(local);
+  const found = tasks.find((task) => task.dayKey === key);
+  if (found) return { tasks, task: found };
+  const fresh = buildTask(local);
+  return { tasks: sortTasks([...tasks, fresh]), task: fresh };
+}
+
+/** Does the day's task already allow this window? */
 export function hasSlot(tasks: TaskDraft[], dayKeyValue: string, time: TimeChoice): boolean {
-  const wanted = taskKeyOf(dayKeyValue, time);
-  return tasks.some((task) => task.key === wanted);
+  const task = tasks.find((entry) => entry.dayKey === dayKeyValue);
+  if (!task) return false;
+  if (time.kind === 'anytime') return isAllDaySlots(slotCodesOf(task));
+  return slotCodesOf(task).includes(time.key);
 }
 
 /**
@@ -456,29 +568,37 @@ export function toggleTaskSlot(
 ): { tasks: TaskDraft[]; action: 'added' | 'removed' | 'max-slots' | 'max-tasks' } {
   const local = localDay(day);
   const key = dayKey(local);
-  const wanted = taskKeyOf(key, time);
+  // ONE task per day: every legacy per-slot card of this day collapses into it.
+  const base = normalizeDraftTasks(tasks);
+  const existing = base.some((task) => task.dayKey === key);
+  if (!existing && base.length >= MAX_MILESTONE_DAYS) return { tasks: base, action: 'max-tasks' };
+  const { tasks: withTask, task } = dayTask(base, local);
+  const current = slotCodesOf(task);
 
-  if (tasks.some((task) => task.key === wanted)) {
-    const remaining = tasks.filter((task) => task.key !== wanted);
-    if (!remaining.some((task) => task.dayKey === key)) {
-      return { tasks: sortTasks([...remaining, buildTask(local)]), action: 'removed' };
+  let codes: string[];
+  let action: 'added' | 'removed';
+  if (time.kind === 'anytime') {
+    // Anytime IS all five API slots; tapping it again clears them.
+    if (isAllDaySlots(current)) {
+      codes = [];
+      action = 'removed';
+    } else {
+      codes = allSlotCodes();
+      action = 'added';
     }
-    return { tasks: sortTasks(remaining), action: 'removed' };
+  } else if (current.includes(time.key)) {
+    codes = current.filter((code) => code !== time.key);
+    action = 'removed';
+  } else {
+    if (current.length >= MAX_SLOTS_PER_DAY) return { tasks: base, action: 'max-slots' };
+    codes = [...current, time.key];
+    action = 'added';
   }
 
-  const others =
-    time.kind === 'anytime'
-      ? tasks.filter((task) => task.dayKey !== key)
-      : tasks.filter(
-          (task) =>
-            task.dayKey !== key || (task.time?.kind !== 'anytime' && task.time !== null)
-        );
-
-  const onDay = tasks.filter((task) => task.dayKey === key && task.time !== null).length;
-  if (onDay >= MAX_SLOTS_PER_DAY) return { tasks, action: 'max-slots' };
-  if (others.length >= MAX_MILESTONE_DAYS) return { tasks, action: 'max-tasks' };
-
-  return { tasks: sortTasks([...others, buildTaskAt(local, time)]), action: 'added' };
+  const next = withTask.map((entry) =>
+    entry.dayKey === key ? withDaySlots(entry, codes, entry.hours) : entry
+  );
+  return { tasks: sortTasks(next), action };
 }
 
 /** Drop ONE task (its day survives while it still has another window). */
@@ -560,38 +680,18 @@ export function anytimeLeavesNoHour(task: TaskDraft): boolean {
  * date, time and hours" real on the wire.
  */
 export function buildTaskMilestones(tasks: TaskDraft[]): MilestoneDraft[] {
-  return tasks
+  return normalizeDraftTasks(tasks)
     .slice(0, MAX_MILESTONE_DAYS)
     .map((task) => {
-      if (task.time == null) return null;
-      const win = selectionWindow(task.time);
-      if (!win) return null;
-      const slotKind = task.time.kind;
-      // EVERY slot the user allowed for this day goes on the wire. Sending only
-      // the first one is what made a job posted with 3 slots come back with 1.
-      const selected = slotKind === 'slot'
-        ? (task.timeSlots && task.timeSlots.length > 0
-            ? task.timeSlots
-            : [task.time.key]
-          ).filter((code) => slotByKey(code) !== null)
-        : [];
-      const timeSlots: string[] = slotKind === 'slot'
-        ? selected
-        : slotKind === 'anytime'
-        ? ['anytime']
-        : [];
-      // The hours ceiling follows the LATEST allowed start, not the first one:
-      // 8 AM + 8 PM must not promise 15 hours.
-      const latestStart = selected.reduce<number | null>((latest, code) => {
-        const slot = slotByKey(code);
-        if (!slot) return latest;
-        const start = slot.start.hour * 60 + slot.start.minute;
-        return latest === null || start > latest ? start : latest;
-      }, null);
-      const cap = maxHoursForStart(latestStart ?? minutesOf(win.start));
+      // ONE milestone per DAY, carrying every API slot that day allows.
+      // normalizeDraftTasks already expanded "Anytime" to the five real codes
+      // and dropped unknown ones, so this can never emit ANYTIME.
+      const codes = slotCodesOf(task);
+      if (codes.length === 0) return null;
+      const cap = hoursCapOfSlots(codes) ?? MIN_EXPECTED_HOURS;
       return {
-        date: dayKey(task.day),
-        time_slots: timeSlots.length > 0 ? timeSlots : ['anytime'],
+        date: dayKey(task.day) || task.dayKey,
+        time_slots: codes,
         expected_hours: clampHours(task.hours, cap),
       };
     })

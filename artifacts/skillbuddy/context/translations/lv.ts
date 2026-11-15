@@ -1871,6 +1871,7 @@ const lv = {
   post_date_start: 'Sākums',
   post_days_selected_of: 'Izvēlētas {n} no {total} dienām',
   post_time_anytime: '8AM-11PM (Jebkurā laikā)',
+  post_time_all_day: 'Visu dienu · {from} - {to}',
   post_time_slot_started: 'Jau sācies',
   post_slots_hint: 'Izvēlies vienu vai vairākus laika logus',
   post_slots_loading: 'Ielādē laika logus…',

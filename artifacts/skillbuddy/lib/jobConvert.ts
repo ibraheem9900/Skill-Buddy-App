@@ -104,13 +104,44 @@ export function canConvertJobToRegular(
 export function canConvertJobToUrgent(
   job:
     | (Pick<JobResponse, 'can_convert_to_urgent'> &
-        Partial<Pick<JobResponse, 'is_urgent' | 'request_type'>>)
+        Partial<Pick<JobResponse, 'is_urgent' | 'request_type' | 'booking_type' | 'milestones'>>)
     | null
     | undefined
 ): boolean {
   if (!job) return false;
   if (job.can_convert_to_urgent !== true) return false;
-  return isRegularJob(job as Pick<JobResponse, 'is_urgent' | 'request_type'>);
+  if (!isRegularJob(job as Pick<JobResponse, 'is_urgent' | 'request_type'>)) return false;
+  // ROUND 18: urgent exists only for SINGLE-DAY bookings. The backend kept
+  // answering can_convert_to_urgent:true for a MULTI_DAY job (observed live), so
+  // the app owns the rule instead of trusting the flag alone.
+  return isSingleDayJob(job);
+}
+
+/**
+ * Is this job a SINGLE-DAY booking (one task / one date)?
+ * `booking_type` decides when present; otherwise the milestone dates do: a job
+ * with two or more distinct dates is multiple-day and must never be offered
+ * "Convert to Urgent" or "Restart Timer".
+ */
+export function isSingleDayJob(
+  job:
+    | {
+        booking_type?: string | null;
+        milestones?: Array<{ scheduled_date?: string | null }> | null;
+      }
+    | null
+    | undefined
+): boolean {
+  if (!job) return false;
+  if (typeof job.booking_type === 'string' && job.booking_type.toUpperCase() === 'MULTI_DAY') {
+    return false;
+  }
+  const dates = new Set(
+    (job.milestones ?? [])
+      .map((milestone) => milestone?.scheduled_date)
+      .filter((date): date is string => typeof date === 'string' && date.length > 0)
+  );
+  return dates.size <= 1;
 }
 
 /**

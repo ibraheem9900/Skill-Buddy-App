@@ -75,9 +75,11 @@ import {
   buildTaskMilestones,
   dayKey,
   firstUntimedTask,
+  isAllDaySlots,
   hasBookableTime as dayHasBookableTime,
   meetsMultipleDayMinimum,
   removeTaskDraft,
+  slotCodesOf,
   syncTasks,
   taskHoursCap,
   tasksForDay,
@@ -998,11 +1000,6 @@ export default function PostJobScreen() {
    */
   const toggleActiveTime = (time: TimeChoice) => {
     if (!activeTask) return;
-    const index = tasksForDay(tasks, activeTask.dayKey).findIndex((entry) =>
-      time.kind === 'anytime'
-        ? entry.time?.kind === 'anytime'
-        : entry.time?.kind === 'slot' && entry.time.key === time.key
-    );
     const outcome = toggleTaskSlot(tasks, activeTask.day, time);
     if (outcome.action === 'max-slots' || outcome.action === 'max-tasks') return;
     setTasks(outcome.tasks);
@@ -1692,7 +1689,12 @@ export default function PostJobScreen() {
           );
           return allTimed ? 'timed' : 'untimed';
         }}
-        count={(day) => tasksForDay(tasks, dayKey(day)).filter((entry) => entry.time !== null).length}
+        count={(day) =>
+          tasksForDay(tasks, dayKey(day)).reduce(
+            (total, entry) => total + slotCodesOf(entry).length,
+            0
+          )
+        }
       />
       <Text style={[styles.hint, { color: c.mutedForeground, marginTop: 10 }]}>
         {daySelection.days.length === 0
@@ -1719,8 +1721,19 @@ export default function PostJobScreen() {
             day={activeTask.day}
             onChange={() => undefined}
             selected={tasksForDay(tasks, activeTask.dayKey)
-              .map((entry) => entry.time)
-              .filter((entry): entry is TimeChoice => entry !== null)}
+              .flatMap((entry) => {
+                const codes = slotCodesOf(entry);
+                const choices: TimeChoice[] = codes.map((key) => ({ kind: 'slot', key }));
+                // Anytime IS all five slots: show its chip selected in that case.
+                if (isAllDaySlots(codes)) {
+                  choices.push({
+                    kind: 'anytime',
+                    start: { hour: 8, minute: 0 },
+                    end: { hour: 23, minute: 0 },
+                  });
+                }
+                return choices;
+              })}
             onToggle={toggleActiveTime}
           />
         </>
@@ -1796,17 +1809,17 @@ export default function PostJobScreen() {
           .filter((task, index, list) => list.findIndex((entry) => entry.dayKey === task.dayKey) === index)
           .map((task, index) => {
           const group = tasksForDay(tasks, task.dayKey);
-          // EVERY allowed slot of the day is shown, not just the first.
-          const taskWindow = group
-            .flatMap((entry) =>
-              entry.timeSlots && entry.timeSlots.length > 0
-                ? entry.timeSlots.map((code) =>
-                    formatWindowLabel({ kind: 'slot', key: code } as TimeChoice, meridiem)
-                  )
-                : [formatWindowLabel(entry.time, meridiem)]
-            )
-            .filter(Boolean)
-            .join(', ');
+          // EVERY allowed slot of the day is shown; all five read as one line.
+          const dayCodes = Array.from(new Set(group.flatMap((entry) => slotCodesOf(entry))));
+          const taskWindow = isAllDaySlots(dayCodes)
+            ? t('post_time_all_day', {
+                from: formatTimeLabel(clockOf(8 * 60), meridiem),
+                to: formatTimeLabel(clockOf(DAY_END_MINUTES), meridiem),
+              })
+            : dayCodes
+                .map((code) => formatWindowLabel({ kind: 'slot', key: code } as TimeChoice, meridiem))
+                .filter(Boolean)
+                .join(', ');
           const untimed = group.some((entry) => validateTimeChoice(entry.time, entry.day, new Date()) !== null);
           const cap = Math.min(...group.map((entry) => taskHoursCap(entry) ?? 0).filter((value) => value > 0));
           const groupHours = Math.max(...group.map((entry) => entry.hours));

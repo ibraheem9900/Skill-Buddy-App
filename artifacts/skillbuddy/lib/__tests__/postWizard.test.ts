@@ -39,6 +39,11 @@ import {
   validateTasks,
   applyTaskSlots,
   validateTaskSlots,
+  allSlotCodes,
+  hoursCapOfSlots,
+  isAllDaySlots,
+  normalizeDraftTasks,
+  slotCodesOf,
   type DaySelection,
   type TaskDraft,
 } from '../postWizard';
@@ -125,7 +130,7 @@ eq('activating keeps both days', activateOnly.selection.days.length, 2);
 // Tapping the ACTIVE day deselects it and hands back every key to drop.
 const deselect = applyDayTap(activateOnly.selection, day(22), tasks, NOW);
 eq('the active day is removed', deselect.selection.days.length, 1);
-eq('the removed key is reported', deselect.removedKeys[0], keyFor(22, SLOT_8_11));
+eq('the removed key is reported', deselect.removedKeys[0], tasks.find((task) => task.dayKey === '2026-10-22')!.key);
 eq('another selected day becomes active', deselect.selection.activeKey, '2026-10-25');
 tasks = tasks.filter((task) => !deselect.removedKeys.includes(task.key));
 
@@ -166,7 +171,7 @@ const kept = syncTasks(list, [day(20)]);
 eq('deselecting drops the task', kept.length, 1);
 eq('and its identity still names the day', kept[0].dayKey, '2026-10-20');
 eq('the surviving day keeps its window', kept[0].time?.kind, 'slot');
-eq('and its identity still names that window', kept[0].key, keyFor(20, SLOT_17_20));
+eq('and its identity is the DAY (one task per day)', kept[0].key, '2026-10-20#none');
 
 // A newly selected day gets a fresh card.
 const regrown = syncTasks(kept, [day(20), day(24)]);
@@ -182,52 +187,57 @@ const slotOne = toggleTaskSlot(twoDays, day28, SLOT_8_11);
 eq('the first window is added', slotOne.action, 'added');
 eq('and replaces the day prompt', tasksForDay(slotOne.tasks, '2026-10-28').length, 1);
 
+// ROUND 18: ONE task per day, MANY slots. A second window is a second chip on
+// the SAME card, never a second task (the "7 tasks for 3 days" bug).
 const slotTwo = toggleTaskSlot(slotOne.tasks, day28, SLOT_11_14);
 eq('a second window on the same day is added', slotTwo.action, 'added');
-eq('both windows live on that day', tasksForDay(slotTwo.tasks, '2026-10-28').length, 2);
+eq('the day still has ONE task card', tasksForDay(slotTwo.tasks, '2026-10-28').length, 1);
 eq(
-  'the day is one task card per window, sorted by start',
-  tasksForDay(slotTwo.tasks, '2026-10-28')[1].time?.kind === 'slot'
-    ? (tasksForDay(slotTwo.tasks, '2026-10-28')[1].time as { key: string }).key
-    : '',
-  'MIDDAY'
+  'that card allows BOTH windows in chronological order',
+  slotCodesOf(tasksForDay(slotTwo.tasks, '2026-10-28')[0]).join(','),
+  'MORNING,MIDDAY'
 );
+eq('its primary window is the first slot', tasksForDay(slotTwo.tasks, '2026-10-28')[0].time?.kind === 'slot' ? (tasksForDay(slotTwo.tasks, '2026-10-28')[0].time as { key: string }).key : '', 'MORNING');
 eq('the other day keeps its prompt', tasksForDay(slotTwo.tasks, '2026-10-29').length, 1);
 eq('two distinct dates are counted once each', distinctDayCount(slotTwo.tasks), 2);
 
 const removedSlot = toggleTaskSlot(slotTwo.tasks, day28, SLOT_11_14);
 eq('tapping the window again removes it', removedSlot.action, 'removed');
-eq('the first window stays', tasksForDay(removedSlot.tasks, '2026-10-28').length, 1);
+eq('the first window stays', slotCodesOf(tasksForDay(removedSlot.tasks, '2026-10-28')[0]).join(','), 'MORNING');
 
-// Anytime is exclusive for its day: it clears the regular windows …
+// Anytime = ALL FIVE real API slots (never a pseudo-code on the wire).
 const anytime = toggleTaskSlot(slotTwo.tasks, day28, ANYTIME_9_12);
 eq('Anytime is added', anytime.action, 'added');
 eq('and is alone on its day', tasksForDay(anytime.tasks, '2026-10-28').length, 1);
-eq('Anytime is the surviving window', tasksForDay(anytime.tasks, '2026-10-28')[0].time?.kind, 'anytime');
-// … and a regular window clears the day's Anytime.
+eq(
+  'Anytime expands to the five API slots',
+  slotCodesOf(tasksForDay(anytime.tasks, '2026-10-28')[0]).join(','),
+  'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT'
+);
+check('a full day is recognised as all-day', isAllDaySlots(slotCodesOf(tasksForDay(anytime.tasks, '2026-10-28')[0])));
+eq('and never contains ANYTIME', slotCodesOf(tasksForDay(anytime.tasks, '2026-10-28')[0]).includes('ANYTIME'), false);
+
+// Tapping Anytime again clears the set; a regular window then re-adds one.
 const afterAnytime = toggleTaskSlot(anytime.tasks, day28, SLOT_17_20);
-eq('a regular window replaces Anytime', tasksForDay(afterAnytime.tasks, '2026-10-28').length, 1);
-eq('the regular window is the survivor', tasksForDay(afterAnytime.tasks, '2026-10-28')[0].time?.kind, 'slot');
+eq('tapping one of the all-day slots removes just that slot', slotCodesOf(tasksForDay(afterAnytime.tasks, '2026-10-28')[0]).join(','), 'MORNING,MIDDAY,AFTERNOON,NIGHT');
+eq('the task is still one per day', tasksForDay(afterAnytime.tasks, '2026-10-28').length, 1);
 
-// The cap is MAX_SLOTS_PER_DAY (5) per day.
-const FIVE: TimeChoice[] = [
-  { kind: 'slot', key: 'MORNING' },
-  { kind: 'slot', key: 'MIDDAY' },
-  { kind: 'slot', key: 'AFTERNOON' },
-  { kind: 'slot', key: 'EVENING' },
-  { kind: 'slot', key: 'NIGHT' },
-];
+// All five fit on one card; a sixth is impossible because there are only five.
 let capped = syncTasks([], [day(28)]);
-for (const slot of FIVE) capped = toggleTaskSlot(capped, day28, slot).tasks;
-eq('five windows fit on one day', tasksForDay(capped, '2026-10-28').length, MAX_SLOTS_PER_DAY);
+for (const code of ['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING', 'NIGHT']) {
+  capped = toggleTaskSlot(capped, day28, { kind: 'slot', key: code }).tasks;
+}
+eq('all five slots fit on ONE task', slotCodesOf(tasksForDay(capped, '2026-10-28')[0]).length, MAX_SLOTS_PER_DAY);
+eq('one card, not five', tasksForDay(capped, '2026-10-28').length, 1);
 const sixth = toggleTaskSlot(capped, day28, ANYTIME_9_12);
-eq('a sixth window is refused', sixth.action, 'max-slots');
-eq('and changes nothing', tasksForDay(sixth.tasks, '2026-10-28').length, MAX_SLOTS_PER_DAY);
+eq('the all-day tap on an already full day clears it', sixth.action, 'removed');
+eq('leaving an empty (untimed) task for the day', slotCodesOf(tasksForDay(sixth.tasks, '2026-10-28')[0]).length, 0);
 
-// Deleting ONE window keeps the day (and its other windows).
-const pruned = removeTaskDraft(capped, keyFor(28, SLOT_11_14));
-eq('one window is deleted', tasksForDay(pruned, '2026-10-28').length, 4);
+// Deleting ONE slot keeps the day and its other slots.
+const pruned = toggleTaskSlot(capped, day28, SLOT_11_14).tasks;
+eq('one slot is deleted', slotCodesOf(tasksForDay(pruned, '2026-10-28')[0]).length, 4);
 eq('its date survives', distinctDayCount(pruned), 1);
+eq('removing the whole day drops one card', removeTaskDraft(pruned, tasksForDay(pruned, '2026-10-28')[0].key).length, 0);
 
 /* ── FIX 3: at least two dates for a multiple-day job ────────────────────── */
 
@@ -278,7 +288,7 @@ const atEight: TaskDraft[] = [
 const moved = applyTaskTime(atEight, atEight[0].key, SLOT_17_20);
 eq('the new ceiling is applied', moved.tasks[0].hours, 6);
 eq('the lowering is reported', moved.loweredFrom, 12);
-eq('the edited card re-keys to its window', moved.tasks[0].key, keyFor(22, SLOT_17_20));
+eq('the edited card keeps its DAY-scoped key', moved.tasks[0].key, '2026-10-22#none');
 
 // Moving earlier keeps the value and reports nothing.
 const earlier = applyTaskTime(moved.tasks, moved.tasks[0].key, SLOT_8_11);
@@ -321,13 +331,9 @@ const sameDay = [
   { ...buildTask(day(28)), time: SLOT_17_20, key: keyFor(28, SLOT_17_20), hours: 3 },
 ];
 const sameDayMilestones = buildTaskMilestones(sameDay);
-eq('two windows on one date make two milestones (one per task)', sameDayMilestones.length, 2);
-eq(
-  'with both allowed slots on that one task',
-  sameDayMilestones[0].time_slots.join(','),
-  'MORNING'
-);
-eq('first task has expected hours 2', sameDayMilestones[0].expected_hours, 2);
+eq('two legacy cards of one date collapse into ONE milestone', sameDayMilestones.length, 1);
+eq('carrying both allowed slots', sameDayMilestones[0].time_slots.join(','), 'MORNING,EVENING');
+eq('and the latest start caps the hours (5 PM -> 6)', sameDayMilestones[0].expected_hours <= 6, true);
 
 /* ── ROUND 18: EVERY selected slot reaches the wire ───────────────────────── */
 
@@ -406,6 +412,59 @@ const multiSlot = applyTaskSlots([buildTask(day(20))], keyFor(20, null), ['MORNI
 eq('applyTaskSlots keeps every slot', multiSlot.timeSlots.join(','), 'MORNING,AFTERNOON');
 const clampedEarly = applyTaskSlots([buildTask(day(20))], keyFor(20, null), ['EVENING'], 9).tasks[0];
 eq('evening start caps hours at 6', clampedEarly.hours, 6);
+
+/* ── ROUND 18: ONE task per day, Anytime = all five slots ─────────────────── */
+
+// The boss's scenario: Mon [MORNING, AFTERNOON, EVENING], Tue [MORNING, MIDDAY,
+// EVENING], Wed Anytime -> exactly 3 tasks and 3 milestones (it used to be 7).
+let scenario = syncTasks([], [day(21), day(22), day(23)]);
+for (const code of ['MORNING', 'AFTERNOON', 'EVENING']) {
+  scenario = toggleTaskSlot(scenario, day(21), { kind: 'slot', key: code }).tasks;
+}
+for (const code of ['MORNING', 'MIDDAY', 'EVENING']) {
+  scenario = toggleTaskSlot(scenario, day(22), { kind: 'slot', key: code }).tasks;
+}
+scenario = toggleTaskSlot(scenario, day(23), ANYTIME_9_12).tasks;
+eq('the scenario has exactly 3 tasks', scenario.length, 3);
+eq('Mon allows three slots', slotCodesOf(scenario[0]).join(','), 'MORNING,AFTERNOON,EVENING');
+eq('Tue allows three slots', slotCodesOf(scenario[1]).join(','), 'MORNING,MIDDAY,EVENING');
+eq('Wed allows all five slots', slotCodesOf(scenario[2]).join(','), 'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT');
+const scenarioPayload = buildTaskMilestones(scenario);
+eq('the payload is 3 milestones', scenarioPayload.length, 3);
+eq('day 1 payload slots', scenarioPayload[0].time_slots.join(','), 'MORNING,AFTERNOON,EVENING');
+eq('day 2 payload slots', scenarioPayload[1].time_slots.join(','), 'MORNING,MIDDAY,EVENING');
+eq('day 3 payload slots', scenarioPayload[2].time_slots.join(','), 'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT');
+check('no payload ever mentions ANYTIME', !JSON.stringify(scenarioPayload).toUpperCase().includes('ANYTIME'));
+eq('all five slots leave a THREE hour ceiling (NIGHT starts at 8 PM)', hoursCapOfSlots(slotCodesOf(scenario[2])), 3);
+eq('and the requested 1 hour is kept under that ceiling', scenarioPayload[2].expected_hours, 1);
+
+// A legacy draft (one task per (day, slot), ANYTIME pseudo-code) normalises back.
+const legacy: TaskDraft[] = [
+  { ...buildTask(day(21)), time: SLOT_8_11, key: keyFor(21, SLOT_8_11), hours: 1 },
+  { ...buildTask(day(21)), time: SLOT_17_20, key: keyFor(21, SLOT_17_20), hours: 1 },
+  { ...buildTask(day(22)), time: SLOT_8_11, key: keyFor(22, SLOT_8_11), hours: 1 },
+  { ...buildTask(day(23)), time: ANYTIME_9_12, key: keyFor(23, null), hours: 3, timeSlots: ['ANYTIME'] },
+];
+const normalized = normalizeDraftTasks(legacy);
+eq('a legacy per-slot draft becomes one task per day', normalized.length, 3);
+eq('with the legacy pair unioned', slotCodesOf(normalized[0]).join(','), 'MORNING,EVENING');
+eq('the legacy ANYTIME expands to the five real codes', slotCodesOf(normalized[2]).join(','), 'MORNING,MIDDAY,AFTERNOON,EVENING,NIGHT');
+check(
+  'and an unknown code is dropped, not sent',
+  normalizeDraftTasks([{ ...buildTask(day(21)), time: null, timeSlots: ['NOPE'] }]).every((task) => slotCodesOf(task).length === 0)
+);
+eq('the API has exactly five real slots', allSlotCodes().length, 5);
+
+// Editor operations on ONE card: add until five, delete one, no duplicates.
+let editor = toggleTaskSlot(syncTasks([], [day(21)]), day(21), SLOT_8_11).tasks;
+editor = toggleTaskSlot(editor, day(21), SLOT_8_11).tasks;
+eq('adding the same slot twice removes it instead of duplicating', slotCodesOf(editor[0]).length, 0);
+editor = toggleTaskSlot(editor, day(21), SLOT_8_11).tasks;
+for (const code of ['MIDDAY', 'AFTERNOON', 'EVENING', 'NIGHT']) {
+  editor = toggleTaskSlot(editor, day(21), { kind: 'slot', key: code }).tasks;
+}
+eq('a full day holds five distinct slots', new Set(slotCodesOf(editor[0])).size, 5);
+eq('and is still one task', editor.length, 1);
 
 console.log(`postWizard: ${passed} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {

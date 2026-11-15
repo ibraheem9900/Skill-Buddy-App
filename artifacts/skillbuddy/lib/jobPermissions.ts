@@ -126,8 +126,11 @@ export function jobPermissionsForIds(
     isProviderViewer,
     canEditJob: owner && (status === 'DRAFT' || (open && job!.is_editable !== false)),
     canEditAddress: owner && (status === 'DRAFT' || (open && job!.is_editable !== false)),
-    canRestartTimer:
-      owner && noProvider && (job!.can_restart_timer === true || biddingExpired),
+    // ROUND 18: the button was showing with 2h59m of bidding left because the
+    // backend's can_restart_timer was true while the window was still open.
+    // Agreed rule: a timer is only restartable once bidding has CLOSED and no
+    // pilot is assigned — a live countdown is never "restarted".
+    canRestartTimer: owner && noProvider && biddingExpired,
     canConvertToRegular:
       owner && (job!.can_convert_to_regular === true || (job!.is_urgent === true && open)),
     canConvertToUrgent:

@@ -1264,11 +1264,6 @@ export default function BiddingDashboardScreen() {
       parseScheduleSegments(serverJob.description),
       milestones.length
     );
-    // "Edit tasks" covers BOTH shapes: several days, and ONE day that allows
-    // several slots (that is a task set too, and it must be editable).
-    const canEditTasks =
-      milestones.length > 1 ||
-      milestones.some((milestone) => (milestone.time_slots?.length ?? 0) > 1);
     const scheduledLocal = localStartOf(serverJob.scheduled_at);
     const scheduledLabel = formatLocalDateTime(
       serverJob.scheduled_at,
@@ -2174,15 +2169,9 @@ export default function BiddingDashboardScreen() {
             <>
               <View style={styles.sectionHeaderRow}>
                 <Text style={[styles.sectionTitle, { color: c.text }]}>{t('jobd_milestones')}</Text>
-                {perms.canEditAddress && canEditTasks ? (
-                  <TouchableOpacity
-                    onPress={() => router.push(`/job/${serverJob.id}/edit-tasks` as any)}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                  >
-                    <Text style={[styles.bodyLine, { color: c.primary }]}>{t('jobd_edit_tasks')}</Text>
-                  </TouchableOpacity>
-                ) : null}
+                {/* ROUND 18: the "Edit tasks" link opened a blank screen and is
+                    gone. Tasks are edited through Edit Job ("Save and repost"),
+                    which is the single edit path. */}
               </View>
               {milestones.map((m, i) => {
                 const mHours = parseExpectedHours(m.expected_hours);

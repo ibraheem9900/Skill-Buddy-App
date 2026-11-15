@@ -1871,6 +1871,7 @@ const de = {
   post_date_start: 'Start',
   post_days_selected_of: '{n} von {total} Tagen gewählt',
   post_time_anytime: '8AM-11PM (Jederzeit)',
+  post_time_all_day: 'Ganztägig · {from} - {to}',
   post_time_slot_started: 'Bereits begonnen',
   post_slots_hint: 'Wähle ein oder mehrere Zeitfenster',
   post_slots_loading: 'Zeitfenster werden geladen…',

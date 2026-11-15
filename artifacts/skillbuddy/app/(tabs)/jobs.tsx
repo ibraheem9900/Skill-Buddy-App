@@ -24,6 +24,7 @@ import MyBidsFeed from '@/components/MyBidsFeed';
 import JobsSortSheet from '@/components/JobsSortSheet';
 import TabGreenHeader from '@/components/TabGreenHeader';
 import { filterJobsBySearch, isClientProfileMissing, resolveJobsViewState } from '@/lib/jobList';
+import { jobDetailsRoute } from '@/lib/jobRoute';
 import { resolveJobStatus } from '@/lib/jobStatus';
 import useJobList from '@/hooks/useJobList';
 import {
@@ -271,15 +272,20 @@ function JobsScreen() {
   };
 
   const openJob = (job: JobListItem) => {
-    // Details come from GET /api/v1/jobs/{job_id} on that screen — the list
-    // item has no description or address to pass along.
-    // `JobListItem` carries no distance; only a feed item that does adds it.
-    const maybeDistance = (job as unknown as { distance_km?: unknown }).distance_km;
-    const distance =
-      typeof maybeDistance === 'number' && Number.isFinite(maybeDistance)
-        ? maybeDistance
-        : undefined;
-    router.push({ href: `/job/${job.id}`, params: distance !== undefined ? { distance } : {} } as any);
+    // ROUND 18: the old `{ href, params }` object is NOT an expo-router route
+    // (the object form is `{ pathname, params }`), so the push silently did
+    // nothing. `jobDetailsRoute` builds the valid shape and only ever adds a
+    // finite numeric distance as a string.
+    const route = jobDetailsRoute({
+      id: job.id,
+      distance_km: (job as unknown as { distance_km?: unknown }).distance_km,
+    });
+    try {
+      router.push(route as any);
+    } catch (error) {
+      // Never swallow a navigation failure silently again.
+      console.error('[jobs] could not open job details', job.id, error);
+    }
   };
 
   /**

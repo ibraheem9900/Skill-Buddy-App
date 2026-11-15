@@ -47,7 +47,8 @@ const owner = jobPermissions(job, 'CLIENT', '7');
 check('the owner is recognised', owner.isOwner);
 check('the owner may edit', owner.canEditJob);
 check('the owner may edit the address', owner.canEditAddress);
-check('the owner may restart the timer', owner.canRestartTimer);
+// ROUND 18: a LIVE countdown is never "restarted" — only a closed window is.
+check('the owner may NOT restart a timer that is still running', !owner.canRestartTimer);
 check('the owner may convert to regular', owner.canConvertToRegular);
 check('the owner may convert to urgent', owner.canConvertToUrgent);
 check('the owner may cancel', owner.canCancelJob);
@@ -86,8 +87,10 @@ check('the owner in PILOT mode may cancel', ownerInPilotMode.canCancelJob);
 check('the owner in PILOT mode is NOT a provider viewer', !ownerInPilotMode.isProviderViewer);
 check('the owner in PILOT mode cannot place a bid on their own job', !ownerInPilotMode.canPlaceBid);
 check(
-  'every owner action stays available in PILOT mode',
-  Object.values(canOwnerRunAction(ownerInPilotMode)).every(Boolean)
+  'every owner action except the closed-window-only timer stays available in PILOT mode',
+  Object.entries(canOwnerRunAction(ownerInPilotMode))
+    .filter(([action]) => action !== 'restartTimer')
+    .every(([, allowed]) => Boolean(allowed))
 );
 
 /* ── A different client ──────────────────────────────────────────────────── */
