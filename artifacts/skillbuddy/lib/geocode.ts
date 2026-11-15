@@ -146,6 +146,26 @@ export function streetNameOnly(house: string): string {
   return withoutNumbers.replace(/\s{2,}/g, ' ');
 }
 
+/**
+ * The geocoding query's building line: street name + BUILDING number only.
+ * An apartment/office/floor suffix ("… 7A 46") is never sent — Nominatim
+ * answers that with nothing, which is how every address used to fall back to
+ * the postcode or the city centre.
+ */
+export function buildingLine(fields: GeocodeFields): string {
+  const house = clean(fields.house_number);
+  const streetField = clean(fields.street_address);
+  // A full line that already names the street: keep it up to the BUILDING
+  // number (and an optional /sub), dropping anything after it (apartment,
+  // office, floor).
+  if (house && /[A-Za-z]/.test(house)) {
+    const match = house.match(/^(.*?\b\d+[A-Za-z]?(?:\s*\/\s*[0-9A-Za-z-]+)?)/);
+    return (match ? match[1] : house).trim();
+  }
+  // A bare building number: pair it with the street field.
+  return [streetField, house].filter((part) => part.length > 0).join(' ');
+}
+
 /** "12616 Tallinn" — the postcode+city part of a free-form address line. */
 export function postalCityLine(fields: GeocodeFields): string {
   return [clean(fields.postal_code), clean(fields.city)]
@@ -192,11 +212,17 @@ export function buildGeocodeLadder(fields: GeocodeFields): GeocodeRung[] {
   };
 
   // 1. the complete building line, as the form collected it.
-  push('full', 'building', [house, postalCity, country]);
+  // ONLY street + building number: an apartment/office/floor suffix makes
+  // Nominatim answer nothing, so the ladder used to fall to the postcode.
+  push('full', 'building', [buildingLine(fields), postalCity, country]);
   // 2. the base building without the "/2" sub-number.
-  if (baseHouse && baseHouse !== house) push('base-building', 'building', [baseHouse, postalCity, country]);
+  const baseBuilding = stripSubNumber(buildingLine(fields));
+  if (baseBuilding && baseBuilding !== buildingLine(fields)) {
+    push('base-building', 'building', [baseBuilding, postalCity, country]);
+  }
   // 3. the street itself.
-  if (street) push('street', 'street', [street, city || county, country]);
+  const streetName = street || streetNameOnly(buildingLine(fields));
+  if (streetName) push('street', 'street', [streetName, city || county, country]);
   // 4. the postcode.
   push('postcode', 'postcode', [postal, country]);
   // 5. the city — the LAST resort, and reported as such.
