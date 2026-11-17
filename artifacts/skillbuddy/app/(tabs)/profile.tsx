@@ -14,6 +14,11 @@ import LogoImage from '@/components/LogoImage';
 import useProfilePictureUpload from '@/hooks/useProfilePictureUpload';
 import useClientProfile, { formatAmountSpent } from '@/hooks/useClientProfile';
 import useProviderDashboard from '@/hooks/useProviderDashboard';
+import { usePendingReviews } from '@/hooks/usePendingReviews';
+import useProviderProfile from '@/hooks/useProviderProfile';
+import { useProviderReviews } from '@/hooks/useProviderReviews';
+import { useClientReviews } from '@/hooks/useClientReviews';
+import { formatReviewAverage, providerReviewCountKey, reviewAverageForDisplay } from '@/lib/reviews';
 import { useCreditWallet } from '@/hooks/useWallet';
 import { failureCopyKind, resolveDataViewState } from '@/lib/dataState';
 import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
@@ -25,6 +30,8 @@ interface MenuItem {
   action?: () => void;
   color?: string;
   badge?: string;
+  /** Optional second line under the label (e.g. a rating summary). */
+  subtitle?: string;
   isThemeToggle?: boolean;
 }
 
@@ -33,7 +40,7 @@ function ProfileScreen() {
   const router = useRouter();
   const { logout, user } = useAuth();
   const { colors: c, theme, toggleTheme } = useTheme();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { activeRole, isBothRoles, toggleRole } = useRole();
   const { pickAndUpload, uploading, removePicture, deleting } = useProfilePictureUpload(!!user?.profile_picture);
   // Client activity stats (GET /api/v1/clients/profile) — fetched only while
@@ -44,9 +51,49 @@ function ProfileScreen() {
   // Provider-side counts (GET /providers/dashboard) — the previous numbers
   // came from the mock user; they are real now (0 until the dashboard loads).
   const providerStats = useProviderDashboard();
+  // My provider PROFILE id (the id /providers/{id}/reviews expects) comes
+  // from the already-cached provider profile — no extra lookup request.
+  const myProviderProfile = useProviderProfile();
+  const myReviews = useProviderReviews(
+    activeRole === 'PROVIDER' ? myProviderProfile.profile?.id ?? null : null
+  );
+  // "4.7 · 12 reviews" under the row label — the same summary the screen shows.
+  const myReviewsAverage = formatReviewAverage(
+    reviewAverageForDisplay(myReviews.summary),
+    language
+  );
+  const myReviewsSubtitle = myReviewsAverage
+    ? `${myReviewsAverage} · ${t(
+        providerReviewCountKey(myReviews.summary.review_count, language),
+        { n: myReviews.summary.review_count }
+      )}`
+    : t('fb_prov_no_reviews');
+  // Same for the CLIENT side: the client PROFILE id from GET /clients/profile
+  // (the id /clients/{id}/reviews expects — measured live).
+  const myClientReviews = useClientReviews(
+    activeRole === 'CLIENT' ? clientStats.profile?.id ?? null : null
+  );
+  const myClientReviewsAverage = formatReviewAverage(
+    reviewAverageForDisplay(myClientReviews.summary),
+    language
+  );
+  const myClientReviewsSubtitle = myClientReviewsAverage
+    ? `${myClientReviewsAverage} · ${t(
+        providerReviewCountKey(myClientReviews.summary.review_count, language),
+        { n: myClientReviews.summary.review_count }
+      )}`
+    : t('fb_prov_no_reviews');
+  // "Reviews to write" — same session-cached read as the Home card, so the
+  // badge and the list always agree. Hidden at 0, capped at "9+".
+  const pendingReviews = usePendingReviews();
+  const pendingBadge =
+    pendingReviews.count > 0 ? (pendingReviews.count > 9 ? '9+' : String(pendingReviews.count)) : undefined;
 
   React.useEffect(() => {
-    if (activeRole === 'PROVIDER') void providerStats.load();
+    if (activeRole === 'PROVIDER') {
+      void providerStats.load();
+      void myProviderProfile.load();
+    }
   }, [activeRole, providerStats.load]);
   const { activeRole: statsRole } = useRole();
   const statsLoadedFor = useRef<'CLIENT' | 'PROVIDER' | null>(null);
@@ -146,6 +193,27 @@ function ProfileScreen() {
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'heart', label: t('cf_title'), route: '/profile/favorites' },
+        ...(clientStats.profile
+          ? [
+              {
+                icon: 'message-square' as const,
+                label: t('fb_prov_my_reviews'),
+                route: `/client/${clientStats.profile.id}/reviews`,
+                subtitle: myClientReviewsSubtitle,
+              },
+            ]
+          : []),
+        { icon: 'star', label: t('fb_pending_title'), route: '/reviews/pending', badge: pendingBadge },
+        ...(myProviderProfile.profile
+          ? [
+              {
+                icon: 'message-square' as const,
+                label: t('fb_prov_my_reviews'),
+                route: `/provider/${myProviderProfile.profile.id}/reviews`,
+                subtitle: myReviewsSubtitle,
+              },
+            ]
+          : []),
         {
           icon: 'star',
           label: t('profile_credit_points'),
@@ -206,6 +274,7 @@ function ProfileScreen() {
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'shield', label: t('cert_title'), route: '/profile/certifications' },
+        { icon: 'star', label: t('fb_pending_title'), route: '/reviews/pending', badge: pendingBadge },
       ],
     },
     {
@@ -405,7 +474,19 @@ function ProfileScreen() {
                 >
                   <Feather name={item.icon} size={18} color={item.color ?? c.primary} />
                 </View>
-                <Text style={[styles.menuLabel, { color: item.color ?? c.text }]}>{item.label}</Text>
+                <View style={styles.menuLabelWrap}>
+                  <Text style={[styles.menuLabel, { color: item.color ?? c.text }]}>
+                    {item.label}
+                  </Text>
+                  {item.subtitle ? (
+                    <Text
+                      style={[styles.menuSub, { color: c.mutedForeground }]}
+                      numberOfLines={1}
+                    >
+                      {item.subtitle}
+                    </Text>
+                  ) : null}
+                </View>
                 {item.badge ? (
                   <View style={[styles.badge, { backgroundColor: c.primaryLight }]}>
                     <Text style={[styles.badgeText, { color: c.primary }]}>{item.badge}</Text>
@@ -550,6 +631,8 @@ const styles = StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
   menuIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   menuLabel: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 14 },
+  menuLabelWrap: { flex: 1, gap: 2 },
+  menuSub: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
   badgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
 });

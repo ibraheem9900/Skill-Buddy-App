@@ -84,6 +84,11 @@ const TEST_FILES = [
   'repostJob.test.js',
   'certificationDetail.test.js',
   'apiTimeSlots.test.js',
+  'feedback.test.js',
+  'taskFeedback.test.js',
+  'disputeImages.test.js',
+  'reviewPhotos.test.js',
+  'reviews.test.js',
 ];
 
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');

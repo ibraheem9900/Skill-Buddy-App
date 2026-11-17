@@ -18,6 +18,9 @@ import EmptyState from '@/components/EmptyState';
 import BrandedLoader from '@/components/BrandedLoader';
 import { useAppAlert } from '@/context/AlertModalContext';
 import { useJobDetail } from '@/hooks/useJobDetail';
+import { useTaskFeedbackCounts } from '@/hooks/useTaskFeedback';
+import { useFeedbackOptionLabels } from '@/hooks/useFeedbackOptionLabels';
+import JobReviewsCard from '@/components/JobReviewsCard';
 import useRepostNotice from '@/hooks/useRepostNotice';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { useRestartJobTimer } from '@/hooks/useRestartJobTimer';
@@ -39,6 +42,7 @@ import {
 } from '@/lib/jobList';
 import { isDraftJob, publishErrorKey } from '@/lib/jobPublish';
 import { canAddJobAddress } from '@/lib/jobAddress';
+import { FEEDBACK_DISPUTE_CREATE_ENABLED } from '@/lib/feedback';
 import { formatAddressLine } from '@/lib/addressFormat';
 import { canClientCancelJob } from '@/lib/jobCancel';
 import {
@@ -195,6 +199,20 @@ export default function BiddingDashboardScreen() {
     refetch: refetchServerJob,
     applyJob: applyServerJob,
   } = useJobDetail(isServer ? numericId : null);
+
+  // Task feedback history: ONE cached read per Task, used only for the count
+  // badge on each Task card. Failures stay silent — a missing badge must never
+  // break this screen, and the history screen reports its own errors.
+  const taskIds = useMemo(
+    () => (serverJob?.milestones ?? []).map((task) => task.id),
+    [serverJob]
+  );
+  const taskFeedbackCounts = useTaskFeedbackCounts(isServer ? numericId : null, taskIds);
+
+  // Reviews: the Reviews card reads GET /jobs/{id}/reviews itself; this only
+  // provides the id → label lookup for its selected_options chips (the same
+  // session-cached GET /feedback/options the form uses).
+  const reviewOptionLabels = useFeedbackOptionLabels();
 
   // PART 5: refetch whenever the screen regains focus, so returning from any
   // other screen never leaves stale data on display. This doubles as the
@@ -1524,6 +1542,61 @@ export default function BiddingDashboardScreen() {
           return false;
         })
       : [];
+    // JOB FEEDBACK entry. One route (/feedback/{context}) renders all seven
+    // contexts; here only the ones a finished job earns are offered, and the
+    // context comes from the viewer's side of the job — never from the role
+    // switch alone. A pilot looking at someone else's job gets no button.
+    // MILESTONE_DENIAL / DISPUTE_* have no entry point in this app yet (there is
+    // no Task approval screen), so only their routes exist for now.
+    const feedbackContext: 'CLIENT_CANCELLATION' | 'PROVIDER_CANCELLATION' | null =
+      serverJob.status === 'CANCELLED' || serverJob.status === 'CANCELLED_BY_CLIENT'
+          ? perms.isOwner
+            ? 'CLIENT_CANCELLATION'
+            : null
+          : serverJob.status === 'CANCELLED_BY_PROVIDER'
+            ? perms.isProviderViewer
+              ? 'PROVIDER_CANCELLATION'
+              : perms.isOwner
+                ? 'CLIENT_CANCELLATION'
+                : null
+            : null;
+    /* REVIEW ENTRY (both roles). POST /api/v1/jobs/{job_id}/reviews only
+       accepts a CLOSED job, so the button appears from that status on and the
+       SERVER decides everything else (closed at all, 7-day window, both sides).
+       The review screen's job card is filled from data THIS screen already has:
+       the title, the completion date and — for the client — the assigned pilot.
+       TODO(job-reviews): a "Review submitted" state cannot be derived yet, because
+       JobResponse carries no review fields and GET /jobs/{job_id}/reviews is still
+       an unwired stub. Until then the button stays and a second review is rejected
+       by the backend (409/400), which the form reports as "You already reviewed
+       this job".
+       TODO(job-reviews): display names/avatars of both parties are not on
+       JobResponse either, so the client sees the provider id and the pilot sees no
+       counterpart row at all — no profile fetch was added for it. */
+    const reviewContext: 'CLIENT_REVIEW' | 'PROVIDER_REVIEW' | null =
+      serverJob.status === 'CLOSED'
+        ? perms.isOwner
+          ? 'CLIENT_REVIEW'
+          : perms.isProviderViewer
+            ? 'PROVIDER_REVIEW'
+            : null
+        : null;
+    const reviewRoute = (context: 'CLIENT_REVIEW' | 'PROVIDER_REVIEW') => {
+      const params = [
+        `jobId=${serverJob.id}`,
+        `role=${context === 'CLIENT_REVIEW' ? 'CLIENT' : 'PROVIDER'}`,
+      ];
+      if (serverJob.title) params.push(`jobTitle=${encodeURIComponent(serverJob.title)}`);
+      if (completedOn) params.push(`jobDate=${encodeURIComponent(completedOn)}`);
+      if (context === 'CLIENT_REVIEW' && typeof serverJob.assigned_provider_id === 'number') {
+        params.push(
+          `counterpart=${encodeURIComponent(
+            t('jobd_provider_n', { id: serverJob.assigned_provider_id })
+          )}`
+        );
+      }
+      return `/feedback/${context}?${params.join('&')}`;
+    };
     const actionIcon: Record<JobActionId, keyof typeof Feather.glyphMap> = {
       edit: 'edit-2',
       cancel: 'x-circle',
@@ -1995,6 +2068,45 @@ export default function BiddingDashboardScreen() {
               details screen only. The upload screen (/job/{id}/attachment) and
               the Post a Job flow keep their attach capability untouched. */}
 
+          {/* REVIEWS (both roles, CLOSED jobs only). The card reads the job
+              review state itself — button, "Review submitted", expired or
+              unavailable — and links to the dedicated reviews screen. */}
+          {reviewContext ? (
+            <View style={{ marginTop: 14 }}>
+              <JobReviewsCard
+                jobId={serverJob.id}
+                viewerSide={reviewContext === 'CLIENT_REVIEW' ? 'CLIENT' : 'PROVIDER'}
+                optionLookup={reviewOptionLabels.labels}
+                onRate={() => router.push(reviewRoute(reviewContext) as any)}
+                onViewReviews={() =>
+                  router.push(
+                    `/job/${serverJob.id}/reviews?role=${
+                      reviewContext === 'CLIENT_REVIEW' ? 'CLIENT' : 'PROVIDER'
+                    }` as any
+                  )
+                }
+              />
+            </View>
+          ) : null}
+
+          {/* Hidden while the cancellation-feedback create API is a stub: the
+              form would open but could never submit. See lib/feedback. */}
+          {FEEDBACK_DISPUTE_CREATE_ENABLED && feedbackContext ? (
+            <TouchableOpacity
+              style={[styles.restartBtn, { borderColor: c.primary, marginTop: 14 }]}
+              onPress={() =>
+                router.push(
+                  `/feedback/${feedbackContext}?jobId=${serverJob.id}&role=${
+                    feedbackContext === 'CLIENT_CANCELLATION' ? 'CLIENT' : 'PROVIDER'
+                  }` as any
+                )
+              }
+              activeOpacity={0.85}
+            >
+              <Feather name="star" size={15} color={c.primary} />
+              <Text style={[styles.restartText, { color: c.primary }]}>{t('fb_entry_review')}</Text>
+            </TouchableOpacity>
+          ) : null}
           {/* Which actions exist is decided by is_editable / is_cancellable /
               can_restart_timer / can_convert_to_regular / can_convert_to_urgent
               exactly as returned — never re-derived from status or dates. */}
@@ -2175,6 +2287,7 @@ export default function BiddingDashboardScreen() {
               </View>
               {milestones.map((m, i) => {
                 const mHours = parseExpectedHours(m.expected_hours);
+                const feedbackCount = taskFeedbackCounts[m.id] ?? 0;
                 // LOCAL day + the stored window: "Thu 22 Oct · 8:00 AM - 11:00 AM"
                 // instead of the raw UTC stamp and the raw "Preferred time" text.
                 const local = localStartOf(m.scheduled_at);
@@ -2245,6 +2358,42 @@ export default function BiddingDashboardScreen() {
                     ) : null}
                     {m.note ? (
                       <Text style={[styles.bodyLine, { color: c.mutedForeground }]}>{m.note}</Text>
+                    ) : null}
+                    {/* Task feedback history (denials/disputes). A small link, not a
+                        new card layout: the count badge only appears when the Task
+                        already has entries. */}
+                    {perms.isOwner || perms.isProviderViewer ? (
+                      <TouchableOpacity
+                        style={styles.taskFeedbackLink}
+                        onPress={() =>
+                          router.push(
+                            `/job/${serverJob.id}/task-feedback?milestoneId=${m.id}&task=${i + 1}&role=${
+                              perms.isOwner ? 'CLIENT' : 'PROVIDER'
+                            }` as any
+                          )
+                        }
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                      >
+                        <Feather name="message-square" size={13} color={c.primary} />
+                        <Text style={[styles.taskFeedbackText, { color: c.primary }]}>
+                          {t('fb_task_feedback')}
+                        </Text>
+                        {feedbackCount > 0 ? (
+                          <View
+                            style={[styles.taskFeedbackBadge, { backgroundColor: c.primary }]}
+                          >
+                            <Text
+                              style={[
+                                styles.taskFeedbackBadgeText,
+                                { color: c.primaryForeground },
+                              ]}
+                            >
+                              {feedbackCount}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
                     ) : null}
                   </View>
                 );
@@ -2492,4 +2641,22 @@ const styles = StyleSheet.create({
   infoValue: { fontFamily: 'Manrope_600SemiBold', fontSize: 15 },
   bodyLine: { fontFamily: 'Manrope_400Regular', fontSize: 13, lineHeight: 20, textAlign: 'left' },
   milestoneTitle: { fontFamily: 'Manrope_700Bold', fontSize: 13 },
+  taskFeedbackLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 2,
+    minHeight: 36,
+  },
+  taskFeedbackText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12 },
+  taskFeedbackBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  taskFeedbackBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 10 },
 });

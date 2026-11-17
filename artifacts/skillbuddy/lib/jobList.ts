@@ -331,6 +331,7 @@ export type JobStatusLabelKey =
   | 'status_paused_by_provider'
   | 'status_blocked'
   | 'status_completed'
+  | 'status_closed'
   | 'status_cancelled'
   | 'status_cancelled_by_client'
   | 'status_cancelled_by_provider';
@@ -347,6 +348,7 @@ const STATUS_LABEL_KEY: Record<JobApiStatus, JobStatusLabelKey> = {
   PAUSED_BY_PROVIDER: 'status_paused_by_provider',
   BLOCKED: 'status_blocked',
   COMPLETED: 'status_completed',
+  CLOSED: 'status_closed',
   CANCELLED: 'status_cancelled',
   CANCELLED_BY_CLIENT: 'status_cancelled_by_client',
   CANCELLED_BY_PROVIDER: 'status_cancelled_by_provider',
@@ -390,6 +392,7 @@ const STATUS_TONE: Record<JobApiStatus, JobStatusTone> = {
   PAUSED_BY_PROVIDER: 'muted',
   BLOCKED: 'muted',
   COMPLETED: 'success',
+  CLOSED: 'success',
   CANCELLED: 'destructive',
   CANCELLED_BY_CLIENT: 'destructive',
   CANCELLED_BY_PROVIDER: 'destructive',

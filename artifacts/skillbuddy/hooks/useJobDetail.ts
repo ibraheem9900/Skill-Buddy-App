@@ -42,6 +42,15 @@ const cache = new Map<number, JobResponse>();
 // cached job id from another account must never be served.
 registerSessionReset(() => cache.clear());
 
+/**
+ * A job already fetched this session, or null. Used by the pending-reviews list
+ * to tell which side of a job the viewer is on WITHOUT another request (the
+ * pending items carry no role). Never triggers a fetch.
+ */
+export function peekJobDetail(jobId: number): JobResponse | null {
+  return cache.get(jobId) ?? null;
+}
+
 /** Drop a cached job (call after a mutation so the next open re-reads it). */
 export function invalidateJobDetail(jobId?: number): void {
   if (jobId === undefined) cache.clear();

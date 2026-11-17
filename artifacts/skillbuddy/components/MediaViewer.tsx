@@ -18,6 +18,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DotsLoader from '@/components/DotsLoader';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 
@@ -32,6 +33,15 @@ interface Props {
   items: MediaViewerItem[];
   initialIndex?: number;
   onClose: () => void;
+  /**
+   * Optional destructive action for the image on screen (used by the dispute
+   * history for the author's own photos). Hidden entirely when omitted, so no
+   * existing viewer gains a button.
+   */
+  onDelete?: () => void;
+  deleteLabel?: string;
+  /** Shows the three-dot loader in place of the trash icon while deleting. */
+  deleting?: boolean;
 }
 
 /** One page: pinch to zoom, release back to a comfortable size. */
@@ -100,7 +110,15 @@ function ZoomPage({ item, width, height }: { item: MediaViewerItem; width: numbe
  * close button and an "n / total" counter. One component serves job
  * attachments, certification previews and the pilot's view.
  */
-export default function MediaViewer({ visible, items, initialIndex = 0, onClose }: Props) {
+export default function MediaViewer({
+  visible,
+  items,
+  initialIndex = 0,
+  onClose,
+  onDelete,
+  deleteLabel,
+  deleting = false,
+}: Props) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
@@ -140,7 +158,24 @@ export default function MediaViewer({ visible, items, initialIndex = 0, onClose 
           <Text style={styles.counter}>
             {items.length === 0 ? '0 / 0' : `${index + 1} / ${items.length}`}
           </Text>
-          <View style={{ width: 40 }} />
+          {onDelete ? (
+            <TouchableOpacity
+              onPress={onDelete}
+              disabled={deleting}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel={deleteLabel ?? t('media_close')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              {deleting ? (
+                <DotsLoader color="#FFFFFF" size={6} gap={4} />
+              ) : (
+                <Feather name="trash-2" size={20} color="#FFF" />
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 40 }} />
+          )}
         </View>
 
         <FlatList

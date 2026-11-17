@@ -63,6 +63,7 @@
     "expo-auth-session": "~57.0.13",
     "expo-crypto": "~57.0.3",
     "expo-glass-effect": "~57.0.4",
+    "expo-image-manipulator": "~57.0.22",
     "expo-secure-store": "~57.0.4",
     "expo-updates": "~57.0.23",
     "expo-video": "~57.0.5",

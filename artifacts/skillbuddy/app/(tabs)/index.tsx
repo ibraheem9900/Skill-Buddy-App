@@ -47,6 +47,7 @@ import useSelectedLocation from '@/hooks/useSelectedLocation';
 import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
 import UpdateBanner from '@/components/UpdateBanner';
+import PendingReviewsCard from '@/components/PendingReviewsCard';
 import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 import { loadHomeContent, type HomeContent } from '@/lib/homeContent';
 import { formatCompactPoints } from '@/lib/carousel';
@@ -324,6 +325,10 @@ function HomeScreen() {
             build with the latest GitHub release; hidden while up to date or
             after the user dismisses that release. Android release builds only. */}
         <UpdateBanner />
+
+        {/* Pending reviews (both roles): ONE compact, dismissible card — never
+            a modal, and hidden at 0 / while loading / when the call fails. */}
+        {user ? <PendingReviewsCard /> : null}
 
         {/* Section heading — no "Welcome back, Name" greeting, per request */}
         <Animated.View entering={FadeInDown.delay(20).duration(380)} style={[styles.section, { paddingHorizontal: 16 }]}>

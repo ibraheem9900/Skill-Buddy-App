@@ -1,12 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import BackButton from '@/components/BackButton';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
+import MediaViewer, { type MediaViewerItem } from '@/components/MediaViewer';
+import RatingSummary from '@/components/RatingSummary';
+import ReviewCard from '@/components/ReviewCard';
+import { useFeedbackOptions } from '@/hooks/useFeedbackOptions';
+import { useProviderReviews } from '@/hooks/useProviderReviews';
 import { authApi } from '@/services/api';
 import { getRememberedProvider } from '@/lib/publicProfiles';
 import { initialsFor, providerDisplayName } from '@/lib/profileDisplay';
@@ -33,6 +38,7 @@ import type { ProviderSkill } from '@/types';
 export default function PublicProviderProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { colors: c } = useTheme();
   const { t } = useLanguage();
 
@@ -42,6 +48,19 @@ export default function PublicProviderProfileScreen() {
   const [skills, setSkills] = useState<ProviderSkill[] | null>(null);
   const [skillsStatus, setSkillsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
+
+  // The route id is the provider PROFILE id — exactly what
+  // GET /providers/{provider_id}/reviews expects (its user id answers 404).
+  const providerReviews = useProviderReviews(providerId);
+  const { options: reviewOptions } = useFeedbackOptions('CLIENT_REVIEW');
+  const reviewOptionLookup = React.useMemo(
+    () => new Map(reviewOptions.map((option) => [option.id, option.label])),
+    [reviewOptions]
+  );
+  const openMedia = useCallback((items: MediaViewerItem[], index: number) => {
+    setViewer({ items, index });
+  }, []);
 
   const loadSkills = useCallback(async () => {
     if (providerId === null) return;
@@ -192,7 +211,65 @@ export default function PublicProviderProfileScreen() {
             ))}
           </View>
         )}
+        {/* Reviews — the pilot's PUBLISHED client reviews, first page as a
+            preview. Read-only, no reply feature exists. */}
+        <View style={styles.reviewsHead}>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>{t('fb_prov_title')}</Text>
+          <TouchableOpacity
+            onPress={() => router.push(`/provider/${providerId}/reviews` as any)}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.seeAll, { color: c.primary }]}>{t('fb_prov_see_all')}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <RatingSummary summary={providerReviews.summary} subject="provider" compact />
+
+        {providerReviews.loading ? (
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {[0, 1].map((row) => (
+              <View
+                key={row}
+                style={[
+                  styles.skeleton,
+                  { backgroundColor: c.muted, borderColor: c.border, height: 92 },
+                ]}
+              />
+            ))}
+          </View>
+        ) : providerReviews.failure && providerReviews.reviews.length === 0 ? (
+          <Text style={[styles.emptyText, { color: c.mutedForeground, marginTop: 10 }]}>
+            {t('fb_prov_load_error')}
+          </Text>
+        ) : providerReviews.reviews.length === 0 ? (
+          <Text style={[styles.emptyText, { color: c.mutedForeground, marginTop: 10 }]}>
+            {t('fb_prov_empty_msg')}
+          </Text>
+        ) : (
+          providerReviews.reviews.slice(0, 3).map((review) => (
+            <View key={review.id} style={{ marginTop: 10 }}>
+              <ReviewCard
+                review={review}
+                viewerSide="CLIENT"
+                variant="public"
+                title={t('fb_prov_reviewer_client')}
+                optionLookup={reviewOptionLookup}
+                onOpenMedia={openMedia}
+                compact
+              />
+            </View>
+          ))
+        )}
       </ScrollView>
+
+      <MediaViewer
+        visible={viewer !== null}
+        items={viewer?.items ?? []}
+        initialIndex={viewer?.index ?? 0}
+        onClose={() => setViewer(null)}
+      />
     </View>
   );
 }
@@ -237,6 +314,13 @@ const styles = StyleSheet.create({
   statValue: { fontFamily: 'Manrope_700Bold', fontSize: 17 },
   statLabel: { fontFamily: 'Manrope_400Regular', fontSize: 10, textAlign: 'center' },
   sectionTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, marginTop: 22, marginBottom: 10 },
+  reviewsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  seeAll: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, flexShrink: 0 },
   skeleton: { height: 44, borderWidth: 1, borderRadius: 12, opacity: 0.6 },
   errorBox: { borderWidth: 1, borderRadius: 14, padding: 14, gap: 8, alignItems: 'flex-start' },
   errorText: { fontFamily: 'Manrope_400Regular', fontSize: 12, lineHeight: 17 },

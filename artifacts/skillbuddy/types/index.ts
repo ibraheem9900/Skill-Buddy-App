@@ -732,6 +732,8 @@ export type JobApiStatus =
   | 'PAUSED_BY_PROVIDER'
   | 'BLOCKED'
   | 'COMPLETED'
+  /** Final, reviewed state — the one POST /jobs/{id}/reviews accepts. */
+  | 'CLOSED'
   | 'CANCELLED'
   | 'CANCELLED_BY_CLIENT'
   | 'CANCELLED_BY_PROVIDER';

@@ -17,6 +17,7 @@ import { useAppAlert } from '@/context/AlertModalContext';
 import BackButton from '@/components/BackButton';
 import BrandedLoader from '@/components/BrandedLoader';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { useAuth } from '@/context/AuthContext';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { useCancelJob } from '@/hooks/useCancelJob';
 import {
@@ -30,6 +31,7 @@ import {
   shouldResyncAfterCancelFailure,
   validateCancelReason,
 } from '@/lib/jobCancel';
+import { FEEDBACK_DISPUTE_CREATE_ENABLED } from '@/lib/feedback';
 
 /**
  * Cancel Job — POST /api/v1/jobs/{job_id}/cancel (schema JobCancelRequest).
@@ -61,6 +63,7 @@ export default function CancelJobScreen() {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const showAlert = useAppAlert();
+  const { user } = useAuth();
 
   const numericId = /^\d+$/.test(id ?? '') ? Number(id) : null;
 
@@ -326,6 +329,29 @@ export default function CancelJobScreen() {
             </Text>
           </TouchableOpacity>
 
+          {/* CANCELLATION FEEDBACK — hidden while the create API is a stub, so
+              nobody taps through to a form that cannot submit. The context
+              follows the real side of the job — owner → CLIENT_CANCELLATION,
+              the assigned pilot → PROVIDER_CANCELLATION. */}
+          {FEEDBACK_DISPUTE_CREATE_ENABLED ? (
+          <TouchableOpacity
+            style={[styles.feedbackLink, { borderColor: c.border }]}
+            onPress={() => {
+              const isOwner = user?.id != null && String(job.client_id) === String(user.id);
+              const context = isOwner ? 'CLIENT_CANCELLATION' : 'PROVIDER_CANCELLATION';
+              router.push(
+                `/feedback/${context}?jobId=${job.id}&role=${isOwner ? 'CLIENT' : 'PROVIDER'}` as any
+              );
+            }}
+            activeOpacity={0.85}
+          >
+            <Feather name="message-square" size={15} color={c.mutedForeground} />
+            <Text style={[styles.feedbackLinkText, { color: c.mutedForeground }]}>
+              {t('fb_entry_cancel')}
+            </Text>
+          </TouchableOpacity>
+          ) : null}
+
           {retryable && !cancelling ? (
             <TouchableOpacity
               style={[styles.retry, { borderColor: c.border }]}
@@ -414,6 +440,17 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   retryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14 },
+  feedbackLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginTop: 12,
+  },
+  feedbackLinkText: { fontFamily: 'Manrope_500Medium', fontSize: 13 },
   stateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
   stateTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, textAlign: 'center' },
   stateSub: { fontFamily: 'Manrope_400Regular', fontSize: 13, textAlign: 'center', lineHeight: 19 },

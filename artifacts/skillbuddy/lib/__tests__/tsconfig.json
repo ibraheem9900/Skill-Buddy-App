@@ -82,6 +82,11 @@
     "./repostJob.test.ts",
     "./certificationDetail.test.ts",
     "./jobRoute.test.ts",
-    "./apiTimeSlots.test.ts"
+    "./apiTimeSlots.test.ts",
+    "./feedback.test.ts",
+    "./taskFeedback.test.ts",
+    "./disputeImages.test.ts",
+    "./reviewPhotos.test.ts",
+    "./reviews.test.ts"
   ]
 }
