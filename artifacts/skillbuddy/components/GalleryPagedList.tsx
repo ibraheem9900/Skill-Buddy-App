@@ -7,9 +7,9 @@
  *     single-service endpoint; see hooks/usePublicMediaPage, which also keeps
  *     its first page in a per-service session cache so reopening the screen, or
  *     closing the viewer, does not refetch);
- *   • category only → GET /api/v1/media-gallery/public?category_id (List Public
- *     Media, still the paginated category source).
- * Both grouped endpoints have no limit/offset, so every "See all" lands here.
+ *   • category only → GET /api/v1/categories/{category_id}/gallery (the
+ *     dedicated category endpoint, see lib/categoryGalleryFetch).
+ * The grouped endpoints have no limit/offset, so every "See all" lands here.
  *
  * The viewer is fed from the LIVE items array, so swiping near the end can pull
  * the next page while it stays open.

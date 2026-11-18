@@ -1,5 +1,6 @@
 /**
- * MediaGalleryGrid — the 3-column grid used by the paginated "See all" list.
+ * MediaGalleryGrid — the responsive grid used by the paginated "See all" list
+ * (2 columns on phones, 3 on small tablets, 4 on large ones).
  *
  * A thin, lazy wrapper around FlatList: square tiles sized from the live window
  * width (so small and large screens both fit whole columns), RemoteImage for
@@ -28,6 +29,7 @@ import type { DisplayMedia } from '@/lib/mediaGallery';
 interface Props {
   media: readonly DisplayMedia[];
   onPressPhoto?: (index: number) => void;
+  /** Override the responsive column count (2 / 3 / 4 by width). */
   columns?: number;
   contentPadding?: number;
   ListHeaderComponent?: React.ComponentType<any> | React.ReactElement | null;
@@ -41,7 +43,7 @@ interface Props {
 export default function MediaGalleryGrid({
   media,
   onPressPhoto,
-  columns = 3,
+  columns: columnsProp,
   contentPadding = 16,
   ListHeaderComponent,
   ListEmptyComponent,
@@ -55,6 +57,8 @@ export default function MediaGalleryGrid({
   const { width } = useWindowDimensions();
 
   const gap = 8;
+  // Phones stay readable at 2 columns; tablets get 3, big screens 4.
+  const columns = columnsProp ?? (width < 600 ? 2 : width < 900 ? 3 : 4);
   const tile = Math.max(
     72,
     Math.floor((width - contentPadding * 2 - gap * (columns - 1)) / columns)
