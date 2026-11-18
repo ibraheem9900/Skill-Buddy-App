@@ -429,6 +429,76 @@ export interface ServiceMediaItem {
   is_thumbnail: boolean;
 }
 
+/** One public gallery row (live OpenAPI schema MediaItemResponse) — the SAME
+ * shape for `PublicMediaResponse.items` and for every group of
+ * GET /api/v1/media-gallery/public/by-service.
+ * REQUIRED on the wire: id, uploaded_by_side, feedback_type, is_public,
+ * can_be_public, media_type, created_at. NULLABLE: job_id, service_id,
+ * category_id, caption, url — so a row without a URL is skipped, never
+ * rendered as a broken tile.
+ * PRIVACY: job_id / uploaded_by_side / can_be_public describe the photo's
+ * private origin and MUST never reach a public gallery view (see
+ * lib/mediaGallery, which strips them into DisplayMedia).
+ * VERIFIED LIVE: GET /api/v1/media-gallery/public answers 200 with no
+ * Authorization header and with a bogus token → the endpoint is PUBLIC. The
+ * backend is unseeded, so no populated row has been observed yet. */
+export interface MediaItem {
+  id: number;
+  /** CLIENT | PROVIDER — internal, never displayed. */
+  uploaded_by_side: string;
+  /** COMPLETED | DENIAL | DISPUTE (MediaFeedbackType). Only COMPLETED may be
+   * public, so every other value is filtered out of public galleries. */
+  feedback_type: string;
+  is_public: boolean;
+  can_be_public: boolean;
+  job_id?: number | null;
+  service_id?: number | null;
+  category_id?: number | null;
+  /** Unconstrained string (no enum in the spec) — classified by prefix in
+   * lib/mediaGallery.mediaKindOf; unrecognised values are skipped. */
+  media_type: string;
+  caption?: string | null;
+  url?: string | null;
+  created_at: string;
+}
+
+/** GET /api/v1/media-gallery/public → PublicMediaResponse: a WRAPPER object,
+ * not a bare array. `service_id`/`category_id` echo the filter that was sent
+ * (both null when unfiltered); only `items` is required. */
+export interface PublicMediaResponse {
+  service_id?: number | null;
+  category_id?: number | null;
+  items: MediaItem[];
+}
+
+/** One page of a dedicated media endpoint: GET /api/v1/services/{id}/gallery
+ * answers the SAME wrapper as List Public Media ({service_id, category_id,
+ * items}), so the two share one type instead of a near-duplicate interface.
+ * `category_id` echoes the service's category on the wire (null while the
+ * backend is unseeded) — used for screen context only, never for filtering. */
+export type PublicMediaPage = PublicMediaResponse;
+
+/** One group of GET /api/v1/media-gallery/public/by-service (live OpenAPI
+ * ServiceGalleryGroup): required service_id / service_title / items, and
+ * `category_id` is NULLABLE on the wire even though the brief shows a number. */
+export interface ServiceMediaGroup {
+  service_id: number;
+  service_title: string;
+  category_id?: number | null;
+  items: MediaItem[];
+}
+
+/** One group of GET /api/v1/media-gallery/public/by-category (live OpenAPI
+ * CategoryGalleryGroup): category_id / category_name / items are all required,
+ * and each item still carries its own `service_id` (nullable).
+ * This is a DIFFERENT slice of data from the by-service groups (newest N per
+ * category vs newest N per service) — never merged with them. */
+export interface CategoryMediaGroup {
+  category_id: number;
+  category_name: string;
+  items: MediaItem[];
+}
+
 /** One entry of `ServiceResponse.inclusion_options` (live OpenAPI schema
  * InclusionOptionResponse): just { id, name }, both required. */
 export interface ServiceInclusionOption {

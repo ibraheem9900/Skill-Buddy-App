@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { authApi } from '@/services/api';
 import { withRetry } from '@/lib/fetchRetry';
 import type { ServiceListItem } from '@/types';
@@ -53,6 +53,46 @@ let inFlight: Promise<void> | null = null;
 /** Sequence guard: only the newest started request may write the cache. */
 let seq = 0;
 
+/**
+ * Read-only subscribers. The public gallery needs a service's title for a
+ * group of photos it already has; it must NOT trigger a services request just
+ * to label a photo (see cachedServiceTitle / useCachedServiceTitle below), but
+ * it does need to re-render when a screen elsewhere fills the cache.
+ */
+const cacheListeners = new Set<() => void>();
+
+function emitCacheChange() {
+  cacheListeners.forEach((listener) => listener());
+}
+
+function subscribeCache(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
+}
+
+/**
+ * The cached catalog title for a service id, or null. NEVER fetches — a gallery
+ * label must not cost a request. `service_title` from the media endpoint is the
+ * fallback when this returns null.
+ */
+export function cachedServiceTitle(serviceId: number | null | undefined): string | null {
+  if (serviceId === null || serviceId === undefined || cache === null) return null;
+  const hit = cache.find((service) => service.id === serviceId);
+  const title = hit?.title?.trim();
+  return title && title.length > 0 ? title : null;
+}
+
+/** Reactive form of cachedServiceTitle (re-renders when the catalog lands). */
+export function useCachedServiceTitle(serviceId: number | null | undefined): string | null {
+  return useSyncExternalStore(
+    subscribeCache,
+    () => cachedServiceTitle(serviceId),
+    () => cachedServiceTitle(serviceId)
+  );
+}
+
 async function fetchServices(): Promise<ServiceListItem[]> {
   const { data } = await authApi.getServices();
   if (!Array.isArray(data)) {
@@ -106,6 +146,7 @@ export function useServices() {
           if (mySeq !== seq) return; // superseded by a newer request — ignore
           cache = items;
           cacheStatus = 'ready';
+          emitCacheChange();
         } catch (err: any) {
           if (mySeq !== seq) return;
           console.log(
@@ -116,6 +157,7 @@ export function useServices() {
           // A failure NEVER becomes an empty list: the error state owns it,
           // and any previously loaded data in `cache` stays usable.
           cacheStatus = 'error';
+          emitCacheChange();
         }
         sync();
       })();

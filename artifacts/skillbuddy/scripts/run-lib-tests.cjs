@@ -88,6 +88,7 @@ const TEST_FILES = [
   'taskFeedback.test.js',
   'disputeImages.test.js',
   'reviewPhotos.test.js',
+  'mediaGallery.test.js',
   'reviews.test.js',
 ];
 

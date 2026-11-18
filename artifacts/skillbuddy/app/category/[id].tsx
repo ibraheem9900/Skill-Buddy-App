@@ -8,6 +8,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import BackButton from '@/components/BackButton';
 import RemoteImage from '@/components/RemoteImage';
+import CategoryWorkPreview from '@/components/CategoryWorkPreview';
 import useCategories from '@/hooks/useCategories';
 import useCategoryServices from '@/hooks/useCategoryServices';
 import { formatServiceHourlyPrice } from '@/lib/servicePrice';
@@ -175,6 +176,13 @@ export default function CategoryDetailScreen() {
             ) : (
               <>
                 {serverHeader}
+                {/* Public work photos in THIS category, read from the dedicated
+                    GET /categories/{id}/gallery endpoint. Hidden silently while
+                    empty / on failure — the category screen keeps its existing
+                    behaviour. */}
+                {isActive ? (
+                  <CategoryWorkPreview categoryId={numericId} fallbackName={serverCat?.name} />
+                ) : null}
                 {isActive && svcStatus === 'loading' ? spinnerCard : null}
                 {isActive && svcStatus === 'error' ? errorCard(() => refreshServices()) : null}
                 {isActive && svcStatus === 'invalid' ? invalidCard : null}

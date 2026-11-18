@@ -7,6 +7,7 @@ import RemoteImage from '@/components/RemoteImage';
 import { formatServiceHourlyPrice } from '@/lib/servicePrice';
 import { resolveServiceImage } from '@/lib/serviceImage';
 import { htmlToFlowText } from '@/lib/htmlText';
+import { useServiceGroupCover } from '@/hooks/useServiceMediaGroups';
 import type { ServiceListItem } from '@/types';
 
 /**
@@ -46,7 +47,13 @@ export default function ServerServiceRow({
     typeof categoryId === 'number' ? tCat(String(categoryId)) || service.category_name : service.category_name;
   const price = formatServiceHourlyPrice(service, t('price_from_prefix'));
   const description = htmlToFlowText(service.description);
-  const image = resolveServiceImage(service);
+  // Cover: the record's own image/thumbnail first, then the first public work
+  // photo for this service from the ONE shared grouped gallery cache. Every
+  // card sharing that cache costs zero extra requests (the hook collapses all
+  // of them into a single by-service call), so a service with no thumbnail can
+  // still show a real picture instead of the placeholder glyph.
+  const workCover = useServiceGroupCover(service.id);
+  const image = resolveServiceImage(service) ?? workCover;
 
   return (
     <TouchableOpacity

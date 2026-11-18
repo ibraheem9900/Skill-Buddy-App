@@ -19,13 +19,19 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DotsLoader from '@/components/DotsLoader';
+import MediaVideo from '@/components/MediaVideo';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 
 export interface MediaViewerItem {
   uri: string;
   title: string;
-  kind: 'image' | 'file';
+  kind: 'image' | 'video' | 'file';
+  /**
+   * Optional second line (the public gallery puts the photo's localised date
+   * here). Omitted by every pre-existing caller, so nothing changes for them.
+   */
+  subtitle?: string;
 }
 
 interface Props {
@@ -42,6 +48,12 @@ interface Props {
   deleteLabel?: string;
   /** Shows the three-dot loader in place of the trash icon while deleting. */
   deleting?: boolean;
+  /**
+   * Optional "near the end" callback so a paginated gallery can fetch the next
+   * page while the user swipes. Omitted by every other caller, so their viewer
+   * behaves exactly as before.
+   */
+  onEndReached?: () => void;
 }
 
 /** One page: pinch to zoom, release back to a comfortable size. */
@@ -84,6 +96,17 @@ function ZoomPage({ item, width, height }: { item: MediaViewerItem; width: numbe
               transition={120}
               onError={() => setFailed(true)}
             />
+          ) : item.kind === 'video' ? (
+            /* A public gallery row may be a video (media_type contains
+               "video"). expo-video is already in the installed build, so the
+               viewer plays it instead of showing a "preview unavailable"
+               placeholder for a file it can actually render. */
+            <MediaVideo
+              url={item.uri}
+              style={{ width, height: height * 0.62 }}
+              cover={false}
+              controls
+            />
           ) : (
             <View style={styles.filePage}>
               <Feather
@@ -118,6 +141,7 @@ export default function MediaViewer({
   onDelete,
   deleteLabel,
   deleting = false,
+  onEndReached,
 }: Props) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
@@ -194,14 +218,23 @@ export default function MediaViewer({
             const next = Math.round(event.nativeEvent.contentOffset.x / width);
             setIndex(Math.max(0, Math.min(next, items.length - 1)));
           }}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.8}
           renderItem={({ item }) => <ZoomPage item={item} width={width} height={height} />}
         />
 
-        {items[index]?.title ? (
+        {items[index]?.title || items[index]?.subtitle ? (
           <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={[styles.caption, { color: c.mutedForeground }]} numberOfLines={2}>
-              {items[index].title}
-            </Text>
+            {items[index]?.title ? (
+              <Text style={[styles.caption, { color: c.mutedForeground }]} numberOfLines={2}>
+                {items[index].title}
+              </Text>
+            ) : null}
+            {items[index]?.subtitle ? (
+              <Text style={[styles.captionDate, { color: c.mutedForeground }]} numberOfLines={1}>
+                {items[index].subtitle}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -256,4 +289,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   caption: { fontFamily: 'Manrope_400Regular', fontSize: 12, textAlign: 'center' },
+  captionDate: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 2,
+  },
 });

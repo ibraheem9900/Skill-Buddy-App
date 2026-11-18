@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { authApi } from '@/services/api';
 import { withRetry } from '@/lib/fetchRetry';
 import type { CategoryDetailResponse, CategoryResponse } from '@/types';
@@ -35,6 +35,38 @@ let seq = 0;
  * view (detail adds REQUIRED is_active/status/timestamps), so these are
  * cached separately and never back-filled from the list. */
 const singleCache = new Map<number, CategoryDetailResponse>();
+
+/**
+ * Read-only subscribers for surfaces that display category NAMES they already
+ * have cached (the public gallery's filter chips) and must not fire a request
+ * of their own to build them.
+ */
+const cacheListeners = new Set<() => void>();
+
+function emitCacheChange() {
+  cacheListeners.forEach((listener) => listener());
+}
+
+function subscribeCache(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
+}
+
+/**
+ * The cached categories, or null. NEVER fetches: the gallery's filter chips are
+ * built only from what the app already loaded, so opening the gallery adds no
+ * category request. Returns a stable reference until the cache changes.
+ */
+export function cachedCategories(): CategoryResponse[] | null {
+  return cache;
+}
+
+/** Reactive form of cachedCategories — updates when another screen fills it. */
+export function useCachedCategories(): CategoryResponse[] | null {
+  return useSyncExternalStore(subscribeCache, cachedCategories, cachedCategories);
+}
 
 async function fetchCategories(): Promise<CategoryResponse[]> {
   const { data } = await authApi.getCategories();
@@ -84,6 +116,7 @@ export function useCategories() {
           if (mySeq !== seq) return; // superseded — ignore the stale answer
           cache = items;
           cacheStatus = 'ready';
+          emitCacheChange();
         } catch (err: any) {
           if (mySeq !== seq) return;
           console.log(
@@ -92,6 +125,7 @@ export function useCategories() {
             err?.response?.data ?? err?.message
           );
           cacheStatus = 'error'; // never stored as []
+          emitCacheChange();
         }
         sync();
       })();

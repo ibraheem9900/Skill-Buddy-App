@@ -5,8 +5,20 @@ import { buildMyBidsQuery } from '@/lib/myBids';
 import { recordServerDate } from '@/lib/serverClock';
 import { isValidBidId } from '@/lib/bid';
 import { isValidJobId } from '@/lib/jobPublish';
+import {
+  CATEGORY_GALLERY_PATH,
+  MEDIA_GALLERY_BY_CATEGORY_PATH,
+  MEDIA_GALLERY_BY_SERVICE_PATH,
+  MEDIA_GALLERY_PATH,
+  SERVICE_GALLERY_PATH,
+  type ListPublicMediaParams,
+} from '@/lib/mediaGallery';
 import type { NearbyJob } from '@/lib/nearbyJobs';
 import type { ProviderProfile, ProviderSkill, ProviderSkillCreatePayload, ProviderSkillUpdatePayload, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest, ListMyBidsParams,
+  CategoryMediaGroup,
+  PublicMediaPage,
+  PublicMediaResponse,
+  ServiceMediaGroup,
 } from '@/types';
 
 // Backend base URL. EXPO_PUBLIC_API_BASE_URL is inlined by babel-preset-expo at
@@ -597,6 +609,176 @@ export const authApi = {
     api.get<ServiceInclusionOption[]>(
       `/api/v1/services/${serviceId}/inclusion-options`
     ),
+  /* ── Media gallery (public work photos) ─────────────────────────────────── */
+
+  /**
+   * GET /api/v1/media-gallery/public — List Public Media.
+   *
+   * AUTH: PUBLIC. The live OpenAPI operation has no `security` block, and a
+   * real call returns 200 both with no Authorization header and with a bogus
+   * bearer token (verified 2026-11-18). Guests must therefore be able to
+   * browse it; a 401 is treated as an ordinary failure, never a crash.
+   *
+   * PARAMS (live spec): service_id? (int), category_id? (int), limit
+   * (1..100, default 30), offset (>= 0). There is NO page/cursor. Out-of-range
+   * values → 422 {detail:[…]}.
+   *
+   * 200 = PublicMediaResponse, a WRAPPER {service_id, category_id, items} —
+   * NOT a bare array (verified live: the unseeded backend returns
+   * {"service_id":null,"category_id":null,"items":[]}). `items` is the only
+   * required field. Normalise through lib/mediaGallery, never render raw.
+   *
+   * This is the paginated destination behind every "See all" and the
+   * single-service fallback (service_id filter) for a service the grouped
+   * cache does not know about.
+   */
+  getPublicMedia: async (params?: ListPublicMediaParams): Promise<PublicMediaResponse> => {
+    const { data } = await api.get<PublicMediaResponse>(MEDIA_GALLERY_PATH, { params });
+    return data ?? { items: [] };
+  },
+
+  /**
+   * GET /api/v1/media-gallery/public/by-service — List Public Media By Service.
+   *
+   * AUTH: PUBLIC (same evidence as getPublicMedia above).
+   * QUERY: `per_service` only — integer, default 10, min 1, max 50 (verified
+   * live: 0 → 422 greater_than_equal, 99 → 422 less_than_equal, "abc" → 422
+   * int_parsing). There is NO limit/offset: the groups themselves are not
+   * paginated, so "See all" must switch to getPublicMedia with a service_id.
+   *
+   * 200 = a BARE ARRAY of ServiceGalleryGroup
+   *   { service_id, service_title, category_id, items: MediaItemResponse[] }
+   * `category_id` is nullable on the wire. The response is always normalised to
+   * an array here — a null/object payload can never reach a screen as
+   * undefined.
+   *
+   * THIS IS THE ONE CALL that powers the grouped screen, the home preview, the
+   * category preview and the per-service card previews: never call it once per
+   * service (see hooks/useServiceMediaGroups, which shares one session cache
+   * and one in-flight request).
+   */
+  listPublicMediaByService: async (params?: { per_service?: number }): Promise<ServiceMediaGroup[]> => {
+    const { data } = await api.get<ServiceMediaGroup[]>(MEDIA_GALLERY_BY_SERVICE_PATH, {
+      params,
+    });
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * GET /api/v1/media-gallery/public/by-category — List Public Media By
+   * Category.
+   *
+   * AUTH: PUBLIC. The live operation has no `security` block, and a real call
+   * returns 200 with no Authorization header AND with a bogus bearer token
+   * (verified 2026-11-18). Guests can browse it; a 401 is an ordinary failure,
+   * never a crash.
+   *
+   * QUERY: `per_category` only — integer, default 10, min 1, max 50 (verified
+   * live: 0 → 422 greater_than_equal, 99 → 422 less_than_equal, "abc" → 422
+   * int_parsing). NO limit/offset: these groups are not paginated, so a full
+   * category list must switch to getPublicMedia with a category_id.
+   *
+   * 200 = a BARE ARRAY of CategoryGalleryGroup
+   *   { category_id, category_name, items: MediaItemResponse[] }
+   * (every item still carries its own nullable service_id). Normalised to an
+   * array here, so a null/non-array payload can never reach a screen.
+   *
+   * THIS IS THE ONE CALL behind the gallery's "By category" view and the
+   * category preview — the SAME slice of data as by-service is NOT a subset of
+   * it, so the two are never merged or de-duplicated (see
+   * hooks/useCategoryMediaGroups).
+   */
+  listPublicMediaByCategory: async (params?: { per_category?: number }): Promise<CategoryMediaGroup[]> => {
+    const { data } = await api.get<CategoryMediaGroup[]>(MEDIA_GALLERY_BY_CATEGORY_PATH, {
+      params,
+    });
+    return Array.isArray(data) ? data : [];
+  },
+
+  /**
+   * GET /api/v1/services/{service_id}/gallery — Get Service Gallery.
+   *
+   * AUTH: PUBLIC. The live operation has no `security` block, and a real call
+   * for service 1 answers 200 both with NO Authorization header and with a
+   * bogus bearer token (verified 2026-11-18). Guests browse it; a 401 is an
+   * ordinary failure and never a crash.
+   *
+   * PARAMS (live spec): path `service_id` (integer, required) + query `limit`
+   * (1..100, default 30) and `offset` (>= 0, default 0). Verified live:
+   * limit=0 → 422 greater_than_equal, limit=101 → 422 less_than_equal,
+   * offset=-1 → 422 greater_than_equal, non-numeric path → 422 int_parsing.
+   *
+   * 200 = the SAME wrapper as getPublicMedia: {service_id, category_id, items}.
+   * A NON-EXISTENT service is NOT a 404: service 999999 answers 200 with
+   * {"service_id":999999,"category_id":null,"items":[]} (verified live), so a
+   * missing or media-less service is just an empty page.
+   *
+   * THE dedicated source for every SINGLE-service gallery view (the paginated
+   * service gallery screen and the single-service preview fallback). Lists
+   * never call it — their previews read the grouped cache
+   * (getGroupForService). Normalise through lib/serviceGalleryFetch, never
+   * render raw.
+   */
+  getServiceGallery: async (
+    serviceId: number,
+    params?: { limit?: number; offset?: number }
+  ): Promise<PublicMediaPage> => {
+    const { data } = await api.get<PublicMediaPage>(SERVICE_GALLERY_PATH(serviceId), {
+      params,
+    });
+    return data ?? { items: [] };
+  },
+
+  /**
+   * GET /api/v1/categories/{category_id}/gallery — Get Category Gallery.
+   *
+   * AUTH: PUBLIC. The live operation has no `security` block, and a real call
+   * for category 1 answers 200 with NO Authorization header and with a bogus
+   * bearer token (verified 2026-11-18). Guests browse it; a 401 is an ordinary
+   * failure and never a crash / forced logout.
+   *
+   * PARAMS (live spec): path `category_id` (integer, required) + query `limit`
+   * (1..100, default 30) and `offset` (>= 0, default 0). Verified live:
+   * limit=0 → 422 greater_than_equal, limit=101 → 422 less_than_equal,
+   * offset=-1 → 422 greater_than_equal, non-numeric path → 422 int_parsing.
+   *
+   * 200 = the SAME wrapper as getPublicMedia: {service_id, category_id, items}.
+   * `service_id` is null for a category page. A NON-EXISTENT category is NOT a
+   * 404: category 999999 answers 200
+   * {"service_id":null,"category_id":999999,"items":[]} (verified live), so a
+   * missing or media-less category is just an empty page.
+   *
+   * THE dedicated source for every SINGLE-category gallery view: the category
+   * detail preview and the paginated category gallery screen. The multi-category
+   * "By category" overview keeps its grouped call (by-category); lists never
+   * call this endpoint per row. Normalise through lib/categoryGalleryFetch.
+   */
+  getCategoryGallery: async (
+    categoryId: number,
+    params?: { limit?: number; offset?: number }
+  ): Promise<PublicMediaPage> => {
+    const { data } = await api.get<PublicMediaPage>(CATEGORY_GALLERY_PATH(categoryId), {
+      params,
+    });
+    return data ?? { items: [] };
+  },
+
+  /*
+   * TODO(media-gallery) — typed STUBS, not called by anything yet, per the
+   * brief (their schemas are not part of this contract). Each is documented in
+   * the live spec, so none of them is invented:
+   *
+   *   GET    /api/v1/media-gallery/mine?limit&offset   (AUTH — 401 without token)
+   *   PATCH  /api/v1/media-gallery/{item_id}          (AUTH — 401 without token)
+   *   DELETE /api/v1/media-gallery/{item_id}          (AUTH — 401 without token)
+   *
+   * The last three are "my uploads / manage my media" features. Verified live
+   * 2026-11-18: mine/PATCH/DELETE answer 401 {"detail":"Not authenticated"}
+   * with no token, so all three exist and are protected. Nothing in this app
+   * calls them and no management UI is built in this task; wire them only when
+   * the upload/manage screens are in scope.
+   */
+
   /* ── Jobs (client job creation) ─────────────────────────────────────────── */
 
   /**

@@ -87,6 +87,7 @@
     "./taskFeedback.test.ts",
     "./disputeImages.test.ts",
     "./reviewPhotos.test.ts",
+    "./mediaGallery.test.ts",
     "./reviews.test.ts"
   ]
 }

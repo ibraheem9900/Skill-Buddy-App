@@ -48,6 +48,7 @@ import LogoImage from '@/components/LogoImage';
 import SkeletonCard from '@/components/SkeletonCard';
 import UpdateBanner from '@/components/UpdateBanner';
 import PendingReviewsCard from '@/components/PendingReviewsCard';
+import HomeWorkPreview from '@/components/HomeWorkPreview';
 import { withTabPagerPage } from '@/components/tabBar/TabPagerPage';
 import { loadHomeContent, type HomeContent } from '@/lib/homeContent';
 import { formatCompactPoints } from '@/lib/carousel';
@@ -606,6 +607,10 @@ function HomeScreen() {
             />
           )}
         </Animated.View>
+
+        {/* Our work — the public gallery preview (one grouped request; hidden
+            entirely when there is nothing to show or the call fails). */}
+        <HomeWorkPreview />
 
         {/* SkillBuddy Specialties */}
         <Animated.View entering={FadeInDown.delay(140).duration(380)} style={styles.section}>

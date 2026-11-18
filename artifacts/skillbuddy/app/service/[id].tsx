@@ -28,6 +28,7 @@ import useServiceDetail from '@/hooks/useServiceDetail';
 import MediaVideo from '@/components/MediaVideo';
 import RemoteImage from '@/components/RemoteImage';
 import BrandedLoader from '@/components/BrandedLoader';
+import ServiceWorkPreview from '@/components/ServiceWorkPreview';
 
 const W = Dimensions.get('window').width;
 
@@ -426,6 +427,10 @@ export default function ServiceDetailScreen() {
                 </Text>
               </View>
             )}
+            {/* Public work photos for this service. Cache-first from the one
+                grouped gallery call; only this single-service screen may fall
+                back to the filtered list endpoint. Hidden when empty. */}
+            <ServiceWorkPreview serviceId={numericId} serviceTitle={displayTitle} />
           </Animated.View>
         )}
 
