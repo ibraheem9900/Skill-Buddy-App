@@ -103,6 +103,38 @@ export function resetCategoryGalleryPageCache() {
   }
 }
 
+/**
+ * Apply ONE photo's PATCH response to the cached first pages of the dedicated
+ * single-service / single-category lists, with no refetch. `next` replaces the
+ * tile (caption change); `null` removes it (the photo became private or was
+ * deleted). A mounted list re-seeds from this cache on its next mount, and
+ * `markPublicPageCachesStale` is what asks it to re-read the server.
+ *
+ * Called by the Update Media flow, never by a screen.
+ */
+export function applyMediaToPublicPageCaches(id: number, next: DisplayMedia | null): void {
+  for (const [key, entry] of [...galleryPageCache]) {
+    const index = entry.items.findIndex((item) => item.id === id);
+    if (index === -1) continue;
+    const items =
+      next === null
+        ? entry.items.filter((item) => item.id !== id)
+        : entry.items.map((item) => (item.id === id ? next : item));
+    galleryPageCache.set(key, {
+      ...entry,
+      items,
+      rawCount: next === null ? Math.max(0, entry.rawCount - 1) : entry.rawCount,
+    });
+  }
+}
+
+/** A photo became public: let every cached page revalidate on its next mount. */
+export function markPublicPageCachesStale(): void {
+  for (const [key, entry] of [...galleryPageCache]) {
+    galleryPageCache.set(key, { ...entry, fetchedAt: 0 });
+  }
+}
+
 export function usePublicMediaPage(options: UsePublicMediaPageOptions) {
   const requestedLimit = options.limit ?? PUBLIC_MEDIA_PAGE_SIZE;
   const limit = Math.min(100, Math.max(1, Math.trunc(requestedLimit)));

@@ -32,6 +32,7 @@
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { groupCoverUrl, type DisplayMedia } from '@/lib/mediaGallery';
+import { applyMediaToGroups, applyMediaToMediaList } from '@/lib/mediaEdit';
 
 export type GalleryStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -184,6 +185,51 @@ export function createGroupStore<TGroup extends GalleryGroupBase>(config: GroupS
       (group) => config.idOf(group) === id
     );
     return own ?? findInAnyBucket(id);
+  }
+
+  /**
+   * Apply ONE photo's new server state to every cached bucket, in place, with
+   * no refetch: `next` replaces it (caption changes), `null` removes it (the
+   * photo became private, or a 404 deleted it). Groups left with no photos are
+   * dropped, and the single-group fallback pages are patched the same way.
+   *
+   * Only READY buckets are touched: a bucket still loading will fetch fresh
+   * data anyway, and a failed one holds no rows to patch.
+   */
+  function applyMedia(id: number, next: DisplayMedia | null): void {
+    let changed = false;
+
+    for (const [key, entry] of [...entries]) {
+      if (entry.status !== 'ready' || entry.groups.length === 0) continue;
+      const result = applyMediaToGroups(entry.groups, id, next);
+      if (!result.changed) continue;
+      entries.set(key, { ...entry, groups: result.groups });
+      changed = true;
+    }
+
+    for (const [key, value] of [...singleCache]) {
+      const result = applyMediaToMediaList(value.media, id, next);
+      if (!result.changed) continue;
+      singleCache.set(key, {
+        media: result.media,
+        rawCount: next === null ? Math.max(0, value.rawCount - 1) : value.rawCount,
+      });
+      changed = true;
+    }
+
+    if (changed) emit();
+  }
+
+  /**
+   * Mark every cached bucket STALE without touching what is on screen: used
+   * when a photo BECAME public. It is never inserted into a list by guesswork —
+   * the next load/refresh re-reads the server and includes it in its real place.
+   */
+  function markStale(): void {
+    for (const [key, entry] of [...entries]) {
+      entries.set(key, { ...entry, fetchedAt: null });
+    }
+    emit();
   }
 
   /**
@@ -345,7 +391,18 @@ export function createGroupStore<TGroup extends GalleryGroupBase>(config: GroupS
     listeners.forEach((listener) => listener());
   }
 
-  return { subscribe, entryFor, load, peek, useGroups, useCover, usePreview, reset };
+  return {
+    subscribe,
+    entryFor,
+    load,
+    peek,
+    useGroups,
+    useCover,
+    usePreview,
+    applyMedia,
+    markStale,
+    reset,
+  };
 }
 
 export type GalleryGroupStore<TGroup extends GalleryGroupBase> = ReturnType<

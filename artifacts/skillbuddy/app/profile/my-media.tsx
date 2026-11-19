@@ -8,17 +8,42 @@
  * (Confirmed with nobody yet — the task brief asks the team which role owns the
  * screen; both roles are shown here and this note is the flag.)
  *
- * SCOPE: read-only. No upload, no edit, no visibility toggle — `is_public` is
- * shown as a small read-only chip ("Public" / "Private") and nothing more.
- * `job_id` never reaches this component.
+ * SCOPE: this task (Media Gallery · Update Media) turned the screen into the
+ * OWNED surface: opening a photo shows its "Public"/"Private" chip and a pencil
+ * in the viewer header, which opens the edit screen (caption + public switch).
+ * Ownership here is CERTAIN — the list comes from GET /media-gallery/mine, which
+ * the server scopes to the bearer token — so this is the only place in the app
+ * that passes `isOwnMedia` to MediaViewer.
  *
- * STATES: first-load skeleton → grid; an EMPTY ARRAY is a calm empty state, not
- * an error; a failed first page is an error card with Retry; a failed NEXT page
- * keeps the loaded tiles and shows a small footer retry. Pull-to-refresh
- * replaces the list (offset 0).
+ * Still absent on purpose: upload, delete, and any visibility toggle outside the
+ * editor. `job_id` never reaches this component.
+ *
+ * STATES: first-load grid skeleton → grid; an EMPTY ARRAY is a calm empty state,
+ * not an error; a failed first page is an error card with Retry; a failed NEXT
+ * page keeps the loaded tiles and shows a small footer retry. Pull-to-refresh
+ * replaces the list (offset 0); the list also revalidates when the screen
+ * regains focus and when the app returns to the foreground.
+ *
+ * PER-TILE FACTS (all read-only): the Public/Private chip, the raw side badge
+ * from `uploaded_by_side` (no enum is guessed — an unknown value is shown
+ * verbatim; the list is NOT filtered by the active role, an open product
+ * question), the caption, the localised date and the category name joined from
+ * the ALREADY CACHED categories (no per-item request).
+ *
+ * DEAD IMAGE URLS: a tile that fails to load (a signed URL may have expired)
+ * asks the screen for ONE throttled list refresh, on top of RemoteImage's own
+ * tap-to-retry placeholder — never a permanently broken tile.
  */
-import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AppState,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -30,8 +55,42 @@ import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import useMyMedia, { type MyMediaFailure } from '@/hooks/useMyMedia';
-import { formatMyMediaDate } from '@/lib/myMedia';
+import { useCachedCategories } from '@/hooks/useCategories';
+import {
+  formatMyMediaDate,
+  myMediaCategoryLabel,
+  myMediaSideLabel,
+} from '@/lib/myMedia';
 import { toGalleryViewerItems, type DisplayMedia } from '@/lib/mediaGallery';
+import { toEditableMedia } from '@/lib/mediaEdit';
+import { openEditMedia } from '@/components/EditMediaSheet';
+
+/**
+ * The first-load skeleton: the SAME responsive column maths as the grid, so the
+ * screen never jumps when the real tiles arrive. No new component or animation —
+ * plain muted squares in the app's tile radius.
+ */
+function MyMediaSkeleton() {
+  const { colors: c } = useTheme();
+  const { width } = useWindowDimensions();
+  const gap = 8;
+  const padding = 16;
+  const columns = width < 600 ? 2 : width < 900 ? 3 : 4;
+  const tile = Math.max(
+    72,
+    Math.floor((width - padding * 2 - gap * (columns - 1)) / columns)
+  );
+  return (
+    <View style={[styles.skeleton, { gap }]}>
+      {Array.from({ length: columns * 3 }, (_, index) => (
+        <View
+          key={`skeleton-${index}`}
+          style={{ width: tile, height: tile, borderRadius: 12, backgroundColor: c.muted }}
+        />
+      ))}
+    </View>
+  );
+}
 
 function failureMessageKey(failure: MyMediaFailure | null) {
   switch (failure) {
@@ -51,7 +110,7 @@ function failureMessageKey(failure: MyMediaFailure | null) {
 export default function MyMediaScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c } = useTheme();
-  const { t, language } = useLanguage();
+  const { t, tCat, language } = useLanguage();
   const { user } = useAuth();
 
   const userId = user?.id ?? null;
@@ -66,6 +125,77 @@ export default function MyMediaScreen() {
     }, [load])
   );
 
+  /**
+   * Returning to the app is a natural refresh point (photos may have been added
+   * or made private elsewhere). Silent: rows already on screen never flash.
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh({ silent: true });
+    });
+    return () => subscription.remove();
+  }, [refresh]);
+
+  /** Category names come from the CACHED categories — never one call per tile. */
+  const cachedCategories = useCachedCategories();
+  const categoryNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    (cachedCategories ?? []).forEach((category) => {
+      const name = typeof category.name === 'string' ? category.name.trim() : '';
+      if (name) map.set(category.id, name);
+    });
+    return map;
+  }, [cachedCategories]);
+
+  /** The row behind a tile, keyed by the id the grid already carries. */
+  const entryById = useMemo(
+    () => new Map(items.map((entry) => [entry.id, entry])),
+    [items]
+  );
+
+  // `MediaUploaderSide` is confirmed as CLIENT | PROVIDER, so those two use the
+  // app's own existing wording; anything unexpected is shown verbatim.
+  const sideFor = useCallback(
+    (item: DisplayMedia) =>
+      myMediaSideLabel(entryById.get(item.id)?.uploadedBySide, {
+        client: t('profile_client'),
+        provider: t('profile_pilot'),
+      }),
+    [entryById, t]
+  );
+
+  /** date · category — whichever exist; never the word "null". */
+  const metaFor = useCallback(
+    (item: DisplayMedia) => {
+      const entry = entryById.get(item.id);
+      if (!entry) return null;
+      const date = entry.createdAt ? formatMyMediaDate(entry.createdAt, language) : '';
+      const category =
+        entry.categoryId === null
+          ? null
+          : myMediaCategoryLabel(
+              entry.categoryId,
+              categoryNameById.get(entry.categoryId) ?? null,
+              tCat(String(entry.categoryId))
+            );
+      const line = [date, category].filter((part) => !!part).join(' · ');
+      return line.length > 0 ? line : null;
+    },
+    [categoryNameById, entryById, language, tCat]
+  );
+
+  /**
+   * A tile that cannot load may be a signed URL that expired. Ask for ONE fresh
+   * list, at most every 30 s, instead of leaving dead tiles behind.
+   */
+  const lastImageRecoveryRef = useRef(0);
+  const onImageError = useCallback(() => {
+    const now = Date.now();
+    if (now - lastImageRecoveryRef.current < 30_000) return;
+    lastImageRecoveryRef.current = now;
+    void refresh({ silent: true });
+  }, [refresh]);
+
   /** Read-only visibility label per tile — never a toggle. */
   const publicIds = useMemo(
     () => new Set(items.filter((entry) => entry.isPublic).map((entry) => entry.id)),
@@ -76,10 +206,39 @@ export default function MyMediaScreen() {
     [language]
   );
 
-  const viewerItems = useMemo(
-    () =>
-      viewerIndex === null ? [] : toGalleryViewerItems(items as DisplayMedia[], formatDate),
-    [items, viewerIndex, formatDate]
+  const viewerItems = useMemo(() => {
+    if (viewerIndex === null) return [];
+    // The viewer reads the SAME patched cache as the grid, so a caption or
+    // visibility change made in the editor is visible the moment it reopens.
+    return toGalleryViewerItems(items as unknown as DisplayMedia[], formatDate).map(
+      (viewerItem, index) => ({
+        ...viewerItem,
+        badge: items[index]?.isPublic ? t('my_media_public') : t('my_media_private'),
+      })
+    );
+  }, [items, viewerIndex, formatDate, t]);
+
+  /**
+   * Open the editor for the photo on screen. The viewer modal is closed first
+   * (two stacked native modals are not reliable), and the opener asks for it
+   * back on the same photo once the server confirms — so the updated caption is
+   * on screen immediately.
+   *
+   * TODO (entry points): this viewer pencil is the only editor entry wired
+   * today. A future grid-tile menu can reuse <EditMediaButton item={...} />
+   * from the same owned list; public gallery rows must never get one (they
+   * carry no owner id).
+   */
+  const openEditor = useCallback(
+    (index: number) => {
+      const entry = items[index];
+      if (!entry) return;
+      setViewerIndex(null);
+      openEditMedia(toEditableMedia(entry), {
+        onSaved: () => setViewerIndex(index),
+      });
+    },
+    [items]
   );
 
   const firstLoad = status === 'loading' && items.length === 0;
@@ -119,9 +278,7 @@ export default function MyMediaScreen() {
       </View>
     </View>
   ) : firstLoad ? (
-    <View style={styles.center}>
-      <DotsLoader color={c.mutedForeground} size={7} gap={5} />
-    </View>
+    <MyMediaSkeleton />
   ) : status === 'ready' ? (
     <View style={styles.emptyWrap}>
       <View style={[styles.emptyIcon, { backgroundColor: c.primaryLight }]}>
@@ -166,6 +323,9 @@ export default function MyMediaScreen() {
         chipFor={
           userId ? (item) => (publicIds.has(item.id) ? t('my_media_public') : t('my_media_private')) : undefined
         }
+        secondaryChipFor={userId ? sideFor : undefined}
+        metaFor={userId ? metaFor : undefined}
+        onImageError={userId ? onImageError : undefined}
         ListEmptyComponent={emptyComponent}
         ListFooterComponent={footer}
         onEndReached={() => loadMore()}
@@ -186,6 +346,8 @@ export default function MyMediaScreen() {
         initialIndex={viewerIndex ?? 0}
         onClose={() => setViewerIndex(null)}
         onEndReached={() => loadMore()}
+        isOwnMedia={!!userId}
+        onEditMedia={userId ? openEditor : undefined}
       />
     </View>
   );
@@ -248,4 +410,5 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   footerRetryText: { fontFamily: 'Manrope_600SemiBold', fontSize: 13 },
+  skeleton: { flexDirection: 'row', flexWrap: 'wrap', paddingTop: 16 },
 });

@@ -37,6 +37,12 @@ export interface RemoteImageProps {
   backgroundColor?: string;
   accessibilityLabel?: string;
   testID?: string;
+  /**
+   * Optional failure hook. The placeholder + tap-to-retry behave exactly as
+   * before; the owner can additionally react (e.g. a gallery whose URLs are
+   * signed/expiring refreshes its LIST instead of leaving a dead tile).
+   */
+  onError?: () => void;
 }
 
 /** Three dots pulsing in sequence — no third-party loader, no layout shift. */
@@ -83,6 +89,7 @@ export default function RemoteImage({
   backgroundColor,
   accessibilityLabel,
   testID,
+  onError,
 }: RemoteImageProps) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
@@ -116,7 +123,10 @@ export default function RemoteImage({
           transition={150}
           onLoadStart={() => setStatus('loading')}
           onLoad={() => setStatus('ready')}
-          onError={() => setStatus('error')}
+          onError={() => {
+            setStatus('error');
+            onError?.();
+          }}
           accessibilityLabel={accessibilityLabel}
         />
       ) : null}

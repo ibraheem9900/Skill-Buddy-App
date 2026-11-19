@@ -19,6 +19,7 @@ import {
   clampPerCategory,
   normalizeCategoryGroups,
   type CategoryGalleryGroupView,
+  type DisplayMedia,
 } from '@/lib/mediaGallery';
 import {
   createGroupStore,
@@ -83,6 +84,20 @@ export function useCategoryMediaGroups(options: UseCategoryMediaGroupsOptions = 
  */
 export function useCategoryGroupCover(categoryId: number | null | undefined): string | null {
   return store.useCover(categoryId);
+}
+
+/**
+ * Apply ONE photo's PATCH response to every cached by-category bucket with no
+ * refetch. `next` is the item's new PUBLIC representation; `null` removes it.
+ * Called by the Update Media flow, not by screens.
+ */
+export function applyCategoryGroupMedia(id: number, next: DisplayMedia | null): void {
+  store.applyMedia(id, next);
+}
+
+/** A photo became public: let every bucket refetch on its next load. */
+export function markCategoryGroupsStale(): void {
+  store.markStale();
 }
 
 /** Test/debug helper — clears the by-category session cache. */

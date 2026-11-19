@@ -14,6 +14,7 @@ import {
   type ListPublicMediaParams,
 } from '@/lib/mediaGallery';
 import { MY_MEDIA_PATH } from '@/lib/myMedia';
+import { MEDIA_ITEM_PATH, type MediaUpdatePatch } from '@/lib/mediaEdit';
 import type { NearbyJob } from '@/lib/nearbyJobs';
 import type { ProviderProfile, ProviderSkill, ProviderSkillCreatePayload, ProviderSkillUpdatePayload, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest, ListMyBidsParams,
   CategoryMediaGroup,
@@ -784,8 +785,8 @@ export const authApi = {
    * to [] here so no screen can receive `undefined`; lib/myMedia then skips
    * rows it cannot draw.
    *
-   * Not part of this task: PATCH /media-gallery/{item_id} (Update Media) and
-   * DELETE /media-gallery/{item_id} (Delete Media). Neither is wired here.
+   * The PATCH companion lives in `updateMedia` below; DELETE is still a typed
+   * TODO stub (its response schema was not supplied).
    */
   getMyMedia: async (params?: {
     limit?: number;
@@ -794,6 +795,60 @@ export const authApi = {
     const { data } = await api.get<MediaItem[]>(MY_MEDIA_PATH, { params });
     return Array.isArray(data) ? data : [];
   },
+
+  /**
+   * PATCH /api/v1/media-gallery/{item_id} — Update Media.
+   *
+   * Changes ONE photo's caption and/or its public visibility. AUTH: REQUIRED
+   * (live OpenAPI security: OAuth2PasswordBearer); the shared axios instance
+   * attaches the bearer token and refreshes an expired one once before
+   * replaying the request, so no header is built here.
+   *
+   * PATH: `item_id` — integer, required. It is re-checked at runtime because a
+   * non-integer would build a malformed path (/media-gallery/NaN).
+   *
+   * BODY: { is_public?: boolean, caption?: string }. The spec marks the body
+   * required but declares NO `required` property, so only the fields the user
+   * actually changed are sent (see lib/mediaEdit.buildMediaUpdatePatch). If the
+   * server ever rejects a partial body with 422, the caller must switch to
+   * sending both fields with the unchanged value repeated — NOT done blindly
+   * here, because sending `is_public` on a caption edit could flip a photo's
+   * visibility.
+   *
+   * 200 → the COMPLETE updated MediaItemResponse — the source of truth every
+   * cache is updated from (never an optimistic guess). 403/404 mean the caller
+   * is not allowed to edit / the row is gone; 422 carries detail[]. 401 is
+   * handled by the shared interceptor.
+   *
+   * Read-only companion: `can_be_public` on the item decides whether the
+   * visibility switch is enabled at all. This call does not compute it.
+   */
+  updateMedia: async (itemId: number, patch: MediaUpdatePatch): Promise<MediaItem> => {
+    if (!Number.isInteger(itemId) || itemId <= 0) {
+      throw new Error(`updateMedia: invalid media item id ${String(itemId)}`);
+    }
+    const { data } = await api.patch<MediaItem>(MEDIA_ITEM_PATH(itemId), patch);
+    return data;
+  },
+
+  /**
+   * TODO (NOT IMPLEMENTED — Delete Media, a separate task):
+   *   DELETE /api/v1/media-gallery/{item_id} (auth required)
+   * The live OpenAPI documents this operation but its response schema/body has
+   * not been supplied for this task, so NO request is made and no UI exists.
+   * When the task arrives: add the call here, type its response, then remove the
+   * row from every cache (the same cache mutators used by useUpdateMedia).
+   */
+  deleteMedia: (_itemId: number): Promise<never> =>
+    Promise.reject(new Error('deleteMedia: not implemented yet (documented but out of scope)')),
+
+  /**
+   * TODO (ALREADY COVERED ELSEWHERE): listMyMedia
+   *   GET /api/v1/media-gallery/mine (auth required)
+   * Typed as `getMyMedia` above — implemented in the previous task from the real
+   * OpenAPI (a PLAIN ARRAY of MediaItemResponse with limit/offset). It is kept
+   * as is; there is no second stub for the same endpoint.
+   */
 
   /* ── Jobs (client job creation) ─────────────────────────────────────────── */
 

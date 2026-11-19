@@ -21,8 +21,15 @@
  *     classified by lib/mediaGallery.mediaKindOf: any *video* → video, the
  *     image family → image, anything else is SKIPPED rather than rendered as a
  *     broken tile;
- *   • the `uploaded_by_side` / `feedback_type` value lists — neither is used
- *     for filtering or badges here, so an unknown value is harmless;
+ *   • `uploaded_by_side` is CONFIRMED by the live OpenAPI as CLIENT | PROVIDER
+ *     and is shown as a small side badge (the app's own "Client" / "SkillBuddy
+ *     Pilot" wording; any unexpected value is shown verbatim). `feedback_type`
+ *     is confirmed as COMPLETED | DENIAL | DISPUTE but is NOT displayed or used
+ *     to filter — every row the token owns is listed, whatever role uploaded
+ *     it (role filtering is an open product question);
+ *   • category NAMES: the payload carries `category_id` only, so the screen
+ *     joins it against the already-cached GET /categories list (and the app's
+ *     own `cat_<id>` copy) — one cached lookup per tile, zero requests;
  *   • whether `url` is absolute or relative, and whether the media host wants a
  *     bearer token — resolveMediaUrl accepts absolute, protocol-relative,
  *     root-relative and bare paths, and the image component loads them
@@ -44,8 +51,8 @@ export type { MediaKind };
 /** The documented path — the service layer builds the URL from this. */
 export const MY_MEDIA_PATH = '/api/v1/media-gallery/mine';
 
-/** Page size for My Media (server allows 1..100; the task asks for ~20). */
-export const MY_MEDIA_PAGE_SIZE = 20;
+/** Page size for My Media (server default 50, hard maximum 100). */
+export const MY_MEDIA_PAGE_SIZE = 50;
 
 /** Hard server ceiling for `limit`. */
 export const MY_MEDIA_MAX_LIMIT = 100;
@@ -61,6 +68,21 @@ export interface MyMediaEntry {
   /** Read-only status of THIS item (never an action in this task). */
   isPublic: boolean;
   canBePublic: boolean;
+  /**
+   * Raw `uploaded_by_side` ("CLIENT", likely also a pilot value). The full enum
+   * is NOT confirmed, so it is shown as a NEUTRAL badge with exactly the value
+   * the server sent — never mapped to invented copy and never used to filter.
+   * Null when the server sent nothing usable.
+   */
+  uploadedBySide: string | null;
+  /** Raw `feedback_type` ("COMPLETED" in the docs). Display-only; unconfirmed. */
+  feedbackType: string | null;
+  /**
+   * Related category id. The payload carries NO name, so the screen joins this
+   * against the categories the app has already cached (GET /categories) — no
+   * per-item request is ever made.
+   */
+  categoryId: number | null;
 }
 
 /** Clamp a requested page size into the documented 1..100 range. */
@@ -105,6 +127,9 @@ export function normalizeMyMediaItem(
     created_at?: unknown;
     is_public?: unknown;
     can_be_public?: unknown;
+    uploaded_by_side?: unknown;
+    feedback_type?: unknown;
+    category_id?: unknown;
   };
 
   const kind = mediaKindOf(typeof item.media_type === 'string' ? item.media_type : null);
@@ -124,7 +149,70 @@ export function normalizeMyMediaItem(
     isPublic: item.is_public === true,
     // "Can this be made public" only means something when the server says so.
     canBePublic: item.can_be_public === true,
+    uploadedBySide: trimmedValue(item.uploaded_by_side),
+    feedbackType: trimmedValue(item.feedback_type),
+    categoryId:
+      typeof item.category_id === 'number' && Number.isFinite(item.category_id)
+        ? item.category_id
+        : null,
   };
+}
+
+/** A non-empty trimmed string, else null (used for the raw enum badges). */
+export function trimmedValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 ? text : null;
+}
+
+/**
+ * The side badge for `uploaded_by_side`.
+ *
+ * CONFIRMED from the live OpenAPI (re-fetched 2026-11-19): `MediaUploaderSide`
+ * is exactly `CLIENT | PROVIDER`, so those two resolve to the app's own existing
+ * wording ("Client" / "SkillBuddy Pilot") when the caller passes its translated
+ * labels. Anything else is shown VERBATIM as a neutral badge — the documented
+ * fallback for a value the app does not know.
+ *
+ * Filtering by the active role is an OPEN PRODUCT QUESTION: nothing is filtered.
+ */
+export interface MyMediaSideLabels {
+  client?: string | null;
+  provider?: string | null;
+}
+
+export function myMediaSideLabel(
+  side: string | null | undefined,
+  labels?: MyMediaSideLabels
+): string | null {
+  const raw = trimmedValue(side);
+  if (!raw) return null;
+  const upper = raw.toUpperCase();
+  if (upper === 'CLIENT') return trimmedValue(labels?.client) ?? 'CLIENT';
+  if (upper === 'PROVIDER') return trimmedValue(labels?.provider) ?? 'PROVIDER';
+  return raw;
+}
+
+/**
+ * A category name for one media row, resolved WITHOUT a request:
+ *   1. the app's own `cat_<id>` translation (the name every other screen uses),
+ *   2. the name from the already-cached GET /categories list,
+ *   3. null (the row simply shows no category line).
+ * `categoryId` is only an id on this endpoint, so a per-item request would be
+ * the only other option — and it is never made.
+ */
+export function myMediaCategoryLabel(
+  categoryId: number | null | undefined,
+  cachedName?: string | null,
+  localizedName?: string | null
+): string | null {
+  if (typeof categoryId !== 'number' || !Number.isFinite(categoryId)) return null;
+  const candidates = [localizedName, cachedName];
+  for (const candidate of candidates) {
+    const value = typeof candidate === 'string' ? candidate.trim() : '';
+    if (value.length > 0) return value;
+  }
+  return null;
 }
 
 function identityKey(entry: MyMediaEntry): string {

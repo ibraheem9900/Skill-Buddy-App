@@ -90,6 +90,7 @@ const TEST_FILES = [
   'reviewPhotos.test.js',
   'mediaGallery.test.js',
   'myMedia.test.js',
+  'mediaEdit.test.js',
   'reviews.test.js',
 ];
 

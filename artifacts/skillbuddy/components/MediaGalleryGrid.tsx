@@ -37,6 +37,20 @@ interface Props {
    * visibility status; the public gallery passes nothing.
    */
   chipFor?: (item: DisplayMedia) => string | null;
+  /**
+   * Optional second badge pinned to the top-right corner (My Media uses it for
+   * the raw `uploaded_by_side` value). Public galleries pass nothing, so their
+   * tiles are unchanged.
+   */
+  secondaryChipFor?: (item: DisplayMedia) => string | null;
+  /**
+   * Optional small line under the caption (My Media puts the localised date and
+   * the cached category name there). Rendered in the same scrim, so a tile with
+   * no caption still shows its meta line.
+   */
+  metaFor?: (item: DisplayMedia) => string | null;
+  /** Per-tile image failure (e.g. an expired signed URL → refresh the list). */
+  onImageError?: (item: DisplayMedia) => void;
   contentPadding?: number;
   ListHeaderComponent?: React.ComponentType<any> | React.ReactElement | null;
   ListEmptyComponent?: React.ComponentType<any> | React.ReactElement | null;
@@ -51,6 +65,9 @@ export default function MediaGalleryGrid({
   onPressPhoto,
   columns: columnsProp,
   chipFor,
+  secondaryChipFor,
+  metaFor,
+  onImageError,
   contentPadding = 16,
   ListHeaderComponent,
   ListEmptyComponent,
@@ -71,41 +88,64 @@ export default function MediaGalleryGrid({
     Math.floor((width - contentPadding * 2 - gap * (columns - 1)) / columns)
   );
 
-  const renderItem: ListRenderItem<DisplayMedia> = ({ item, index }) => (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={onPressPhoto ? () => onPressPhoto(index) : undefined}
-      disabled={!onPressPhoto}
-      accessibilityRole={onPressPhoto ? 'button' : 'image'}
-      accessibilityLabel={item.caption ?? t('gallery_photo')}
-      style={{ width: tile, height: tile, marginBottom: gap }}
-    >
-      <RemoteImage
-        uri={item.url}
-        style={[styles.tile, { width: tile, height: tile, backgroundColor: c.muted, borderColor: c.border }]}
-        fallbackIcon={item.kind === 'video' ? 'video' : 'image'}
-        fallbackIconSize={22}
+  const renderItem: ListRenderItem<DisplayMedia> = ({ item, index }) => {
+    const chip = chipFor ? chipFor(item) : null;
+    const secondary = secondaryChipFor ? secondaryChipFor(item) : null;
+    const meta = metaFor ? metaFor(item) : null;
+    return (
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={onPressPhoto ? () => onPressPhoto(index) : undefined}
+        disabled={!onPressPhoto}
+        accessibilityRole={onPressPhoto ? 'button' : 'image'}
         accessibilityLabel={item.caption ?? t('gallery_photo')}
-      />
-      {chipFor && chipFor(item) ? (
-        <View style={styles.statusChip} pointerEvents="none">
-          <Text style={styles.statusChipText}>{chipFor(item)}</Text>
-        </View>
-      ) : null}
-      {item.kind === 'video' ? (
-        <View style={styles.playBadge} pointerEvents="none">
-          <Feather name="play" size={13} color="#FFFFFF" />
-        </View>
-      ) : null}
-      {item.caption ? (
-        <View style={styles.captionScrim} pointerEvents="none">
-          <Text style={styles.captionText} numberOfLines={1}>
-            {item.caption}
-          </Text>
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  );
+        style={{ width: tile, height: tile, marginBottom: gap }}
+      >
+        <RemoteImage
+          uri={item.url}
+          style={[
+            styles.tile,
+            { width: tile, height: tile, backgroundColor: c.muted, borderColor: c.border },
+          ]}
+          fallbackIcon={item.kind === 'video' ? 'video' : 'image'}
+          fallbackIconSize={22}
+          accessibilityLabel={item.caption ?? t('gallery_photo')}
+          onError={onImageError ? () => onImageError(item) : undefined}
+        />
+        {chip ? (
+          <View style={styles.statusChip} pointerEvents="none">
+            <Text style={styles.statusChipText}>{chip}</Text>
+          </View>
+        ) : null}
+        {secondary ? (
+          <View style={styles.secondaryChip} pointerEvents="none">
+            <Text style={styles.statusChipText} numberOfLines={1}>
+              {secondary}
+            </Text>
+          </View>
+        ) : null}
+        {item.kind === 'video' ? (
+          <View style={styles.playBadge} pointerEvents="none">
+            <Feather name="play" size={13} color="#FFFFFF" />
+          </View>
+        ) : null}
+        {item.caption || meta ? (
+          <View style={styles.captionScrim} pointerEvents="none">
+            {item.caption ? (
+              <Text style={styles.captionText} numberOfLines={1}>
+                {item.caption}
+              </Text>
+            ) : null}
+            {meta ? (
+              <Text style={styles.metaText} numberOfLines={1}>
+                {meta}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <FlatList
@@ -155,6 +195,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
+  secondaryChip: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    maxWidth: '55%',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   statusChipText: {
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 10,
@@ -183,5 +233,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   captionText: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: '#FFFFFF' },
+  metaText: { fontFamily: 'Manrope_400Regular', fontSize: 9, color: 'rgba(255,255,255,0.85)' },
   footer: { alignItems: 'center', paddingVertical: 18 },
 });

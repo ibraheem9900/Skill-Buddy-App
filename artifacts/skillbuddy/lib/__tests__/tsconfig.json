@@ -89,6 +89,7 @@
     "./reviewPhotos.test.ts",
     "./mediaGallery.test.ts",
     "./myMedia.test.ts",
+    "./mediaEdit.test.ts",
     "./reviews.test.ts"
   ]
 }

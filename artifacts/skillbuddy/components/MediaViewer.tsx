@@ -32,6 +32,11 @@ export interface MediaViewerItem {
    * here). Omitted by every pre-existing caller, so nothing changes for them.
    */
   subtitle?: string;
+  /**
+   * Read-only "Public" / "Private" chip. Rendered ONLY when the viewer is in
+   * own-media mode; public gallery callers never pass it.
+   */
+  badge?: string | null;
 }
 
 interface Props {
@@ -54,6 +59,16 @@ interface Props {
    * behaves exactly as before.
    */
   onEndReached?: () => void;
+  /**
+   * TRUE only when these photos are the signed-in user's OWN media (My media).
+   * It is what makes the header pencil and the per-photo visibility chip
+   * appear; public galleries leave it at the default false, so their viewer is
+   * pixel-identical to before. The client never guesses ownership: every
+   * current public caller keeps this off.
+   */
+  isOwnMedia?: boolean;
+  /** Own-media only: open the editor for the photo on screen. */
+  onEditMedia?: (index: number) => void;
 }
 
 /** One page: pinch to zoom, release back to a comfortable size. */
@@ -142,7 +157,10 @@ export default function MediaViewer({
   deleteLabel,
   deleting = false,
   onEndReached,
+  isOwnMedia = false,
+  onEditMedia,
 }: Props) {
+  const canEdit = isOwnMedia && !!onEditMedia;
   const { colors: c } = useTheme();
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
@@ -197,6 +215,16 @@ export default function MediaViewer({
                 <Feather name="trash-2" size={20} color="#FFF" />
               )}
             </TouchableOpacity>
+          ) : canEdit ? (
+            <TouchableOpacity
+              onPress={() => onEditMedia?.(index)}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel={t('media_edit_action')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Feather name="edit-2" size={19} color="#FFF" />
+            </TouchableOpacity>
           ) : (
             <View style={{ width: 40 }} />
           )}
@@ -222,6 +250,18 @@ export default function MediaViewer({
           onEndReachedThreshold={0.8}
           renderItem={({ item }) => <ZoomPage item={item} width={width} height={height} />}
         />
+
+        {/* Own media only: the photo's current visibility, read-only. */}
+        {isOwnMedia && items[index]?.badge ? (
+          <View
+            style={[styles.ownerChip, { top: insets.top + 96 }]}
+            pointerEvents="none"
+          >
+            <Text style={styles.ownerChipText} numberOfLines={1}>
+              {items[index]?.badge}
+            </Text>
+          </View>
+        ) : null}
 
         {items[index]?.title || items[index]?.subtitle ? (
           <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
@@ -275,6 +315,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   counter: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: '#FFF' },
+  ownerChip: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 2,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  ownerChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: '#FFF' },
   page: { alignItems: 'center', justifyContent: 'center' },
   filePage: { alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32 },
   fileTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 15, color: '#FFF', textAlign: 'center' },

@@ -24,6 +24,7 @@ import {
   clampPerService,
   filterGroupsByCategory,
   normalizeServiceGroups,
+  type DisplayMedia,
   type ServiceGalleryGroupView,
 } from '@/lib/mediaGallery';
 import { fetchServiceGalleryPage } from '@/lib/serviceGalleryFetch';
@@ -136,6 +137,21 @@ export function useServiceWorkPreview(
   enabled = true
 ): ServiceWorkPreview {
   return store.usePreview(serviceId, enabled, fetchServiceFallback);
+}
+
+/**
+ * Apply ONE photo's PATCH response to every cached by-service bucket (and to
+ * the single-service fallback pages) with no refetch. `next` is the item's new
+ * PUBLIC representation; `null` removes it (it became private / was deleted).
+ * Called by the Update Media flow, not by screens.
+ */
+export function applyServiceGroupMedia(id: number, next: DisplayMedia | null): void {
+  store.applyMedia(id, next);
+}
+
+/** A photo became public: let every bucket refetch on its next load. */
+export function markServiceGroupsStale(): void {
+  store.markStale();
 }
 
 /** Test/debug helper — clears the by-service session cache. */

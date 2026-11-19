@@ -20,6 +20,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BASE_URL, authApi } from '@/services/api';
+import { updatedMyMediaFields } from '@/lib/mediaEdit';
+import type { MediaItem } from '@/types';
 import {
   MY_MEDIA_PAGE_SIZE,
   clampMyMediaLimit,
@@ -55,9 +57,55 @@ interface MyMediaCacheEntry {
 
 let cache: MyMediaCacheEntry | null = null;
 
+/**
+ * Subscribers for changes made OUTSIDE this hook (an Update Media PATCH). The
+ * hook re-reads the cache when one fires, so a caption/visibility change made
+ * in the editor is reflected on the list without any refetch.
+ */
+const listeners = new Set<() => void>();
+
+/** Subscribe to external My Media cache changes (unsubscribe on unmount). */
+export function subscribeMyMedia(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function emitMyMedia() {
+  listeners.forEach((listener) => listener());
+}
+
 /** Clears the session cache (logout, account switch, tests). */
 export function resetMyMediaCache() {
   cache = null;
+  emitMyMedia();
+}
+
+/**
+ * Apply ONE photo's PATCH response to the cached "my media" list. The owner's
+ * list KEEPS a photo that became private (that is the whole point of the
+ * screen), so only the editable fields change — never an optimistic guess:
+ * every value comes from the server's 200 body.
+ */
+export function patchMyMediaCache(item: MediaItem, _baseUrl: string): void {
+  if (!cache) return;
+  const index = cache.items.findIndex((entry) => entry.id === item.id);
+  if (index === -1) return;
+  const fields = updatedMyMediaFields(item);
+  const items = [...cache.items];
+  items[index] = { ...items[index], ...fields };
+  cache = { ...cache, items };
+  emitMyMedia();
+}
+
+/** A 404 (or a deleted row) removes the photo from the owner's cached list. */
+export function removeMyMediaFromCache(id: number): void {
+  if (!cache) return;
+  const items = cache.items.filter((entry) => entry.id !== id);
+  if (items.length === cache.items.length) return;
+  cache = { ...cache, items, rawCount: Math.max(0, cache.rawCount - 1) };
+  emitMyMedia();
 }
 
 function classifyFailure(status: number | undefined): MyMediaFailure {
@@ -101,6 +149,23 @@ export default function useMyMedia({ userId, enabled = true }: UseMyMediaOptions
       mountedRef.current = false;
     };
   }, []);
+
+  /**
+   * External mutations (a PATCH through useUpdateMedia) land in the module
+   * cache; this is what makes the list — and the viewer built from it — show
+   * the new caption/visibility immediately, with no second request.
+   */
+  useEffect(() => {
+    return subscribeMyMedia(() => {
+      if (!cache || userId === null || cache.userId !== userId) return;
+      itemsRef.current = cache.items;
+      rawCountRef.current = cache.rawCount;
+      hasMoreRef.current = cache.hasMore;
+      offsetRef.current = cache.offset;
+      setItems(cache.items);
+      setHasMore(cache.hasMore);
+    });
+  }, [userId]);
 
   const commit = useCallback((next: MyMediaEntry[], raw: number, more: boolean, offset: number) => {
     itemsRef.current = next;

@@ -127,6 +127,12 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: 'transparent' },
           }}
         />
+        {/* Edit one of the signed-in user's own photos. A popup SCREEN: fade
+            only, per the one shared rule in lib/motion (never a slide-up sheet). */}
+        <Stack.Screen
+          name="media/edit"
+          options={{ headerShown: false, animation: 'fade', gestureEnabled: false }}
+        />
         <Stack.Screen
           name="chat/[id]"
           options={{ headerShown: false }}

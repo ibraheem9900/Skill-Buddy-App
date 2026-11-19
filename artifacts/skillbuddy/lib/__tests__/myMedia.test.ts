@@ -15,7 +15,9 @@ import {
   clampMyMediaOffset,
   formatMyMediaDate,
   mergeMyMediaPage,
+  myMediaCategoryLabel,
   myMediaHasMore,
+  myMediaSideLabel,
   nextMyMediaOffset,
   normalizeMyMediaArray,
   normalizeMyMediaItem,
@@ -57,6 +59,7 @@ function row(overrides: Record<string, unknown> = {}) {
 /* ── path / limits ───────────────────────────────────────────────────────── */
 
 eq('path', MY_MEDIA_PATH, '/api/v1/media-gallery/mine');
+eq('default page size is the documented 50', MY_MEDIA_PAGE_SIZE, 50);
 eq('default page size inside 1..100', MY_MEDIA_PAGE_SIZE >= 1 && MY_MEDIA_PAGE_SIZE <= 100, true);
 eq('clamp 0 → 1', clampMyMediaLimit(0), 1);
 eq('clamp 500 → 100', clampMyMediaLimit(500), MY_MEDIA_MAX_LIMIT);
@@ -84,6 +87,68 @@ eq(
 );
 check('job_id never carried', !('jobId' in normalizeMyMediaItem(row(), BASE, 0)!));
 check('unknown uploaded_by_side harmless', normalizeMyMediaArray([row({ uploaded_by_side: 'BOTH' })], BASE).length === 1);
+
+/* ── badges / category join ──────────────────────────────────────────────── */
+eq(
+  'the raw side value is carried verbatim',
+  normalizeMyMediaItem(row({ uploaded_by_side: 'PROVIDER' }), BASE)?.uploadedBySide,
+  'PROVIDER'
+);
+eq(
+  'an unknown side value is still carried (neutral fallback)',
+  normalizeMyMediaItem(row({ uploaded_by_side: '  BOTH  ' }), BASE)?.uploadedBySide,
+  'BOTH'
+);
+eq(
+  'a missing side value is null, not "null"',
+  normalizeMyMediaItem(row({ uploaded_by_side: undefined }), BASE)?.uploadedBySide,
+  null
+);
+eq(
+  'the raw feedback type is carried',
+  normalizeMyMediaItem(row({ feedback_type: 'DISPUTE' }), BASE)?.feedbackType,
+  'DISPUTE'
+);
+eq(
+  'category id is carried',
+  normalizeMyMediaItem(row({ category_id: 2 }), BASE)?.categoryId,
+  2
+);
+eq(
+  'a null category id stays null',
+  normalizeMyMediaItem(row({ category_id: null }), BASE)?.categoryId,
+  null
+);
+eq('side badge trims', myMediaSideLabel('  CLIENT '), 'CLIENT');
+eq('side badge hides blank', myMediaSideLabel('   '), null);
+eq('side badge hides null', myMediaSideLabel(null), null);
+eq(
+  'client side uses the app wording',
+  myMediaSideLabel('CLIENT', { client: 'Client', provider: 'SkillBuddy Pilot' }),
+  'Client'
+);
+eq(
+  'provider side uses the app wording',
+  myMediaSideLabel('PROVIDER', { client: 'Client', provider: 'SkillBuddy Pilot' }),
+  'SkillBuddy Pilot'
+);
+eq(
+  'an unknown side value falls back to the raw value',
+  myMediaSideLabel('BOTH', { client: 'Client', provider: 'SkillBuddy Pilot' }),
+  'BOTH'
+);
+eq(
+  'category label prefers the app\'s own copy',
+  myMediaCategoryLabel(3, 'Server name', 'Local name'),
+  'Local name'
+);
+eq(
+  'category label falls back to the cached name',
+  myMediaCategoryLabel(3, 'Server name', ''),
+  'Server name'
+);
+eq('no cached name → no label', myMediaCategoryLabel(3, null, null), null);
+eq('no category id → no label', myMediaCategoryLabel(null, 'x', 'y'), null);
 eq(
   'no local re-sort — API order kept',
   normalizeMyMediaArray([row({ id: 9 }), row({ id: 2, url: '/b.jpg' })], BASE).map((e) => e.id),
