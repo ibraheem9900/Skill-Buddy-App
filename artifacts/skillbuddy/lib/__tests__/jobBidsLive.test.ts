@@ -327,23 +327,25 @@ const response: JobBidsResponse = {
 eq('the merged list keeps API order: recommended first, then the rest', allBids(response).map((b) => b.id).join(','), '1,2,3,4,5,6');
 eq('a duplicated id appears once', allBids(response).filter((b) => b.id === 2).length, 1);
 eq('the merged list with hidden statuses removed', allBids(response).filter((b) => b.status === 'PENDING' || b.status === 'ACCEPTED').map((b) => b.id).join(','), '1,2,4');
-eq('the client-visible filter hides WITHDRAWN/REJECTED/EXPIRED', filterClientVisibleBids(allBids(response)).map((b) => b.id).join(','), '1,2,4');
+// WITHDRAWN/REJECTED are decisions, not offers; EXPIRED stays visible so a
+// closed window does not wipe the list the client just received.
+eq('the client-visible filter hides only WITHDRAWN/REJECTED', filterClientVisibleBids(allBids(response)).map((b) => b.id).join(','), '1,2,4,6');
 eq('an ACCEPTED bid stays visible', filterClientVisibleBids([bid({ id: 9, status: 'ACCEPTED' })]).length, 1);
 eq('a null entry is dropped', filterClientVisibleBids([null, bid({ id: 8 })]).length, 1);
 eq("the server's own total is used, not the array length", totalBidCount(response), 7);
 
 const sortedPrice = sortBids(filterClientVisibleBids(allBids(response)), 'price_asc');
-eq('price low-to-high', sortedPrice.map((b) => b.id).join(','), '2,4,1');
+eq('price low-to-high', sortedPrice.map((b) => b.id).join(','), '2,6,4,1');
 const sortedRating = sortBids(filterClientVisibleBids(allBids(response)), 'rating_desc');
 eq('rating high-to-low', sortedRating.slice(0, 2).map((b) => b.id).join(','), '2,1');
 const sortedDistance = sortBids(filterClientVisibleBids(allBids(response)), 'distance_asc');
-eq('nearest first (missing distances last)', sortedDistance.map((b) => b.id).join(','), '2,1,4');
+eq('nearest first (missing distances last)', sortedDistance.map((b) => b.id).join(','), '2,1,4,6');
 const sortedBadges = sortBids(filterClientVisibleBids(allBids(response)), 'badges_desc');
 eq('most badges first', sortedBadges.slice(0, 2).map((b) => b.id).join(','), '2,1');
 eq(
   'the default chip changes nothing (the API order IS the order)',
   sortBids(filterClientVisibleBids(allBids(response)), 'api').map((b) => b.id).join(','),
-  '1,2,4'
+  '1,2,4,6'
 );
 eq('the recommended block is capped by the screen at 3', response.recommended.slice(0, 3).length, 3);
 

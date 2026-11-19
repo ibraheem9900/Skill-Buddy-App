@@ -392,12 +392,14 @@ eq('a 300-digit distance is refused', parseBidDistance('1'.repeat(300)), null);
 
 /* ─────────────────────────────────────────── what the client is shown ── */
 
-deepEq('the visible statuses are the live bid + the accepted one', [...CLIENT_VISIBLE_BID_STATUSES], ['PENDING', 'ACCEPTED']);
+deepEq('the visible statuses are live, accepted and expired', [...CLIENT_VISIBLE_BID_STATUSES], ['PENDING', 'ACCEPTED', 'EXPIRED']);
 eq('a pending bid is shown', isClientVisibleBid({ status: 'PENDING' }), true);
 eq('the accepted bid is shown', isClientVisibleBid({ status: 'ACCEPTED' }), true);
 eq('a rejected bid is hidden', isClientVisibleBid({ status: 'REJECTED' }), false);
 eq('a withdrawn bid is hidden', isClientVisibleBid({ status: 'WITHDRAWN' }), false);
-eq('an expired bid is hidden', isClientVisibleBid({ status: 'EXPIRED' }), false);
+// A bid lapsed by the closing window is still an offer the client RECEIVED and
+// must stay reviewable; it simply cannot be accepted any more.
+eq('an expired bid stays visible after the window closes', isClientVisibleBid({ status: 'EXPIRED' }), true);
 eq('an unknown status is hidden rather than shown raw', isClientVisibleBid({ status: 'SOMETHING' as BidStatus }), false);
 eq('a missing bid is hidden', isClientVisibleBid(null), false);
 deepEq(
@@ -408,7 +410,7 @@ deepEq(
     offer({ id: 3, status: 'ACCEPTED' }),
     offer({ id: 4, status: 'EXPIRED' }),
   ]).map((b) => b.id),
-  [1, 3]
+  [1, 3, 4]
 );
 
 /* ───────────────────────────────────────────────── the two arrays, read ── */

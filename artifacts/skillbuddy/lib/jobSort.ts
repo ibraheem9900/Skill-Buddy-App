@@ -4,7 +4,7 @@
  * last — a job without a deadline or coordinates must never jump to the top.
  */
 
-export type JobSortKey = 'time' | 'amount' | 'distance' | 'hours';
+export type JobSortKey = 'created' | 'time' | 'amount' | 'distance' | 'hours';
 export type SortDirection = 'asc' | 'desc';
 
 export interface JobSort {
@@ -12,7 +12,16 @@ export interface JobSort {
   direction: SortDirection;
 }
 
-export const DEFAULT_JOB_SORT: JobSort = { key: 'time', direction: 'asc' };
+/**
+ * My Jobs opens with the NEWEST job first.
+ *
+ * "Time left, ascending" was the old default and it put the newest job at the
+ * BOTTOM: a freshly posted job has the most time remaining, so ascending counted
+ * it last. "Time left" also has no meaning for closed/cancelled jobs (they carry
+ * no deadline), which pushed every finished job to the end regardless.
+ * "Date posted" is the only key that orders every job, in every state.
+ */
+export const DEFAULT_JOB_SORT: JobSort = { key: 'created', direction: 'desc' };
 
 export interface SortableJob {
   id?: number;
@@ -64,8 +73,17 @@ function amountOf(job: SortableJob): number | null {
   return found ? total : null;
 }
 
+function createdOrNull(job: SortableJob): number | null {
+  if (typeof job.created_at !== 'string' || job.created_at.trim().length === 0) return null;
+  const raw = job.created_at.trim();
+  const parsed = Date.parse(raw.includes('Z') || /[+-]\d\d:\d\d$/.test(raw) ? raw : `${raw}Z`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function valueFor(job: SortableJob, key: JobSortKey, now: number): number | null {
   switch (key) {
+    case 'created':
+      return createdOrNull(job);
     case 'time':
       return deadlineOrNull(job, now);
     case 'amount':
@@ -87,6 +105,8 @@ export function hasDistanceData(jobs: readonly SortableJob[]): boolean {
 /** Amount/hours availability, used to disable unavailable choices in the sheet. */
 export function hasSortData(jobs: readonly SortableJob[], key: JobSortKey): boolean {
   if (key === 'time') return true;
+  // Date posted exists on every job row, so it is never disabled.
+  if (key === 'created') return jobs.length > 0;
   return jobs.some((job) => valueFor(job, key, Date.now()) !== null);
 }
 
@@ -105,7 +125,9 @@ export function sortJobs<T extends SortableJob>(
     if (a === null) return 1;
     if (b === null) return -1;
     if (a !== b) return (a - b) * direction;
-    return (left.id ?? left.job_id ?? 0) - (right.id ?? right.job_id ?? 0);
+    // Equal values (two jobs posted in the same second): the newer id wins in a
+    // descending sort, so "newest first" never depends on array order.
+    return ((left.id ?? left.job_id ?? 0) - (right.id ?? right.job_id ?? 0)) * direction;
   });
 }
 

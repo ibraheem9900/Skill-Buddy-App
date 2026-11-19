@@ -117,6 +117,7 @@ export default function NearbyJobsFeed({ enabled, bottomInset }: Props) {
   const filtered = filters.kind !== 'ALL' || filters.onlyMatchingSkills;
   const sortedJobs = useMemo(() => sortJobs(jobs, sort), [jobs, sort]);
   const sortLabelKey: Record<JobSortKey, TranslationKey> = {
+    created: 'jobs_sort_created',
     time: 'jobs_sort_time',
     amount: 'jobs_sort_amount',
     distance: 'jobs_sort_distance',

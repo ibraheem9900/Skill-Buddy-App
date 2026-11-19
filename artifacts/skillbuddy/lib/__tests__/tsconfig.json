@@ -63,6 +63,7 @@
     "./postAddress.test.ts",
     "./translations.test.ts",
     "./jobStatus.test.ts",
+    "./round19.test.ts",
     "./fetchRetry.test.ts",
     "./countdown.test.ts",
     "./addressFormat.test.ts",

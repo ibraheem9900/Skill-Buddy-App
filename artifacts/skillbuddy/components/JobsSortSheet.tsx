@@ -22,6 +22,9 @@ interface Props {
 }
 
 const OPTIONS: { key: JobSortKey; label: TranslationKey; icon: keyof typeof Feather.glyphMap }[] = [
+  // Date posted is the default: it is the only key that orders every job in
+  // every state (a closed job has no "time left" to sort by).
+  { key: 'created', label: 'jobs_sort_created', icon: 'calendar' },
   { key: 'time', label: 'jobs_sort_time', icon: 'clock' },
   { key: 'amount', label: 'jobs_sort_amount', icon: 'credit-card' },
   { key: 'distance', label: 'jobs_sort_distance', icon: 'map-pin' },
@@ -47,7 +50,11 @@ export default function JobsSortSheet({
 
   const choose = (key: JobSortKey) => {
     if (disabledKeys.includes(key)) return;
-    onChange({ key, direction: key === 'time' ? 'asc' : value.direction });
+    // Newest-first for "Date posted", soonest-ending for "Time left"; the other
+    // keys keep whatever direction the user already chose.
+    const direction: SortDirection =
+      key === 'created' ? 'desc' : key === 'time' ? 'asc' : value.direction;
+    onChange({ key, direction });
   };
 
   const direction: SortDirection = value.direction;

@@ -21,6 +21,11 @@ import { useJobDetail } from '@/hooks/useJobDetail';
 import { useTaskFeedbackCounts } from '@/hooks/useTaskFeedback';
 import { useFeedbackOptionLabels } from '@/hooks/useFeedbackOptionLabels';
 import JobReviewsCard from '@/components/JobReviewsCard';
+import JobOffersSection from '@/components/JobOffersSection';
+import { resolveJobStatus } from '@/lib/jobStatus';
+import { jobTaskWindows } from '@/lib/bidTimes';
+import { getRememberedProvider } from '@/lib/publicProfiles';
+import { providerDisplayName } from '@/lib/profileDisplay';
 import useRepostNotice from '@/hooks/useRepostNotice';
 import { usePublishJob } from '@/hooks/usePublishJob';
 import { useRestartJobTimer } from '@/hooks/useRestartJobTimer';
@@ -120,8 +125,11 @@ import {
   isJobCompleted,
   isJobPausedStatus,
   isProviderAssigned,
+  mergedSlotRanges,
   milestoneStatusLabelKey,
   parseIsoDate,
+  taskExpectedHours,
+  totalTaskHours,
   visibleJobActions,
   type JobActionId,
 } from '@/lib/jobDetail';
@@ -1099,6 +1107,9 @@ export default function BiddingDashboardScreen() {
     void refetchServerJob();
   }, [refetchServerJob]);
 
+  /** Long descriptions collapse to four lines with a Read more toggle. */
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+
   // FIX (Job Details header): the hero is a dark surface that extends behind
   // the status bar, so its icons switch to light content while THIS screen is
   // focused — and back to the app default when it is left (the form screens
@@ -1246,12 +1257,39 @@ export default function BiddingDashboardScreen() {
 
     // ── Everything below renders the LIVE response. No field is invented, and
     //    every nullable field is guarded before it is displayed. ──────────────
-    const statusKey = jobStatusLabelKey(serverJob.status);
+    // THE shared resolver, not the raw enum: the backend keeps `status: OPEN`
+    // after the bidding window has ended (and logs no history entry), which is
+    // exactly why the list said "Bidding closed" while this screen said
+    // "Accepting Bids" for the same job. resolveJobStatus combines the status,
+    // the deadline and the assigned provider into ONE display status.
+    const resolvedStatus = resolveJobStatus(serverJob);
+    const statusKey = resolvedStatus.labelKey;
     const hours = parseExpectedHours(serverJob.expected_hours);
     const scheduledAt = parseIsoDate(serverJob.scheduled_at);
     const createdOn = formatDate(serverJob.created_at);
     const assignedOn = formatDate(serverJob.assigned_at);
     const providerAssigned = isProviderAssigned(serverJob);
+    // The assigned pilot's snapshot, when the client has just picked them on the
+    // Bids screen (the bid card remembers it). There is NO public
+    // provider-by-id endpoint, so after a cold start only the factual id is
+    // available — never an invented name.
+    const assignedProviderSummary =
+      providerAssigned && serverJob.assigned_provider_id != null
+        ? getRememberedProvider(serverJob.assigned_provider_id)
+        : null;
+    const assignedProviderLabel =
+      providerAssigned && serverJob.assigned_provider_id != null
+        ? assignedProviderSummary
+          ? `${providerDisplayName(
+              assignedProviderSummary.name,
+              t('pilot_fallback_name')
+            )}${
+              typeof assignedProviderSummary.star_rating === 'number'
+                ? ` · ${assignedProviderSummary.star_rating.toFixed(1)}`
+                : ''
+            }`
+          : t('jobd_provider_n', { id: serverJob.assigned_provider_id })
+        : null;
     const completedOn = isJobCompleted(serverJob) ? formatDate(serverJob.completed_at) : null;
     const cancelled = isJobCancelledStatus(serverJob);
     const cancelledOn = cancelled ? formatDateTime(serverJob.cancelled_at) : null;
@@ -1261,15 +1299,17 @@ export default function BiddingDashboardScreen() {
     // cancelled variants (exactly the JobApiStatus enum, no guessing). The
     // screen maps the tone onto the theme tokens so dark theme stays
     // consistent below.
-    const statusTone: JobStatusTone = jobStatusTone(serverJob.status);
+    const statusTone: JobStatusTone = resolvedStatus.tone;
     const statusBadge =
       statusTone === 'destructive'
         ? { bg: c.destructiveLight, fg: c.destructive }
         : statusTone === 'success'
           ? { bg: c.successLight, fg: c.success }
           : { bg: c.muted, fg: c.mutedForeground };
-    // Countdown anchor from the backend's own bidding window (null = no timer).
-    const deadline = biddingDeadline(serverJob, Date.now());
+    // Countdown anchor from the resolver: once a provider is assigned (or the
+    // window has ended) this is null, so the bidding timer disappears at once
+    // on both sides instead of counting down a decision already made.
+    const deadline = resolvedStatus.biddingOpen ? resolvedStatus.deadlineMs : null;
     // The stored "Preferred time:" line is DATA, not prose: it is removed from
     // the description and rendered as the task windows below.
     const description = stripScheduleBlock(sanitizeRichText(serverJob.description));
@@ -1293,10 +1333,10 @@ export default function BiddingDashboardScreen() {
     // and hours. Multi-day jobs now show the task count and the total expected
     // hours; single-day jobs keep date + the full stored window + expected hours.
     const isMultiDay = serverJob.booking_type === 'MULTI_DAY' || milestones.length > 1;
-    const totalHours = milestones.reduce((sum, m) => {
-      const h = parseExpectedHours(m.expected_hours);
-      return h === null ? sum : sum + h;
-    }, 0);
+    // The SUM of each task's real booked hours (slots first, not the leftover
+    // per-slot `expected_hours`): 3 + 9 + 15 + 15 = 42, never 4 × 3 = 12.
+    const totalHours = totalTaskHours(milestones);
+    const taskWindows = jobTaskWindows(serverJob);
     const singleDayWindow = (() => {
       const local = scheduledLocal;
       const segment = taskSegments[0] ?? null;
@@ -1418,7 +1458,8 @@ export default function BiddingDashboardScreen() {
       heading: t('jobd_milestones'),
       value: <Text style={infoValueStyle}>{String(milestones.length)}</Text>,
     });
-    const hoursValue = isMultiDay ? (totalHours > 0 ? totalHours : null) : hours;
+    const hoursValue =
+      isMultiDay && totalHours !== null && totalHours > 0 ? totalHours : isMultiDay ? null : hours;
     if (hoursValue !== null) {
       infoTiles.push({
         key: 'hours',
@@ -1494,9 +1535,7 @@ export default function BiddingDashboardScreen() {
           key: 'provider',
           heading: t('jobd_tile_provider'),
           value: (
-            <Text style={infoValueStyle}>
-              {t('jobd_provider_n', { id: serverJob.assigned_provider_id })}
-            </Text>
+            <Text style={infoValueStyle}>{assignedProviderLabel}</Text>
           ),
         });
       }
@@ -1506,8 +1545,8 @@ export default function BiddingDashboardScreen() {
         heading: t('jobd_tile_provider'),
         value: (
           <Text style={infoValueStyle}>
-            {providerAssigned && serverJob.assigned_provider_id != null
-              ? t('jobd_provider_n', { id: serverJob.assigned_provider_id }) +
+            {providerAssigned && assignedProviderLabel != null
+              ? assignedProviderLabel +
                 (assignedOn ? ` · ${t('jobd_assigned_on', { date: assignedOn })}` : '')
               : t('jobd_not_assigned')}
           </Text>
@@ -1805,7 +1844,7 @@ export default function BiddingDashboardScreen() {
               STATE-AGNOSTIC about whether this provider already bid: that answer
               only exists at /bids/mine, which the bid screen itself reads, so
               tapping it either shows the form or that provider's own bid summary. */}
-          {perms.canPlaceBid ? (
+          {perms.canPlaceBid && resolvedStatus.biddingOpen ? (
             <TouchableOpacity
               style={[styles.publishBtn, { backgroundColor: c.primary, marginTop: 14 }]}
               onPress={() => router.push(`/job/${serverJob.id}/bid` as any)}
@@ -2189,7 +2228,23 @@ export default function BiddingDashboardScreen() {
               <View style={styles.sectionHeaderRow}>
                 <Text style={[styles.sectionTitle, { color: c.text }]}>{t('jobd_description')}</Text>
               </View>
-              <Text style={[styles.bodyLine, { color: c.text }]}>{description}</Text>
+              <Text
+                style={[styles.bodyLine, { color: c.text }]}
+                numberOfLines={descriptionExpanded ? undefined : 4}
+              >
+                {description}
+              </Text>
+              {description.length > 220 ? (
+                <TouchableOpacity
+                  onPress={() => setDescriptionExpanded((prev) => !prev)}
+                  accessibilityRole="button"
+                  style={{ paddingVertical: 6, alignSelf: 'flex-start' }}
+                >
+                  <Text style={[styles.bodyLine, { color: c.primary, fontFamily: 'Manrope_600SemiBold' }]}>
+                    {descriptionExpanded ? t('jobd_read_less') : t('jobd_read_more')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : null}
 
@@ -2286,7 +2341,7 @@ export default function BiddingDashboardScreen() {
                     which is the single edit path. */}
               </View>
               {milestones.map((m, i) => {
-                const mHours = parseExpectedHours(m.expected_hours);
+                const mHours = taskExpectedHours(m);
                 const feedbackCount = taskFeedbackCounts[m.id] ?? 0;
                 // LOCAL day + the stored window: "Thu 22 Oct · 8:00 AM - 11:00 AM"
                 // instead of the raw UTC stamp and the raw "Preferred time" text.
@@ -2297,11 +2352,19 @@ export default function BiddingDashboardScreen() {
                   scheduleMonths,
                   scheduleWeekdays
                 );
+                // Sorted + merged ranges, never a comma-separated wall of raw
+                // slot labels: five adjacent 3-hour slots read as one window.
+                const slotRanges = mergedSlotRanges(m.time_slots);
                 const mWindow =
-                  m.time_slots && m.time_slots.length > 0
-                    ? m.time_slots
-                        .map((slot) => slot.label || slot.window || slot.code)
-                        .filter(Boolean)
+                  slotRanges.length > 0
+                    ? slotRanges
+                        .map((range) =>
+                          formatWindowLabel(
+                            clockOf(range.startMinutes),
+                            clockOf(range.endMinutes),
+                            scheduleMeridiem
+                          )
+                        )
                         .join(', ')
                     : segment && local
                     ? formatWindowLabel(
@@ -2537,16 +2600,20 @@ export default function BiddingDashboardScreen() {
             </>
           ) : null}
 
-          {/* Offers/bids are NOT part of this endpoint's contract, so nothing is
-              invented here. The mock bidding dashboard below stays mock-only. */}
-          <View
-            style={[styles.noBidsCard, { backgroundColor: c.card, borderColor: c.border, marginTop: 20 }]}
-          >
-            <Feather name="trending-up" size={26} color={c.mutedForeground} />
-            <Text style={[styles.noBidsSub, { color: c.mutedForeground }]}>
-              {t('jobd_offers_unavailable')}
-            </Text>
-          </View>
+          {/* Offers: the job's OWN client sees the real bid preview (same hook
+              and endpoint as the Bids screen, top 3 by the server's split) with
+              "View Bids" opening the full list. Providers never get the
+              client-only message; they simply get nothing here. A job with no
+              bids shows the section's own "No offers yet" state, never the old
+              "Offers aren't shown" dead end. */}
+          {perms.isOwner ? (
+            <JobOffersSection
+              jobId={serverJob.id}
+              tasks={taskWindows}
+              canView
+              onViewAll={() => router.push(`/job/${serverJob.id}/bids` as any)}
+            />
+          ) : null}
         </ScrollView>
       </View>
     );

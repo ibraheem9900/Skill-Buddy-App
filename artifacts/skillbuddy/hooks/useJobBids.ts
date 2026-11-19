@@ -221,6 +221,10 @@ export function useJobBids(
         }
       } finally {
         if (requests.current.isCurrent(requestId)) inFlight.current = false;
+        // The pull-to-refresh spinner must ALWAYS stop. It used to be set true
+        // on every refresh and never cleared, so the indicator spun forever on
+        // both success and failure.
+        setRefreshing(false);
       }
     },
     [jobId, applyResponse]

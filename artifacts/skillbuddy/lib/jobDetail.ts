@@ -1,4 +1,9 @@
-import type { JobResponse, MilestoneStatus } from '@/types';
+import type {
+  JobMilestoneResponse,
+  JobMilestoneTimeSlotResponse,
+  JobResponse,
+  MilestoneStatus,
+} from '@/types';
 
 /**
  * Pure helpers for the Job Details screen (GET /api/v1/jobs/{job_id}).
@@ -106,6 +111,113 @@ export function formatDateTime(value: string | null | undefined): string | null 
 export function formatDate(value: string | null | undefined): string | null {
   const date = parseApiIsoUtc(value);
   return date ? date.toLocaleDateString() : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Task hours and time slots — read from what the CLIENT entered
+ * ------------------------------------------------------------------ */
+
+/** `HH:MM` (or `HH:MM:SS`) → local minutes since midnight, or null. */
+export function clockMinutes(value: string | null | undefined): number | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{1,2}):(\d{2})/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+export interface MinuteRange {
+  startMinutes: number;
+  endMinutes: number;
+}
+
+/**
+ * A task's stored slots, sorted by start time and MERGED where they touch.
+ *
+ * A task can legitimately store five 3-hour slots (8-11, 11-2, 2-5, 5-8, 8-11)
+ * that together describe ONE continuous 8:00 AM - 11:00 PM window. Rendering
+ * them raw produced a comma-separated wall of text with an unsorted order; this
+ * returns the readable ranges instead (8:00 AM - 11:00 PM in that example).
+ * Overlapping slots are merged too, so no minute is counted twice.
+ */
+export function mergedSlotRanges(
+  slots: readonly JobMilestoneTimeSlotResponse[] | null | undefined
+): MinuteRange[] {
+  const ranges: MinuteRange[] = [];
+  for (const slot of slots ?? []) {
+    const start = clockMinutes(slot?.start_time);
+    const end = clockMinutes(slot?.end_time);
+    if (start === null || end === null || end <= start) continue;
+    ranges.push({ startMinutes: start, endMinutes: end });
+  }
+  ranges.sort(
+    (a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes
+  );
+
+  const merged: MinuteRange[] = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range.startMinutes <= last.endMinutes) {
+      last.endMinutes = Math.max(last.endMinutes, range.endMinutes);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}
+
+/**
+ * The hours the CLIENT entered for one task.
+ *
+ * The job's stored `expected_hours` per milestone is often the length of a
+ * SINGLE slot (3 h) rather than the task's booked total, so a task built from
+ * five slots rendered "3 hrs" and the job total came out as 4 × 3 = 12 h
+ * instead of 3/9/15/15 = 42 h. The slots the client chose are the truth: merged
+ * they span exactly the booked hours. `expected_hours` remains the fallback for
+ * legacy milestones that carry no slots.
+ */
+export function taskExpectedHours(
+  milestone:
+    | Pick<JobMilestoneResponse, 'expected_hours' | 'time_slots'>
+    | null
+    | undefined
+): number | null {
+  if (!milestone) return null;
+
+  const merged = mergedSlotRanges(milestone.time_slots);
+  if (merged.length > 0) {
+    const minutes = merged.reduce(
+      (sum, range) => sum + (range.endMinutes - range.startMinutes),
+      0
+    );
+    if (minutes > 0) {
+      // Whole hours stay whole; anything else keeps one decimal (7.5 h).
+      return minutes % 60 === 0 ? minutes / 60 : Math.round(minutes / 6) / 10;
+    }
+  }
+
+  const raw = milestone.expected_hours;
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : null;
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** Total expected hours = the SUM of the tasks' own hours (never a guess). */
+export function totalTaskHours(
+  milestones: readonly Pick<JobMilestoneResponse, 'expected_hours' | 'time_slots'>[] | null | undefined
+): number | null {
+  let total = 0;
+  let found = false;
+  for (const milestone of milestones ?? []) {
+    const hours = taskExpectedHours(milestone);
+    if (hours === null) continue;
+    total += hours;
+    found = true;
+  }
+  return found ? Math.round(total * 10) / 10 : null;
 }
 
 /* ------------------------------------------------------------------ *

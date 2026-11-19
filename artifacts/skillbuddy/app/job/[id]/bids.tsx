@@ -23,6 +23,7 @@ import EmptyState from '@/components/EmptyState';
 import AcceptBidSheet from '@/components/AcceptBidSheet';
 import RejectBidSheet from '@/components/RejectBidSheet';
 import BidOfferCard from '@/components/BidOfferCard';
+import { providerDisplayName } from '@/lib/profileDisplay';
 import { useJobDetail } from '@/hooks/useJobDetail';
 import { useJobBids } from '@/hooks/useJobBids';
 import { useJobBiddingRealtime } from '@/hooks/useJobBiddingRealtime';
@@ -121,6 +122,7 @@ function ProviderSheet({
 }) {
   const { colors: c } = useTheme();
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
   const months = useMemo(() => splitTable(t('post_sched_months')), [t]);
   const weekdays = useMemo(() => splitTable(t('post_sched_weekdays')), [t]);
 
@@ -153,15 +155,27 @@ function ProviderSheet({
   return (
     <BottomSheet visible={!!bid} onClose={onClose} title={t('cbids_provider_title')}>
       {bid ? (
-        <View style={{ paddingBottom: 8 }}>
+        /* Scrollable with safe-area padding: the sheet has more rows than a
+           short phone can show (Distance was cut off at the bottom). */
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ paddingBottom: 8 }}>
           <View style={styles.sheetHead}>
             <View style={[styles.sheetAvatar, { backgroundColor: c.muted }]}>
               <Text style={[styles.sheetInitial, { color: c.primary }]}>
-                {bid.provider.name.trim().charAt(0).toUpperCase() || '?'}
+                {(providerDisplayName(bid.provider.name, t('pilot_fallback_name')) || '?')
+                  .trim()
+                  .charAt(0)
+                  .toUpperCase() || '?'}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.sheetName, { color: c.text }]}>{bid.provider.name}</Text>
+              <Text style={[styles.sheetName, { color: c.text }]}>
+                {providerDisplayName(bid.provider.name, t('pilot_fallback_name'))}
+              </Text>
               {bid.provider.badge_tier ? (
                 <Text style={[styles.sheetTier, { color: c.primary }]}>
                   {bid.provider.badge_tier}
@@ -172,7 +186,7 @@ function ProviderSheet({
 
           {row(t('cbids_provider_price'), formatBidPriceLocale(bid.offered_price, locale))}
           {row(
-            t('jobd_bid_arrival_title'),
+            t('cbids_provider_arrival'),
             proposed
               ? proposed.single
                 ? t('bid_starts', { time: proposed.text })
@@ -188,7 +202,13 @@ function ProviderSheet({
           {row(t('cbids_provider_badges'), String(bid.provider.badge_count))}
           {row(t('cbids_provider_jobs'), String(bid.provider.total_jobs_completed))}
           {row(t('cbids_provider_acceptance'), `${bid.provider.acceptance_rate}%`)}
-          {row(t('cbids_provider_response'), String(bid.provider.response_time_avg))}
+          {row(
+            t('cbids_provider_response'),
+            typeof bid.provider.response_time_avg === 'number' &&
+              bid.provider.response_time_avg > 0
+              ? t('cbids_provider_minutes', { n: bid.provider.response_time_avg })
+              : t('cbids_provider_no_data')
+          )}
           {row(t('cbids_provider_distance'), formatBidDistanceLocale(bid.distance_km, locale))}
           {row(t('jobd_bid_summary_status'), statusKey ? t(statusKey) : null)}
           {row(t('jobd_bid_summary_submitted'), submitted)}
@@ -241,7 +261,8 @@ function ProviderSheet({
           >
             <Text style={[styles.sheetCloseText, { color: c.primary }]}>{t('cbids_close')}</Text>
           </TouchableOpacity>
-        </View>
+          </View>
+        </ScrollView>
       ) : null}
     </BottomSheet>
   );
@@ -838,6 +859,12 @@ export default function JobBidsScreen() {
       closeAcceptSheet();
       setSheetBid(null);
       await Promise.all([refetchJob(), refresh()]);
+      // The next step after an accepted bid is payment, and payment is a step on
+      // Job Details (there is no separate payment screen). Go there at once, so
+      // the client sees the "Awaiting payment" state and the confirm-payment
+      // action instead of being left on a bidding screen with a stopped timer.
+      // `replace`, not `push`: going Back must not reopen the race that is over.
+      router.replace(`/job/${job.id}` as any);
       return;
     }
 
@@ -1394,7 +1421,11 @@ export default function JobBidsScreen() {
         </View>
       ) : null}
 
-      {stale ? (
+      {/* Reconnecting is only claimed when the live socket is down AND the REST
+          fallback is failing too. A closed socket on good internet is normal
+          (the list still refreshes every 20 s), so the old socket-only banner
+          sat on screen permanently while the data was perfectly fresh. */}
+      {stale && refreshFailed ? (
         <View
           style={[styles.refreshNotice, { backgroundColor: c.muted, borderColor: c.border }]}
           accessibilityLiveRegion="polite"
@@ -1672,6 +1703,7 @@ const styles = StyleSheet.create({
   skeleton: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 12 },
   skelAvatar: { width: 46, height: 46, borderRadius: 23 },
   skelLine: { height: 10, borderRadius: 5 },
+  sheetScroll: { maxHeight: 520 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   sheetAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   sheetInitial: { fontFamily: 'Manrope_700Bold', fontSize: 17 },

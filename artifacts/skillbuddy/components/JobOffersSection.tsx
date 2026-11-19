@@ -55,7 +55,8 @@ export default function JobOffersSection({
 
   if (!canView) return null;
 
-  const visible = all.slice(0, 3);
+  // At most TWO offers in the preview; the rest live behind "View Bids".
+  const visible = all.slice(0, 2);
   const hasMore = total > visible.length;
 
   return (

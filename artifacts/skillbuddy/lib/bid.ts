@@ -1088,12 +1088,18 @@ export function formatBidDistanceLocale(
 /* ────────────────────────────────────────────────── what the client sees ── */
 
 /**
- * The BidStatus values a client is shown on this screen: the live bids and the
- * one that was accepted. REJECTED, WITHDRAWN and EXPIRED are hidden — the
- * provider took the offer back, or it lapsed, and neither is an offer the client
- * can still act on. The five values are the full BidStatus enum (live schema).
+ * The BidStatus values a client is shown on this screen: live bids, the one
+ * that was accepted, and EXPIRED.
+ *
+ * EXPIRED is visible on purpose. When a bidding window closes the backend lapses
+ * every still-pending offer, so hiding EXPIRED emptied the whole screen the
+ * moment the timer ran out — "0 bids / No bids received" for a job that really
+ * did receive offers, and the first bidder disappeared. Every bid that was
+ * placed stays reviewable after the window (it simply cannot be accepted any
+ * more: canAcceptBid still requires PENDING). REJECTED and WITHDRAWN stay
+ * hidden: those are decisions/take-backs, not offers on the table.
  */
-export const CLIENT_VISIBLE_BID_STATUSES = ['PENDING', 'ACCEPTED'] as const;
+export const CLIENT_VISIBLE_BID_STATUSES = ['PENDING', 'ACCEPTED', 'EXPIRED'] as const;
 
 export function isClientVisibleBid(
   bid: Pick<BidResponse, 'status'> | null | undefined

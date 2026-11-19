@@ -18,7 +18,7 @@ import {
 import { initialsFor, providerDisplayName } from '@/lib/profileDisplay';
 import { rememberProvider } from '@/lib/publicProfiles';
 import { splitTable } from '@/lib/jobSchedule';
-import { clockOf, formatDayLabel, formatWindowLabel } from '@/lib/timeSlots';
+import { clockOf, formatDayLabel, formatTimeLabel, formatWindowLabel } from '@/lib/timeSlots';
 import type { BidResponse } from '@/types';
 
 interface Props {
@@ -125,23 +125,31 @@ export default function BidOfferCard({
       dayLabel: (day) => formatDayLabel(day, months, weekdays),
     }
   );
-  // Which ALLOWED slot each chosen arrival belongs to (derived from the job's
-  // own slot windows, never guessed from the clock).
-  const arrivalSlotNotes = arrivals.flatMap((arrival) => {
-    const task = tasks.find((entry) => entry.number === arrival.taskNumber);
-    const slot = task?.slots.find(
-      (entry) => arrival.minutes >= entry.startMinutes && arrival.minutes < entry.endMinutes
-    );
-    return slot
-      ? [
-          `${t('post_task_n', { n: arrival.taskNumber })}: ${formatWindowLabel(
-            clockOf(slot.startMinutes),
-            clockOf(slot.endMinutes),
-            truthyMeridiem
-          )}`,
-        ]
-      : [];
-  });
+  // One aligned row per task: Task N · Wed 18 Nov · 10:30 PM, plus the allowed
+  // window the arrival belongs to. A multi-task offer used to be ONE run-on
+  // paragraph with every task joined by " · ", which was unreadable on a phone.
+  const arrivalRows = [...arrivals]
+    .filter((arrival) => Number.isFinite(arrival.minutes))
+    .sort((a, b) => a.taskNumber - b.taskNumber || a.minutes - b.minutes)
+    .map((arrival) => {
+      const task = tasks.find((entry) => entry.number === arrival.taskNumber);
+      const slot = task?.slots.find(
+        (entry) => arrival.minutes >= entry.startMinutes && arrival.minutes < entry.endMinutes
+      );
+      return {
+        key: `${arrival.taskNumber}-${arrival.minutes}`,
+        label: t('post_task_n', { n: arrival.taskNumber }),
+        time: formatTimeLabel(clockOf(arrival.minutes), truthyMeridiem),
+        day: task?.day ? formatDayLabel(task.day, months, weekdays) : null,
+        slot: slot
+          ? formatWindowLabel(
+              clockOf(slot.startMinutes),
+              clockOf(slot.endMinutes),
+              truthyMeridiem
+            )
+          : null,
+      };
+    });
   const price = formatBidPriceLocale(bid.offered_price, locale);
   const distance = formatBidDistanceLocale(bid.distance_km, locale);
   const rating =
@@ -254,18 +262,40 @@ export default function BidOfferCard({
         </View>
 
         {proposed ? (
-          <View style={styles.arrivalRow}>
-            <Feather name="clock" size={11} color={c.mutedForeground} />
-            <Text style={[styles.arrivalText, { color: c.mutedForeground }]}>
-              {proposed.single ? t('bid_starts', { time: proposed.text }) : proposed.text}
-            </Text>
-          </View>
-        ) : null}
-
-        {arrivalSlotNotes.length > 0 ? (
-          <Text style={[styles.arrivalText, { color: c.mutedForeground, marginLeft: 16 }]}>
-            {arrivalSlotNotes.join(' · ')}
-          </Text>
+          proposed.single ? (
+            <View style={styles.arrivalRow}>
+              <Feather name="clock" size={11} color={c.mutedForeground} />
+              <Text style={[styles.arrivalText, { color: c.mutedForeground }]}>
+                {t('bid_starts', { time: proposed.text })}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.taskList}>
+              {arrivalRows.map((row) => (
+                <View key={row.key} style={styles.taskRow}>
+                  <Text
+                    style={[styles.taskLabel, { color: c.mutedForeground }]}
+                    numberOfLines={1}
+                  >
+                    {row.label}
+                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.taskTime, { color: c.text }]} numberOfLines={1}>
+                      {row.day ? `${row.day} · ${row.time}` : row.time}
+                    </Text>
+                    {row.slot ? (
+                      <Text
+                        style={[styles.taskSlot, { color: c.mutedForeground }]}
+                        numberOfLines={1}
+                      >
+                        {row.slot}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )
         ) : null}
 
         {onViewProfile ? (
@@ -338,6 +368,16 @@ const styles = StyleSheet.create({
   name: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, marginBottom: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   arrivalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  taskList: {
+    marginTop: 8,
+    gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'transparent',
+  },
+  taskRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  taskLabel: { width: 58, fontFamily: 'Manrope_600SemiBold', fontSize: 11, lineHeight: 16 },
+  taskTime: { fontFamily: 'Manrope_500Medium', fontSize: 12, lineHeight: 16 },
+  taskSlot: { fontFamily: 'Manrope_400Regular', fontSize: 10, lineHeight: 14, marginTop: 1 },
   arrivalText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 11, lineHeight: 16 },
   metaText: { fontFamily: 'Manrope_400Regular', fontSize: 11 },
   dot: { width: 2.5, height: 2.5, borderRadius: 1.25, marginHorizontal: 2 },

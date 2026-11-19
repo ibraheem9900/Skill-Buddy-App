@@ -23,6 +23,7 @@ const outDir = path.join(testDir, '.out');
 const TEST_FILES = [
   'jobAddressUpdate.test.js',
   'jobStatus.test.js',
+  'round19.test.js',
   'jobRestartTimer.test.js',
   'jobConvert.test.js',
   'jobRoute.test.js',
