@@ -2538,6 +2538,15 @@ const de = {
   gallery_by_service: "Nach Dienstleistung",
   gallery_by_category: "Nach Kategorie",
   gallery_view_category: "Kategoriegalerie ansehen",
+  my_media_title: "Meine Medien",
+  my_media_empty_title: "Noch keine Medien",
+  my_media_empty_sub: "Fotos und Videos, die du zu Aufträgen hinzufügst, erscheinen hier.",
+  my_media_error_title: "Deine Medien konnten nicht geladen werden",
+  my_media_load_more_failed: "Mehr konnte nicht geladen werden. Tippe zum Wiederholen.",
+  my_media_public: "Öffentlich",
+  my_media_private: "Privat",
+  my_media_sign_in_title: "Melde dich an, um deine Medien zu sehen",
+  my_media_sign_in_sub: "Deine Fotos und Videos sind mit deinem Konto verknüpft.",
   gallery_category_gallery: "Kategoriegalerie",
 };
 export default de;

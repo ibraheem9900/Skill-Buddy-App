@@ -13,9 +13,11 @@ import {
   SERVICE_GALLERY_PATH,
   type ListPublicMediaParams,
 } from '@/lib/mediaGallery';
+import { MY_MEDIA_PATH } from '@/lib/myMedia';
 import type { NearbyJob } from '@/lib/nearbyJobs';
 import type { ProviderProfile, ProviderSkill, ProviderSkillCreatePayload, ProviderSkillUpdatePayload, ProviderDashboardSummary, ProviderStatusResponse, AddressResponse, AddressCreatePayload, AddressUpdatePayload, AddressCountryResponse, AddressRegionResponse, CategoryResponse, CategoryDetailResponse, ServiceListItem, ServiceDetailResponse, ServiceMediaItem, ServiceInclusionOption, CreateJobRequest, UpdateJobRequest, JobAddressCreate, JobAddressUpdate, JobAddressResponse, JobActionResponse, JobAssignProviderRequest, JobCancelRequest, JobDetailsRequest, JobResponse, JobListItem, ListJobsParams, ClientProfileResponse, ClientDashboardSummary, ClientBookingsResponse, FavoriteListResponse, FavoriteResponse, FavoriteItemResponse, CertificationListResponse, CertificationUploadResponse, CertificationResponse, CreditWalletDetailResponse, ProviderWalletDetailResponse, BidResponse, BidCreateRequest, JobBidsResponse, BidUpdateRequest, BidRejectRequest, ListMyBidsParams,
   CategoryMediaGroup,
+  MediaItem,
   PublicMediaPage,
   PublicMediaResponse,
   ServiceMediaGroup,
@@ -763,21 +765,35 @@ export const authApi = {
     return data ?? { items: [] };
   },
 
-  /*
-   * TODO(media-gallery) — typed STUBS, not called by anything yet, per the
-   * brief (their schemas are not part of this contract). Each is documented in
-   * the live spec, so none of them is invented:
+  /**
+   * GET /api/v1/media-gallery/mine — List My Media (the signed-in user's own
+   * uploads).
    *
-   *   GET    /api/v1/media-gallery/mine?limit&offset   (AUTH — 401 without token)
-   *   PATCH  /api/v1/media-gallery/{item_id}          (AUTH — 401 without token)
-   *   DELETE /api/v1/media-gallery/{item_id}          (AUTH — 401 without token)
+   * AUTH: REQUIRED (live OpenAPI security: OAuth2PasswordBearer). Verified live
+   * 2026-11-18: no token → 401 {"detail":"Not authenticated"}. The shared
+   * axios instance attaches `Authorization: Bearer <token>` to every request
+   * and the response interceptor refreshes an expired token once, so this
+   * function adds no headers of its own. NO user id is sent: the token scopes
+   * the result.
    *
-   * The last three are "my uploads / manage my media" features. Verified live
-   * 2026-11-18: mine/PATCH/DELETE answer 401 {"detail":"Not authenticated"}
-   * with no token, so all three exist and are protected. Nothing in this app
-   * calls them and no management UI is built in this task; wire them only when
-   * the upload/manage screens are in scope.
+   * QUERY: `limit` (integer 1..100, default 50) and `offset` (integer >= 0,
+   * default 0). No request body on a GET.
+   *
+   * 200 = a PLAIN JSON ARRAY of MediaItemResponse — NOT a {items} wrapper and
+   * with NO total (verified against the live schema). Anything else is coerced
+   * to [] here so no screen can receive `undefined`; lib/myMedia then skips
+   * rows it cannot draw.
+   *
+   * Not part of this task: PATCH /media-gallery/{item_id} (Update Media) and
+   * DELETE /media-gallery/{item_id} (Delete Media). Neither is wired here.
    */
+  getMyMedia: async (params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<MediaItem[]> => {
+    const { data } = await api.get<MediaItem[]>(MY_MEDIA_PATH, { params });
+    return Array.isArray(data) ? data : [];
+  },
 
   /* ── Jobs (client job creation) ─────────────────────────────────────────── */
 

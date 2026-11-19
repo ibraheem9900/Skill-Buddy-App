@@ -31,6 +31,12 @@ interface Props {
   onPressPhoto?: (index: number) => void;
   /** Override the responsive column count (2 / 3 / 4 by width). */
   columns?: number;
+  /**
+   * Optional short label pinned to a tile's top-left corner ("Public",
+   * "Private"). Return null for no chip. Used by My Media's read-only
+   * visibility status; the public gallery passes nothing.
+   */
+  chipFor?: (item: DisplayMedia) => string | null;
   contentPadding?: number;
   ListHeaderComponent?: React.ComponentType<any> | React.ReactElement | null;
   ListEmptyComponent?: React.ComponentType<any> | React.ReactElement | null;
@@ -44,6 +50,7 @@ export default function MediaGalleryGrid({
   media,
   onPressPhoto,
   columns: columnsProp,
+  chipFor,
   contentPadding = 16,
   ListHeaderComponent,
   ListEmptyComponent,
@@ -80,6 +87,11 @@ export default function MediaGalleryGrid({
         fallbackIconSize={22}
         accessibilityLabel={item.caption ?? t('gallery_photo')}
       />
+      {chipFor && chipFor(item) ? (
+        <View style={styles.statusChip} pointerEvents="none">
+          <Text style={styles.statusChipText}>{chipFor(item)}</Text>
+        </View>
+      ) : null}
       {item.kind === 'video' ? (
         <View style={styles.playBadge} pointerEvents="none">
           <Feather name="play" size={13} color="#FFFFFF" />
@@ -134,6 +146,20 @@ export function GalleryLoadingMore() {
 
 const styles = StyleSheet.create({
   tile: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
+  statusChip: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  statusChipText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 10,
+    color: '#FFFFFF',
+  },
   playBadge: {
     position: 'absolute',
     bottom: 6,

@@ -2536,6 +2536,15 @@ const lt = {
   gallery_by_service: "Pagal paslaugas",
   gallery_by_category: "Pagal kategorijas",
   gallery_view_category: "Žiūrėti kategorijos galeriją",
+  my_media_title: "Mano medija",
+  my_media_empty_title: "Medijos dar nėra",
+  my_media_empty_sub: "Nuotraukos ir vaizdo įrašai, kuriuos pridėsi prie darbų, bus rodomi čia.",
+  my_media_error_title: "Nepavyko įkelti tavo medijos",
+  my_media_load_more_failed: "Nepavyko įkelti daugiau. Bakstelėk, kad bandytum dar kartą.",
+  my_media_public: "Vieša",
+  my_media_private: "Privatu",
+  my_media_sign_in_title: "Prisijunk, kad pamatytum savo mediją",
+  my_media_sign_in_sub: "Tavo nuotraukos ir vaizdo įrašai susieti su tavo paskyra.",
   gallery_category_gallery: "Kategorijos galerija",
 };
 export default lt;

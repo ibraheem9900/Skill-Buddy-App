@@ -2587,6 +2587,15 @@ const en = {
   gallery_by_service: "By service",
   gallery_by_category: "By category",
   gallery_view_category: "View category gallery",
+  my_media_title: "My Media",
+  my_media_empty_title: "No media yet",
+  my_media_empty_sub: "Photos and videos you add to jobs will show up here.",
+  my_media_error_title: "We couldn't load your media",
+  my_media_load_more_failed: "Couldn't load more. Tap to retry.",
+  my_media_public: "Public",
+  my_media_private: "Private",
+  my_media_sign_in_title: "Sign in to see your media",
+  my_media_sign_in_sub: "Your photos and videos are tied to your account.",
   gallery_category_gallery: "Category gallery",
 };
 export default en;

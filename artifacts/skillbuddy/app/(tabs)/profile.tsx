@@ -193,6 +193,9 @@ function ProfileScreen() {
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'heart', label: t('cf_title'), route: '/profile/favorites' },
+        // The signed-in user's own uploads (GET /media-gallery/mine). Read-only:
+        // no upload/edit/delete here, the item's visibility is just a chip.
+        { icon: 'image', label: t('my_media_title'), route: '/profile/my-media' },
         ...(clientStats.profile
           ? [
               {
@@ -272,6 +275,7 @@ function ProfileScreen() {
         { icon: 'user', label: t('profile_personal_info'), route: '/profile/edit' },
         { icon: 'award', label: t('profile_professional_info'), route: '/profile/professional' },
         { icon: 'file-text', label: t('profile_documents'), route: '/profile/documents' },
+        { icon: 'image', label: t('my_media_title'), route: '/profile/my-media' },
         { icon: 'map-pin', label: t('addr_title'), route: '/profile/addresses' },
         { icon: 'shield', label: t('cert_title'), route: '/profile/certifications' },
         { icon: 'star', label: t('fb_pending_title'), route: '/reviews/pending', badge: pendingBadge },

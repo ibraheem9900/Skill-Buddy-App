@@ -2536,6 +2536,15 @@ const et = {
   gallery_by_service: "Teenuse kaupa",
   gallery_by_category: "Kategooria kaupa",
   gallery_view_category: "Vaata kategooria galeriid",
+  my_media_title: "Minu meedia",
+  my_media_empty_title: "Meediat veel pole",
+  my_media_empty_sub: "Töödele lisatud fotod ja videod ilmuvad siia.",
+  my_media_error_title: "Sinu meediat ei õnnestunud laadida",
+  my_media_load_more_failed: "Rohkem ei õnnestunud laadida. Puuduta uuesti proovimiseks.",
+  my_media_public: "Avalik",
+  my_media_private: "Privaatne",
+  my_media_sign_in_title: "Logi sisse, et oma meediat näha",
+  my_media_sign_in_sub: "Sinu fotod ja videod on seotud sinu kontoga.",
   gallery_category_gallery: "Kategooria galerii",
 };
 

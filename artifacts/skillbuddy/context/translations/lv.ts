@@ -2536,6 +2536,15 @@ const lv = {
   gallery_by_service: "Pa pakalpojumiem",
   gallery_by_category: "Pa kategorijām",
   gallery_view_category: "Skatīt kategorijas galeriju",
+  my_media_title: "Mana multivide",
+  my_media_empty_title: "Multivides vēl nav",
+  my_media_empty_sub: "Fotogrāfijas un video, ko pievienosi darbiem, parādīsies šeit.",
+  my_media_error_title: "Neizdevās ielādēt tavu multivivi",
+  my_media_load_more_failed: "Neizdevās ielādēt vairāk. Pieskaries, lai mēģinātu vēlreiz.",
+  my_media_public: "Publisks",
+  my_media_private: "Privāts",
+  my_media_sign_in_title: "Piesakies, lai redzētu savu multivivi",
+  my_media_sign_in_sub: "Tavas fotogrāfijas un video ir saistītas ar tavu kontu.",
   gallery_category_gallery: "Kategorijas galerija",
 };
 export default lv;
